@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useState, type MouseEvent, type R
 import { createPortal } from "react-dom";
 import { ContextMenu } from "../../../components/ContextMenu";
 import { useT } from "../../../i18n";
+import { safeError } from "../../../ipc/diagnosticSafety";
 
 import { platform } from "../../../platform";
 import { useTermStore } from "../../../store/termStore";
@@ -88,7 +89,10 @@ export function SessionLink({ href, children }: { href: string; children: ReactN
     if (target.kind === "file") {
       useTermStore.getState().openDocTab(target.path);
     } else {
-      void platform.opener.openExternal(target.url).catch((err: unknown) => setError(String(err)));
+      void platform.opener.openExternal(target.url).catch((err: unknown) => {
+        console.warn("[links] failed to open external link", safeError(err));
+        setError(t("share.openLinkFailed"));
+      });
     }
   };
   return <>
@@ -103,7 +107,10 @@ export function SessionLink({ href, children }: { href: string; children: ReactN
     {menu && createPortal(<ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} items={[
       { label: t("share.copyLink"), onClick: () => {
         setError(null);
-        void platform.clipboard.writeText(address).catch((err: unknown) => setError(String(err)));
+        void platform.clipboard.writeText(address).catch((err: unknown) => {
+          console.warn("[links] failed to copy link", safeError(err));
+          setError(t("common.copyFailed"));
+        });
       } },
     ]} />, menu.host)}
     {error && <span role="alert"> {error}</span>}

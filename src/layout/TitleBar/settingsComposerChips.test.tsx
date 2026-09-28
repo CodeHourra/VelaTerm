@@ -22,7 +22,7 @@ import { SettingsModal } from "./SettingsModal";
 beforeEach(() => {
   vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
   localStorage.removeItem(SETTINGS_KEY);
-  useTermStore.setState(loadSettings());
+  useTermStore.setState({ ...loadSettings(), composerInlineChips: ["model", "effort", "collaboration", "permission"] });
   setLang("en");
   vi.clearAllMocks();
 });

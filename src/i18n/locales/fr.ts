@@ -365,6 +365,7 @@ const fr: typeof en = {
   "share.subtitle":
     "Nous sommes une petite équipe derrière VelaTerm. Si vous l’appréciez, partagez VelaTerm autour de vous. Nous aider à nous faire connaître compte énormément pour notre équipe. Merci pour votre soutien ! ❤️", // We're a small team behind VelaTerm. If you enjoy it, please share VelaTerm with others…
   "share.copyLink": "Copier le lien", // Copy link
+  "share.openLinkFailed": "Impossible d’ouvrir ce lien. Faites un clic droit dessus pour copier l’adresse.", // Could not open this link…
   "share.copied": "Copié !", // Copied!
   "share.wechatMoments": "Moments WeChat",
   "share.weibo": "Weibo",
@@ -643,6 +644,7 @@ const fr: typeof en = {
   "settings.composerChip.serviceTier": "Vitesse",
   "settings.composerChip.personality": "Ton",
   "settings.composerChip.mcp": "Serveurs MCP",
+  "settings.composerChip.chrome": "Claude in Chrome",
   "settings.composerChip.tasks": "Tâches en arrière-plan",
   "settings.composerChip.account": "Compte",
   "settings.composerChip.codexCredits": "Crédits de réinitialisation Codex",
@@ -747,6 +749,19 @@ const fr: typeof en = {
     "Les onglets, les divisions et la session active restent identiques sur tous les appareils connectés. Le focus clavier ne bouge pas.", // Tabs, splits, and the active session stay the same on every connected device. Keyboard focus stays put on each one.
 
   // ── Remote connection panel ──
+  "connect.wslUpgrade": "Cet espace de travail utilise une autre version du serveur. Le redémarrage du serveur met fin à toutes les sessions actives de cet espace de travail WSL.",
+  "connect.wslRestart": "Redémarrer le serveur et se connecter",
+  "connect.wsl": "WSL",
+  "connect.wslTitle": "Se connecter à WSL",
+  "connect.wslHint": "Ouvre un espace de travail Linux distinct avec l’utilisateur par défaut de cette distribution. Les agents, les fichiers et l’historique restent dans WSL.",
+  "connect.wslUnsupported": "Les connexions WSL sont disponibles dans l’application de bureau Windows.",
+  "connect.wslEmpty": "Aucune distribution WSL trouvée. Installez et initialisez une distribution, puis actualisez la liste.",
+  "connect.wslDistribution": "Distribution Linux",
+  "connect.wslSelect": "Sélectionner une distribution",
+  "connect.wslMissing": "Cette distribution n’est plus disponible. Sélectionnez-en une autre.",
+  "connect.wslSetup": "Lors de la connexion, la version correspondante du serveur VelaTerm est téléchargée et démarrée dans WSL si nécessaire. Aucune configuration SSH n’est requise.",
+  "conn.wslReconnecting": "Reconnexion à l’espace de travail WSL…",
+  "conn.wslDown": "L’espace de travail WSL est indisponible. Cliquez sur « Reconnecter maintenant » pour réessayer.",
   "connect.title": "Se connecter à un serveur distant", // Connect to Remote Server
   "connect.pairingPlaceholder": "Coller le lien d'appairage", // Paste pairing link
   "connect.confirmConnect": "Empreinte correcte, connecter", // Fingerprint matches, connect
@@ -1643,6 +1658,24 @@ const fr: typeof en = {
   "statusbar.updateReady": "Restart to update", // TODO translate
   "statusbar.updateFailed": "Update failed", // TODO translate
   "statusbar.updateTooltip": "Click for details", // TODO translate
+  "statusbar.skillsAvailable": "Installer les Vela Skills",
+  "skills.title": "Installer les Vela Skills",
+  "skills.subtitle": "Une fois installées, Claude Code et Codex peuvent utiliser les fonctionnalités VelaTerm suivantes dans une conversation, par exemple /vspawn dans Claude Code ou $vspawn dans Codex.",
+  "skills.vspawn": "Crée une session enfant chargée d’une tâche.",
+  "skills.vspawnTree": "Crée une session enfant avec son propre worktree.",
+  "skills.vopen": "Ouvre un fichier ou une page web dans VelaTerm.",
+  "skills.vrefer": "Lit la conversation d’une autre session.",
+  "skills.vask": "Pose une question sur une autre session et obtient une réponse concise.",
+  "skills.vsearch": "Recherche dans les conversations de toutes les sessions.",
+  "skills.vstat": "Indique quelles sessions travaillent ou attendent une saisie.",
+  "skills.vtell": "Envoie un message à une autre session.",
+  "skills.vkb": "Interroge CodeGraph et la base de connaissances du projet.",
+  "skills.settingsHint": "Vous pourrez aussi les installer plus tard dans Paramètres > Avancé.",
+  "skills.installFailed": (err) => `Échec de l’installation : ${err}`,
+  "skills.dontRemind": "Ne plus me le rappeler",
+  "skills.later": "Plus tard",
+  "skills.install": "Installer",
+  "skills.installing": "Installation…",
 
   // ── Vue conversation (la session de l'agent lue comme un échange) ──
   "session.showConversation": "Vue conversation",
@@ -1860,6 +1893,11 @@ const fr: typeof en = {
   "chat.fastMode.label": "Rapide",
   "chat.fastMode.on": "Le mode rapide est activé",
   "chat.fastMode.off": "Le mode rapide est désactivé",
+  "chat.chrome.label": "Chrome",
+  "chat.chrome.on": "Activé",
+  "chat.chrome.off": "Désactivé",
+  "chat.chrome.tooltipOn": "Claude in Chrome est activé",
+  "chat.chrome.tooltipOff": "Claude in Chrome est désactivé",
   "chat.auth.login": "Se connecter",
   "chat.auth.logout": "Se déconnecter",
   "chat.auth.confirmLogout": "Confirmer la déconnexion",
@@ -1949,6 +1987,10 @@ const fr: typeof en = {
   "chat.tasks.finished": "Fin",
   "chat.tasks.summary": "Résumé",
   "chat.tasks.outputFile": "Fichier de sortie",
+  "chat.tasks.command": "Commande",
+  "chat.tasks.output": "Sortie",
+  "chat.tasks.noOutput": "Aucune sortie pour le moment.",
+  "chat.tasks.outputTruncated": "Seule la sortie la plus récente est affichée.",
   "chat.tasks.phases": "Phases",
   "chat.tasks.noProgress": "Cette tâche ne fournit pas la progression de chaque agent.",
   "chat.tasks.attempt": (n: number) => `Tentative ${n}`,

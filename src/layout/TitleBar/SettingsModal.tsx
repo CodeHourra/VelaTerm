@@ -19,11 +19,11 @@ import {
 } from "../../i18n";
 import {
   spawnSkillsInstalled,
-  installSpawnSkills,
   listShells,
   type ShellOption,
 } from "../../ipc/commands";
 import { pushSetting } from "../../ipc/settingsSync";
+import { installVelaSkills } from "../../ipc/velaSkills";
 import { env, platform } from "../../platform";
 import type { VelaCommandStatus } from "../../platform/types";
 import { COMPOSER_CHIP_IDS, type ComposerChipId } from "../../store/settings";
@@ -873,7 +873,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                         }}
                         onClick={async () => {
                           try {
-                            await installSpawnSkills();
+                            await installVelaSkills();
                             setSkillOn(true);
                           } catch (e) {
                             console.error("vlx skill failed:", safeError(e));

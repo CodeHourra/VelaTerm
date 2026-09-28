@@ -590,6 +590,25 @@ pub fn mcp_reconnect(server_name: &str) -> Value {
     json!({"subtype":"mcp_reconnect","serverName":server_name})
 }
 
+/// Name of the Claude in Chrome server this engine attaches at runtime. `claude-in-chrome` itself is
+/// reserved for the server `--chrome` sets up at launch, and the CLI refuses it through `mcp_set_servers`.
+pub const CHROME_SERVER: &str = "chrome";
+
+/// Replace the set of servers attached at runtime. Servers from the user's own configuration are not part
+/// of this set and stay as they are; an empty object detaches everything this engine added.
+pub fn mcp_set_servers(servers: Value) -> Value {
+    json!({"subtype":"mcp_set_servers","servers":servers})
+}
+
+/// The runtime server set with Claude in Chrome attached or not. The server is the same executable in its
+/// Chrome bridge role, which is what `--chrome` starts internally; measured on claude 2.1.283.
+pub fn chrome_servers(bin: &str, enabled: bool) -> Value {
+    if !enabled {
+        return json!({});
+    }
+    json!({CHROME_SERVER: {"type":"stdio","command":bin,"args":["--claude-in-chrome-mcp"]}})
+}
+
 pub fn stop_task(task_id: &str) -> Value {
     json!({"subtype":"stop_task","task_id":task_id})
 }
@@ -955,6 +974,15 @@ mod tests {
             }
             _ => panic!("expected ControlRequest"),
         }
+    }
+
+    #[test]
+    fn chrome_server_set_attaches_the_bridge_or_nothing() {
+        let on = mcp_set_servers(chrome_servers("/bin/claude", true));
+        assert_eq!(on["subtype"], "mcp_set_servers");
+        assert_eq!(on["servers"][CHROME_SERVER]["command"], "/bin/claude");
+        assert_eq!(on["servers"][CHROME_SERVER]["args"], json!(["--claude-in-chrome-mcp"]));
+        assert_eq!(mcp_set_servers(chrome_servers("/bin/claude", false))["servers"], json!({}));
     }
 
     #[test]

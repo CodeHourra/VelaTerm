@@ -54,6 +54,7 @@ mod ssh_remote;
 #[cfg(feature = "gui")]
 mod ssh_russh;
 mod web;
+mod wsl_remote;
 // GUI-only macOS native notifications with session-aware click navigation.
 #[cfg(all(feature = "gui", target_os = "macos"))]
 mod notify_native;
@@ -398,6 +399,12 @@ pub fn run_orch(args: &[String]) -> ! {
 /// blocking until it changes, print it, and exit.
 pub fn run_stat(args: &[String]) -> ! {
     agent::cli_client::run_stat(args)
+}
+
+/// Hidden `--self` entry used by the PATH `vself` shim. POST `/whoami` to report this session's own
+/// identity and the chain of sessions that spawned it, then exit without launching the GUI.
+pub fn run_self(args: &[String]) -> ! {
+    agent::cli_client::run_self(args)
 }
 
 /// Hidden `--run` entry used by the PATH `vrun` shim. Start a long-running command, wait for it, and
@@ -1031,6 +1038,21 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                 }
             });
 
+            let wsl_app = app.handle().clone();
+            app.listen_any("vlx://wsl-reconnect", move |event| {
+                let Ok(v) = serde_json::from_str::<serde_json::Value>(event.payload()) else { return; };
+                let Some(session) = v.get("session").and_then(|s| s.as_str()).map(str::to_owned) else { return; };
+                let app = wsl_app.clone();
+                std::thread::spawn(move || {
+                    use tauri::Emitter;
+                    let _ = app.emit("wsl://connection-state", serde_json::json!({"session":session,"state":"reconnecting"}));
+                    let mut span = diagnostics::Span::new("wsl_reconnect", serde_json::json!({"sessionId":session}));
+                    let result = wsl_remote::reconnect(&session);
+                    span.finish(&result);
+                    let _ = app.emit("wsl://connection-state", serde_json::json!({"session":session,"state":if result.is_ok() {"up"} else {"down"}}));
+                });
+            });
+
             // DevTools are opened on demand rather than automatically in development.
 
             // Disable WebView2 browser accelerator handling in the main view so Ctrl-based app shortcuts
@@ -1189,6 +1211,7 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
             commands::ssh_probe_host,
             commands::ssh_trust_host,
             commands::ssh_connect,
+            commands::wsl_connect,
             commands::ssh_disconnect,
             // 5) Desktop-only built-in browser tabs.
             browser::browser_open,

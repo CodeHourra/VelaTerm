@@ -1365,6 +1365,33 @@ pub fn list_referable_sessions(conn: &Connection) -> Result<Vec<SessionBrief>, S
         .map_err(|e| format!("Failed to read sessions: {e}"))
 }
 
+/// The session itself followed by its ancestor chain, immediate parent first up to the top-level root.
+///
+/// This is what a child session needs to answer "who spawned me": index 0 is the session that asked,
+/// index 1 its parent, and so on. An empty result means the id does not exist. The walk is bounded by
+/// [`ANCESTRY_WALK_MAX`] so a corrupted parent cycle cannot loop forever.
+pub fn session_lineage(conn: &Connection, id: &str) -> Result<Vec<SessionBrief>, String> {
+    let mut chain = Vec::new();
+    let mut seen = HashSet::new();
+    let mut cur = Some(id.to_string());
+    for _ in 0..ANCESTRY_WALK_MAX {
+        let Some(sid) = cur else { break };
+        if !seen.insert(sid.clone()) {
+            break;
+        }
+        let Some(session) = get_session(conn, &sid)? else { break };
+        cur = session.parent_session_id.clone();
+        chain.push(SessionBrief {
+            session_id: session.id,
+            name: session.name,
+            kind: session.kind,
+            cwd: normalize_optional_windows_verbatim_path(session.cwd),
+            archived: session.archived_at.is_some(),
+        });
+    }
+    Ok(chain)
+}
+
 /// Resolve a user-facing session reference to a session id.
 ///
 /// Tries, in order: exact id, id prefix (at least `MIN_ID_PREFIX` characters), exact name
@@ -2644,6 +2671,41 @@ mod tests {
             resolve_session_ref(&conn, "archived one").unwrap(),
             SessionRefMatch::One(archived.id.clone())
         );
+    }
+
+    /// `session_lineage` returns the session then its ancestors, immediate parent first, and stops even
+    /// if the stored parent links form a cycle. A child uses it to find who spawned it.
+    #[test]
+    fn session_lineage_walks_parent_chain_and_survives_cycles() {
+        let conn = mem_conn();
+        conn.execute(
+            "INSERT INTO projects (id, name, root_path, sort_order, created_at)
+             VALUES ('p1', 'p', '/tmp', 0, 0)",
+            [],
+        )
+        .unwrap();
+        for (id, parent) in [("a", None), ("b", Some("a")), ("c", Some("b"))] {
+            conn.execute(
+                "INSERT INTO sessions (id, project_id, name, kind, sort_order, parent_session_id, created_at)
+                 VALUES (?1, 'p1', ?1, 'terminal', 0, ?2, 0)",
+                params![id, parent],
+            )
+            .unwrap();
+        }
+
+        let chain = session_lineage(&conn, "c").unwrap();
+        let ids: Vec<&str> = chain.iter().map(|b| b.session_id.as_str()).collect();
+        assert_eq!(ids, ["c", "b", "a"], "self first, then parent up to the root");
+
+        // A top-level session has only itself.
+        assert_eq!(session_lineage(&conn, "a").unwrap().len(), 1);
+        // An unknown id is an empty chain, not an error.
+        assert!(session_lineage(&conn, "missing").unwrap().is_empty());
+
+        // A corrupt self-parent link must terminate rather than loop while holding the mutex.
+        conn.execute("UPDATE sessions SET parent_session_id = 'a' WHERE id = 'a'", [])
+            .unwrap();
+        assert_eq!(session_lineage(&conn, "a").unwrap().len(), 1);
     }
 
     /// A collection stores an empty root and still lands in the tree beside folder-backed projects.

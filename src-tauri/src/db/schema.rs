@@ -171,6 +171,12 @@ CREATE TABLE IF NOT EXISTS chat_codex_settings (
   service_tier TEXT,
   personality TEXT
 );
+-- Claude conversation-view switches chosen for one conversation. `chrome` is 1 or 0 once the user picked it;
+-- a missing row or null follows the `chatChromeDefault` preference in `vlx-settings`.
+CREATE TABLE IF NOT EXISTS chat_claude_settings (
+  session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+  chrome INTEGER
+);
 
 -- One `/vorch` orchestration: a parent session asked for several agents at once. Without these two tables an
 -- orchestration would leave no trace beyond unrelated-looking sibling sessions, and nothing could report on it

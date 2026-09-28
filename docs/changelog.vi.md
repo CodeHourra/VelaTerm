@@ -1,3 +1,23 @@
+## v0.2.5 — 2026-09-28
+
+- 🐧 Ứng dụng máy tính Windows hỗ trợ mở không gian làm việc riêng trong WSL1 và WSL2, sử dụng tác tử, tệp và lịch sử phiên của bản phân phối Linux đã chọn.
+
+- 🔄 Không gian làm việc WSL cho phép kết nối lại sau khi máy chủ dừng; khi đóng cửa sổ, bạn có thể dừng máy chủ hoặc giữ các phiên tiếp tục chạy.
+
+- 🌐 Phiên Claude có thêm tùy chọn “Chrome” ở khung nhập để bật hoặc tắt Claude in Chrome mà không cần khởi động lại cuộc trò chuyện. Mỗi phiên lưu lựa chọn riêng, phiên chưa chọn sẽ dùng giá trị mặc định.
+
+- 📟 Thẻ của tác vụ shell chạy nền hiển thị lệnh đang chạy và đầu ra mới nhất, được cập nhật trong khi tác vụ đang chạy.
+
+- 🧩 Khi chưa cài Kỹ năng Vela, thanh trạng thái hiển thị mục cài đặt. Hộp thoại mô tả từng kỹ năng, cho phép cài đặt ngay hoặc tắt lời nhắc.
+
+- 🪪 Phiên con tạo bằng `vspawn` nhận ID của phiên cha qua `VLX_PARENT_SESSION_ID`, nhờ đó tác tử có thể liên lạc với phiên cha bằng `vrefer` và `vtell`. Lệnh mới `vself` hiển thị phiên hiện tại và các phiên cấp trên.
+
+- 🖥️ AppImage cho Linux không còn mở cửa sổ trống trên các bản phân phối mới như Fedora 44.
+
+- 🎨 Thay đổi nhỏ: “Tác vụ nền” mặc định hiển thị bên dưới khung nhập và vẫn nằm trong menu “Thêm” nếu bạn chuyển lại vào đó; khi không mở được liên kết, thông báo sẽ hướng dẫn nhấp chuột phải để sao chép địa chỉ.
+
+---
+
 ## v0.2.4 — 2026-09-26
 
 - 📋 Sao chép từ cuộc hội thoại sẽ cho đúng phần văn bản hiển thị trên màn hình: mã nội dòng không kèm dấu huyền ngược, phần nhấn mạnh không kèm dấu sao, liên kết chỉ lấy chữ, khối mã không kèm hàng rào, ô bảng ngăn cách bằng ký tự tab, danh sách giữ nguyên dấu đầu dòng đang thấy. Bản có định dạng vẫn được đưa vào bộ nhớ tạm cùng lúc, và menu chuột phải có thêm "Sao chép dạng Markdown" để lấy mã nguồn Markdown của vùng chọn.

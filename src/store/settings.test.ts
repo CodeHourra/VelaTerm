@@ -141,21 +141,31 @@ describe("legacy defaultSessionEngine migration", () => {
 describe("composer inline chips", () => {
   beforeEach(() => localStorage.clear());
 
-  it("defaults to the four chips that used to sit beside the message", () => {
-    expect(loadSettings().composerInlineChips).toEqual(["model", "effort", "collaboration", "permission"]);
-    expect(DEFAULT_COMPOSER_INLINE_CHIPS).toEqual(["model", "effort", "collaboration", "permission"]);
+  it("defaults to the four chips that used to sit beside the message, plus Tasks", () => {
+    expect(loadSettings().composerInlineChips).toEqual(["model", "effort", "collaboration", "permission", "tasks"]);
+    expect(DEFAULT_COMPOSER_INLINE_CHIPS).toEqual(["model", "effort", "collaboration", "permission", "tasks"]);
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({ termFontSize: 18 }));
     expect(loadSettings().composerInlineChips).toEqual(DEFAULT_COMPOSER_INLINE_CHIPS);
   });
 
   it("keeps the saved order, drops unknown ids and duplicates, and accepts an empty list", () => {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ composerInlineChips: ["account", "bogus", "model", "account", 7] }));
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ composerInlineChips: ["account", "bogus", "model", "account", 7], composerInlineChipsRevision: 1 }));
     expect(loadSettings().composerInlineChips).toEqual(["account", "model"]);
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ composerInlineChips: [] }));
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ composerInlineChips: [], composerInlineChipsRevision: 1 }));
     expect(loadSettings().composerInlineChips).toEqual([]);
     expect(sanitizeComposerInlineChips("model")).toEqual(DEFAULT_COMPOSER_INLINE_CHIPS);
     expect(sanitizeComposerInlineChips(null)).toEqual(DEFAULT_COMPOSER_INLINE_CHIPS);
     expect(sanitizeComposerInlineChips([...COMPOSER_CHIP_IDS])).toEqual([...COMPOSER_CHIP_IDS]);
+  });
+
+  it("adds Tasks once to a list saved before it became a default inline chip", () => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ composerInlineChips: ["model", "effort", "collaboration", "permission"] }));
+    expect(loadSettings().composerInlineChips).toEqual(["model", "effort", "collaboration", "permission", "tasks"]);
+    expect(loadSettings().composerInlineChipsRevision).toBe(1);
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ composerInlineChips: ["tasks", "model"] }));
+    expect(loadSettings().composerInlineChips).toEqual(["tasks", "model"]);
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ composerInlineChips: ["model"], composerInlineChipsRevision: 1 }));
+    expect(loadSettings().composerInlineChips).toEqual(["model"]);
   });
 
   it("round-trips through the store setter and the cache hydration", () => {

@@ -2778,6 +2778,26 @@ select.sv-pill {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+.sv-task-code {
+  margin: 0;
+  padding: 7px 9px;
+  background: var(--bg-1);
+  border-radius: var(--r-sm);
+  font-family: var(--chat-font);
+  font-size: calc(var(--ui-fs) - 1px);
+  line-height: 1.55;
+  color: var(--term-out);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.sv-task-output {
+  max-height: 60vh;
+  overflow: auto;
+}
+.sv-task-output + .sv-task-empty,
+.sv-task-empty + .sv-task-output {
+  margin-top: 6px;
+}
 .sv-task-preview {
   overflow-wrap: anywhere;
   color: var(--text-mid);

@@ -1649,7 +1649,7 @@ it("keeps MCP and Tasks chips in the row while no process runs, disabled and sil
   // The account chip is offered too; it is only disabled while a sign-in is unresolved.
   expect(screen.getByRole("button", { name: "Claude account" }).hasAttribute("disabled")).toBe(false);
   expect([...container.querySelectorAll(".sv-controls-primary .sv-chip-slot")].map((el) => (el as HTMLElement).dataset.chip))
-    .toEqual(["model", "effort", "permission", "mcp", "tasks", "account"]);
+    .toEqual(["model", "effort", "permission", "mcp", "chrome", "tasks", "account"]);
   act(() => eventCallback({ type: "process", pid: 123, startedAt: 100 }));
   expect(screen.getByRole("button", { name: "MCP" })).toBe(mcp);
   expect(mcp.hasAttribute("disabled")).toBe(false);
@@ -1687,4 +1687,19 @@ it("keeps the account chip in the row but disabled while a sign-in is unresolved
   act(() => eventCallback({ type: "extras", extras: { auth: { status: "success" } } }));
   expect(screen.getByRole("button", { name: "Codex account" }).hasAttribute("disabled")).toBe(false);
   expect(screen.queryByRole("region", { name: "Codex account" })).toBeNull();
+});
+
+it("switches Claude in Chrome for the conversation, remembers the default, and follows other views", async () => {
+  snapshotOverrides = { chrome: false };
+  useTermStore.setState({ chatChromeDefault: false });
+  await mountPane();
+  const chip = screen.getByRole("combobox", { name: "Claude in Chrome is off" }) as HTMLSelectElement;
+  expect(chip.value).toBe("off");
+  fireEvent.change(chip, { target: { value: "on" } });
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("chat_set_chrome", { sessionId: "s", enabled: true }));
+  // The mocked chip ticks "Set as default" on every pick.
+  expect(useTermStore.getState().chatChromeDefault).toBe(true);
+  await waitFor(() => expect((screen.getByRole("combobox", { name: "Claude in Chrome is on" }) as HTMLSelectElement).value).toBe("on"));
+  act(() => eventCallback({ type: "chromeChanged", enabled: false }));
+  expect((screen.getByRole("combobox", { name: "Claude in Chrome is off" }) as HTMLSelectElement).value).toBe("off");
 });

@@ -3,7 +3,7 @@
 //! The view subscribes independently of its conversation pane. Reconnection registers the new socket
 //! with a snapshot without starting an agent; backend facts own lifecycle and elapsed time.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import Icons from "../../../components/Icons";
 import { fmtTokens } from "../../../format";
@@ -11,10 +11,12 @@ import { dateLocale, useT, type I18nKey } from "../../../i18n";
 import {
   chatSnapshot,
   chatStopTask,
+  chatTaskOutput,
   extrasOf,
   isTaskFinished,
   onChatEvent,
   type ChatBackgroundTask,
+  type ChatTaskOutput,
   type ChatWorkflowAgent,
   type ChatWorkflowPhase,
 } from "../../../ipc/chat";
@@ -70,6 +72,21 @@ function elapsedOf(task: ChatBackgroundTask | undefined, ticking: boolean, delta
 
 /** Human-readable task type: "local_workflow" reads as "local workflow". */
 const typeLabel = (taskType: string) => taskType.replace(/_/g, " ");
+
+/** How long a running shell task's tab waits between reads of its output. */
+const OUTPUT_POLL_MS = 2000;
+
+/** Terminal output as plain text: color and cursor sequences dropped, carriage-return redraws collapsed. */
+export function plainOutput(text: string): string {
+  return text
+    // eslint-disable-next-line no-control-regex
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
+    // eslint-disable-next-line no-control-regex
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
+    .split("\n")
+    .map((line) => line.replace(/\r$/, "").split("\r").pop())
+    .join("\n");
+}
 
 export function TaskView({ tab, hidden }: { tab: TaskTab; hidden: boolean }) {
   const t = useT();
@@ -167,6 +184,7 @@ export function TaskView({ tab, hidden }: { tab: TaskTab; hidden: boolean }) {
   const agents = progress.filter((entry): entry is ChatWorkflowAgent => entry?.type === "workflow_agent");
   const unphased = agents.filter((agent) => !phases.some((phase) => phase.index != null && phase.index === agent.phaseIndex));
   const isWorkflow = (task?.task_type || tab.taskType) === "local_workflow";
+  const isShell = (task?.task_type || tab.taskType) === "local_bash";
   const when = (ms: number) => new Date(ms).toLocaleString(dateLocale());
 
   return (
@@ -210,6 +228,8 @@ export function TaskView({ tab, hidden }: { tab: TaskTab; hidden: boolean }) {
         {task?.ended_at != null ? <Stat label={t("chat.tasks.finished")} value={when(task.ended_at)} /> : null}
       </dl>
 
+      {isShell ? <ShellDetails sessionId={tab.sessionId} taskId={tab.taskId} live={ticking} hidden={hidden} /> : null}
+
       {finished && task?.summary ? (
         <section className="sv-task-section">
           <h3>{t("chat.tasks.summary")}</h3>
@@ -248,6 +268,73 @@ export function TaskView({ tab, hidden }: { tab: TaskTab; hidden: boolean }) {
         </section>
       ) : null}
     </div>
+  );
+}
+
+/** A shell task's command and the latest part of what it printed, re-read while the task runs. */
+function ShellDetails({ sessionId, taskId, live, hidden }: { sessionId: string; taskId: string; live: boolean; hidden: boolean }) {
+  const t = useT();
+  const [details, setDetails] = useState<ChatTaskOutput | null>(null);
+  const outputRef = useRef<HTMLPreElement>(null);
+  /** Stay pinned to the newest line until the reader scrolls up. */
+  const follow = useRef(true);
+
+  useEffect(() => {
+    if (hidden) return;
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = async () => {
+      try {
+        const value = await chatTaskOutput(sessionId, taskId);
+        if (!disposed) setDetails(value);
+      } catch {
+        // Keep what was last read: a task that has left the agent's list can no longer be asked.
+      }
+      if (!disposed && live) timer = setTimeout(() => void load(), OUTPUT_POLL_MS);
+    };
+    void load();
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+    };
+  }, [sessionId, taskId, live, hidden]);
+
+  const output = details?.output != null ? plainOutput(details.output) : undefined;
+  useLayoutEffect(() => {
+    const element = outputRef.current;
+    if (element && follow.current) element.scrollTop = element.scrollHeight;
+  }, [output]);
+
+  if (!details) return null;
+  return (
+    <>
+      {details.command ? (
+        <section className="sv-task-section">
+          <h3>{t("chat.tasks.command")}</h3>
+          <pre className="sv-task-code">{details.command}</pre>
+        </section>
+      ) : null}
+      {output != null ? (
+        <section className="sv-task-section">
+          <h3>{t("chat.tasks.output")}</h3>
+          {details.truncated ? <div className="sv-task-empty">{t("chat.tasks.outputTruncated")}</div> : null}
+          {output.trim() ? (
+            <pre
+              ref={outputRef}
+              className="sv-task-code sv-task-output"
+              onScroll={(event) => {
+                const element = event.currentTarget;
+                follow.current = element.scrollTop + element.clientHeight >= element.scrollHeight - 8;
+              }}
+            >
+              {output}
+            </pre>
+          ) : (
+            <div className="sv-task-empty">{t("chat.tasks.noOutput")}</div>
+          )}
+        </section>
+      ) : null}
+    </>
   );
 }
 

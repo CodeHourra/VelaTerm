@@ -184,6 +184,12 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         );",
     ).map_err(|e| format!("Failed to migrate Codex conversation settings: {e}"))?;
     conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS chat_claude_settings (
+            session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+            chrome INTEGER
+        );",
+    ).map_err(|e| format!("Failed to migrate Claude conversation settings: {e}"))?;
+    conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS session_model_settings (
             session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
             model TEXT,

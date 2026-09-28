@@ -364,6 +364,7 @@ const zhTW: typeof en = {
   "share.subtitle":
     "我們是 VelaTerm 背後的一個小團隊。如果你喜歡它，歡迎把 VelaTerm 分享給更多人。讓更多人知道我們，對我們真的很重要。謝謝你的支持！❤️", // We're a small team behind VelaTerm. If you enjoy it, please share VelaTerm with others…
   "share.copyLink": "複製連結", // Copy link
+  "share.openLinkFailed": "無法開啟此連結，可按右鍵複製連結位址。", // Could not open this link…
   "share.copied": "已複製！", // Copied!
   "share.wechatMoments": "微信朋友圈",
   "share.weibo": "微博",
@@ -633,6 +634,7 @@ const zhTW: typeof en = {
   "settings.composerChip.serviceTier": "速度",
   "settings.composerChip.personality": "語氣",
   "settings.composerChip.mcp": "MCP 伺服器",
+  "settings.composerChip.chrome": "Claude in Chrome",
   "settings.composerChip.tasks": "背景工作",
   "settings.composerChip.account": "帳戶",
   "settings.composerChip.codexCredits": "Codex 額度重設券",
@@ -732,6 +734,19 @@ const zhTW: typeof en = {
     "分頁、分割與目前會話在所有已連線裝置上保持一致，各端的鍵盤焦點互不打擾。", // Tabs, splits, and the active session stay the same on every connected device. Keyboard focus stays put on each one.
 
   // ── Remote connection panel ──
+  "connect.wslUpgrade": "此工作區正在執行其他版本的伺服器。重新啟動伺服器將結束此 WSL 工作區中所有執行中的會話。",
+  "connect.wslRestart": "重新啟動伺服器並連線",
+  "connect.wsl": "WSL",
+  "connect.wslTitle": "連線至 WSL",
+  "connect.wslHint": "以此發行版的預設使用者開啟獨立的 Linux 工作區。智慧體、檔案與歷史記錄均保留在 WSL 內。",
+  "connect.wslUnsupported": "WSL 連線僅適用於 Windows 桌面版。",
+  "connect.wslEmpty": "找不到 WSL 發行版。請先安裝並初始化發行版，再重新整理。",
+  "connect.wslDistribution": "Linux 發行版",
+  "connect.wslSelect": "選擇發行版",
+  "connect.wslMissing": "此發行版已無法使用，請選擇其他發行版。",
+  "connect.wslSetup": "連線時會視需要下載並啟動相符版本的 VelaTerm 伺服器，無須設定 SSH。",
+  "conn.wslReconnecting": "正在重新連線至 WSL 工作區…",
+  "conn.wslDown": "WSL 工作區無法使用，請按「立即重新連線」再試一次。",
   "connect.title": "連線到遠端服務", // Connect to Remote Server
   "connect.pairingPlaceholder": "貼上配對連結", // Paste pairing link
   "connect.confirmConnect": "指紋無誤，連線", // Fingerprint matches, connect
@@ -1580,6 +1595,24 @@ const zhTW: typeof en = {
   "statusbar.updateReady": "重新啟動以完成更新",
   "statusbar.updateFailed": "更新失敗",
   "statusbar.updateTooltip": "點擊查看詳情",
+  "statusbar.skillsAvailable": "安裝 Vela 技能",
+  "skills.title": "安裝 Vela 技能",
+  "skills.subtitle": "安裝後，Claude Code 和 Codex 可以在對話中使用以下 VelaTerm 功能，例如在 Claude Code 中輸入 /vspawn，在 Codex 中輸入 $vspawn。",
+  "skills.vspawn": "建立子會話來處理任務。",
+  "skills.vspawnTree": "建立使用獨立工作樹的子會話。",
+  "skills.vopen": "在 VelaTerm 中開啟檔案或網頁。",
+  "skills.vrefer": "讀取其他會話的對話內容。",
+  "skills.vask": "針對其他會話提問，並取得簡要回答。",
+  "skills.vsearch": "搜尋所有會話的對話內容。",
+  "skills.vstat": "查看哪些會話正在工作或等待輸入。",
+  "skills.vtell": "傳送訊息給其他會話。",
+  "skills.vkb": "查詢專案的 CodeGraph 和知識庫。",
+  "skills.settingsHint": "之後也可以在「設定 > 進階」中安裝。",
+  "skills.installFailed": (err) => `安裝失敗：${err}`,
+  "skills.dontRemind": "不再提醒",
+  "skills.later": "稍後",
+  "skills.install": "安裝",
+  "skills.installing": "正在安裝…",
 
   // ── 會話檢視（把智慧體會話讀成對話） ──
   "session.showConversation": "會話檢視",
@@ -1794,6 +1827,11 @@ const zhTW: typeof en = {
   "chat.fastMode.label": "快速",
   "chat.fastMode.on": "快速模式已開啟",
   "chat.fastMode.off": "快速模式已關閉",
+  "chat.chrome.label": "Chrome",
+  "chat.chrome.on": "開啟",
+  "chat.chrome.off": "關閉",
+  "chat.chrome.tooltipOn": "Claude in Chrome 已開啟",
+  "chat.chrome.tooltipOff": "Claude in Chrome 已關閉",
   "chat.auth.login": "登入",
   "chat.auth.logout": "登出",
   "chat.auth.confirmLogout": "確認登出",
@@ -1882,6 +1920,10 @@ const zhTW: typeof en = {
   "chat.tasks.finished": "結束時間",
   "chat.tasks.summary": "摘要",
   "chat.tasks.outputFile": "輸出檔案",
+  "chat.tasks.command": "指令",
+  "chat.tasks.output": "輸出",
+  "chat.tasks.noOutput": "尚無輸出。",
+  "chat.tasks.outputTruncated": "僅顯示最近的輸出。",
   "chat.tasks.phases": "階段",
   "chat.tasks.noProgress": "此工作未回報各智慧代理的進度。",
   "chat.tasks.attempt": (n: number) => `第 ${n} 次嘗試`,

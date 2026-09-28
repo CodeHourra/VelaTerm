@@ -364,6 +364,7 @@ const ja: typeof en = {
   "share.subtitle":
     "VelaTerm は小さなチームで開発しています。気に入っていただけたら、ぜひ周りの方にシェアしてください。より多くの方に私たちを知っていただくことは、チームにとって大きな支えになります。ありがとうございます！❤️", // We're a small team behind VelaTerm. If you enjoy it, please share VelaTerm with others…
   "share.copyLink": "リンクをコピー", // Copy link
+  "share.openLinkFailed": "このリンクを開けませんでした。右クリックするとアドレスをコピーできます。", // Could not open this link…
   "share.copied": "コピーしました", // Copied!
   "share.wechatMoments": "WeChat モーメンツ",
   "share.weibo": "Weibo",
@@ -641,6 +642,7 @@ const ja: typeof en = {
   "settings.composerChip.serviceTier": "速度",
   "settings.composerChip.personality": "口調",
   "settings.composerChip.mcp": "MCP サーバー",
+  "settings.composerChip.chrome": "Claude in Chrome",
   "settings.composerChip.tasks": "バックグラウンドタスク",
   "settings.composerChip.account": "アカウント",
   "settings.composerChip.codexCredits": "Codex リセット券",
@@ -745,6 +747,19 @@ const ja: typeof en = {
     "タブ・分割・アクティブなセッションが接続中のすべての端末で一致します。キーボードフォーカスは各端末でそのまま保たれます。", // Tabs, splits, and the active session stay the same on every connected device. Keyboard focus stays put on each one.
 
   // ── Remote connection panel ──
+  "connect.wslUpgrade": "このワークスペースでは別のバージョンのサーバーが動作しています。サーバーを再起動すると、この WSL ワークスペースで実行中のすべてのセッションが終了します。",
+  "connect.wslRestart": "サーバーを再起動して接続",
+  "connect.wsl": "WSL",
+  "connect.wslTitle": "WSL に接続",
+  "connect.wslHint": "このディストリビューションの既定のユーザーで、独立した Linux ワークスペースを開きます。エージェント、ファイル、履歴は WSL 内で管理されます。",
+  "connect.wslUnsupported": "WSL 接続は Windows デスクトップ版で利用できます。",
+  "connect.wslEmpty": "WSL ディストリビューションが見つかりません。インストールと初期設定を済ませてから、一覧を更新してください。",
+  "connect.wslDistribution": "Linux ディストリビューション",
+  "connect.wslSelect": "ディストリビューションを選択",
+  "connect.wslMissing": "このディストリビューションは利用できなくなりました。別のものを選択してください。",
+  "connect.wslSetup": "接続時に、対応するバージョンの VelaTerm サーバーを必要に応じて WSL 内にダウンロードし、起動します。SSH の設定は不要です。",
+  "conn.wslReconnecting": "WSL ワークスペースに再接続しています…",
+  "conn.wslDown": "WSL ワークスペースに接続できません。「今すぐ再接続」を選択して、もう一度お試しください。",
   "connect.title": "リモートサーバーに接続", // Connect to Remote Server
   "connect.pairingPlaceholder": "ペアリングリンクを貼り付け", // Paste pairing link
   "connect.confirmConnect": "指紋を確認して接続", // Fingerprint matches, connect
@@ -1630,6 +1645,24 @@ const ja: typeof en = {
   "statusbar.updateReady": "Restart to update", // TODO translate
   "statusbar.updateFailed": "Update failed", // TODO translate
   "statusbar.updateTooltip": "Click for details", // TODO translate
+  "statusbar.skillsAvailable": "Vela Skills をインストール",
+  "skills.title": "Vela Skills をインストール",
+  "skills.subtitle": "インストールすると、Claude Code と Codex の会話で次の VelaTerm 機能を使えるようになります。Claude Code では /vspawn、Codex では $vspawn のように入力します。",
+  "skills.vspawn": "子セッションを作成してタスクを任せます。",
+  "skills.vspawnTree": "専用のワークツリーを持つ子セッションを作成します。",
+  "skills.vopen": "ファイルや Web ページを VelaTerm で開きます。",
+  "skills.vrefer": "ほかのセッションの会話を読み取ります。",
+  "skills.vask": "ほかのセッションについて質問し、簡潔な回答を得ます。",
+  "skills.vsearch": "すべてのセッションの会話を検索します。",
+  "skills.vstat": "作業中または入力待ちのセッションを確認します。",
+  "skills.vtell": "ほかのセッションにメッセージを送信します。",
+  "skills.vkb": "プロジェクトの CodeGraph とナレッジベースを照会します。",
+  "skills.settingsHint": "後から「設定 > 詳細設定」でもインストールできます。",
+  "skills.installFailed": (err) => `インストールに失敗しました: ${err}`,
+  "skills.dontRemind": "今後表示しない",
+  "skills.later": "後で",
+  "skills.install": "インストール",
+  "skills.installing": "インストール中…",
 
   // ── セッションビュー（エージェントのセッションを会話として読む） ──
   "session.showConversation": "会話ビュー",
@@ -1844,6 +1877,11 @@ const ja: typeof en = {
   "chat.fastMode.label": "高速",
   "chat.fastMode.on": "高速モードはオンです",
   "chat.fastMode.off": "高速モードはオフです",
+  "chat.chrome.label": "Chrome",
+  "chat.chrome.on": "オン",
+  "chat.chrome.off": "オフ",
+  "chat.chrome.tooltipOn": "Claude in Chrome はオンです",
+  "chat.chrome.tooltipOff": "Claude in Chrome はオフです",
   "chat.auth.login": "ログイン",
   "chat.auth.logout": "ログアウト",
   "chat.auth.confirmLogout": "ログアウトを確定",
@@ -1932,6 +1970,10 @@ const ja: typeof en = {
   "chat.tasks.finished": "終了日時",
   "chat.tasks.summary": "概要",
   "chat.tasks.outputFile": "出力ファイル",
+  "chat.tasks.command": "コマンド",
+  "chat.tasks.output": "出力",
+  "chat.tasks.noOutput": "まだ出力はありません。",
+  "chat.tasks.outputTruncated": "最新の出力のみを表示しています。",
   "chat.tasks.phases": "フェーズ",
   "chat.tasks.noProgress": "このタスクでは、エージェントごとの進捗は報告されません。",
   "chat.tasks.attempt": (n: number) => `${n} 回目`,

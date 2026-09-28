@@ -1104,6 +1104,8 @@ interface TermStore {
   chatEffortByModel: Record<string, string>;
   /** Whether a new Claude conversation opens with fast mode on, per agent protocol. */
   chatFastModeByKind: Record<string, boolean>;
+  /** Whether Claude conversations that never chose otherwise have Claude in Chrome attached. */
+  chatChromeDefault: boolean;
   /** Last launch choices for each planning-workflow role. */
   planExecutePrefs: { plan: PlanExecuteRolePrefs; exec: PlanExecuteRolePrefs };
   /** Last agent, model and effort chosen for knowledge-base compilation. */
@@ -1119,6 +1121,8 @@ interface TermStore {
   infoCollapsed: Record<string, boolean>;
   /** Composer chips shown inline under the message input, in display order; the rest are off. */
   composerInlineChips: ComposerChipId[];
+  /** Revision of the default inline set the saved list has been migrated to. */
+  composerInlineChipsRevision: number;
 
   /** Saved agent launch configurations shown in the new-session menu, in menu order. */
   agentPresets: AgentPreset[];
@@ -1493,6 +1497,8 @@ interface TermStore {
   setChatEffort: (model: string, effort: string) => void;
   /** Remember whether new conversations of this agent open with fast mode on. */
   setChatFastMode: (kind: SessionKind, enabled: boolean) => void;
+  /** Remember whether Claude conversations that never chose otherwise have Claude in Chrome attached. */
+  setChatChromeDefault: (enabled: boolean) => void;
   /** Remember the agent, model or effort chosen for one planning-workflow role; null clears a field. */
   setPlanExecuteRolePrefs: (
     role: "plan" | "exec",
@@ -1707,12 +1713,14 @@ function persistAndApplyVisual(getState: () => TermStore) {
     chatModelByKind: s.chatModelByKind,
     chatEffortByModel: s.chatEffortByModel,
     chatFastModeByKind: s.chatFastModeByKind,
+    chatChromeDefault: s.chatChromeDefault,
     planExecutePrefs: s.planExecutePrefs,
     memoryPrefs: s.memoryPrefs,
     referSummary: s.referSummary,
     showSystemResources: s.showSystemResources,
     infoCollapsed: s.infoCollapsed,
     composerInlineChips: s.composerInlineChips,
+    composerInlineChipsRevision: s.composerInlineChipsRevision,
   };
   saveSettings(ps);
   applyVisual(visualOf(ps));
@@ -4587,6 +4595,10 @@ export const useTermStore = create<TermStore>((set, get) => ({
   },
   setChatFastMode: (kind, enabled) => {
     set((state) => ({ chatFastModeByKind: { ...state.chatFastModeByKind, [kind]: enabled } }));
+    persistAndApplyVisual(get);
+  },
+  setChatChromeDefault: (enabled) => {
+    set({ chatChromeDefault: enabled });
     persistAndApplyVisual(get);
   },
   setPlanExecuteRolePrefs: (role, patch) => {

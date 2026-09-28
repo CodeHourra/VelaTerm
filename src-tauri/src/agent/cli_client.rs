@@ -1,5 +1,5 @@
 //! Cross-platform Rust implementation of the hidden `vlx-term` subcommands `--spawn`, `--view`,
-//! `--refer`, and `--search`.
+//! `--refer`, `--search`, `--stat`, and `--self`.
 //!
 //! Thin PATH shims (`vspawn`, `vspawn-tree`, `vopen`, `vrefer`, and `vsearch`; see spawn_cli.rs) invoke
 //! these commands through sh on Unix or .cmd on Windows. They read injected `VLX_SPAWN_URL`,
@@ -663,6 +663,89 @@ pub fn run_stat(args: &[String]) -> ! {
         }
         since = value.get("version").and_then(|v| v.as_u64()).or(since);
     }
+}
+
+const SELF_USAGE: &str = "usage: vself [--json]\n\n\
+Print the current session's identity and the chain of sessions that spawned it. The parent is the\n\
+session that ran `vspawn` to create this one, or empty when this session is top-level.\n\n\
+  --json    print the raw JSON answer instead of a summary\n\
+  -h        show this help";
+
+/// `vlx-term --self` entry point used by the PATH `vself` shim: POST `/whoami` and print the calling
+/// session's own id, name, and ancestry so a spawned session can find its parent.
+pub fn run_self(args: &[String]) -> ! {
+    let rest = &args[args.len().min(2)..];
+    let mut json = false;
+    for arg in rest {
+        match arg.as_str() {
+            "-h" | "--help" => {
+                println!("{SELF_USAGE}");
+                std::process::exit(0);
+            }
+            "--json" => json = true,
+            other => {
+                eprintln!("vself: unknown option {other}");
+                eprintln!("{SELF_USAGE}");
+                std::process::exit(2);
+            }
+        }
+    }
+
+    let (url, sid, token) = match session_env() {
+        Ok(v) => v,
+        Err(msg) => {
+            eprintln!("vself: {msg}");
+            std::process::exit(1);
+        }
+    };
+    let endpoint = format!("{url}/whoami?t={token}");
+    let body = serde_json::json!({ "sessionId": sid }).to_string();
+    let (code, payload) = match post_json_read(&endpoint, &body) {
+        Some(v) => v,
+        None => {
+            eprintln!("vself: cannot read a complete response from VelaTerm ({url})");
+            std::process::exit(1);
+        }
+    };
+    let value = read_value("vself", code, &payload);
+    if code != 200 {
+        report_read_failure("vself", code, &payload, &value)
+    }
+    if json {
+        println!("{payload}");
+    } else {
+        println!("{}", render_self(&value));
+    }
+    std::process::exit(0);
+}
+
+/// One `id  name (kind)` line from a `/whoami` session object, with a short id for readability.
+fn render_self_line(session: &serde_json::Value) -> String {
+    let id = session.get("sessionId").and_then(|v| v.as_str()).unwrap_or("");
+    let name = session.get("name").and_then(|v| v.as_str()).unwrap_or("");
+    let kind = session.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+    format!("{}  {name} ({kind})", short_id(id))
+}
+
+/// Render `/whoami` as a short block: this session, its parent, then the rest of the ancestry.
+fn render_self(value: &serde_json::Value) -> String {
+    let mut out = String::new();
+    if let Some(session) = value.get("session") {
+        out.push_str(&format!("self:   {}", render_self_line(session)));
+    }
+    match value.get("parent") {
+        Some(parent) if !parent.is_null() => {
+            out.push_str(&format!("\nparent: {}", render_self_line(parent)));
+        }
+        _ => out.push_str("\nparent: (none; this is a top-level session)"),
+    }
+    if let Some(ancestors) = value.get("ancestors").and_then(|v| v.as_array()) {
+        // Index 0 is the immediate parent, already shown above; list the grandparents onward.
+        for ancestor in ancestors.iter().skip(1) {
+            out.push_str(&format!("\n        {}", render_self_line(ancestor)));
+        }
+    }
+    out
 }
 
 /// `(session id, state)` pairs of a status answer, the part of it worth reprinting when it changes.

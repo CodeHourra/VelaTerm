@@ -160,6 +160,8 @@ pub enum ReadRequest {
     Stat(StatRequest),
     /// `vrun` started or finished a command; rescanning the runs directory reads files.
     Runs(RunsRequest),
+    /// `vself` asks who the calling session is and which sessions spawned it; reads the database.
+    Whoami(WhoamiRequest),
 }
 
 /// Body of `/runs`, posted by `vrun` when it starts or finishes a command.
@@ -168,6 +170,14 @@ pub enum ReadRequest {
 pub struct RunsRequest {
     /// The announcing session, echoed back; the rescan covers every session.
     #[serde(default)]
+    pub session_id: String,
+}
+
+/// Request from `vself` for the calling session's own identity and ancestry.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WhoamiRequest {
+    /// The session asking about itself, injected as `VLX_SESSION_ID`.
     pub session_id: String,
 }
 
@@ -377,6 +387,7 @@ fn serve_loop(server: tiny_http::Server, app: AppCtx, token: String) {
                 crate::agent::runs::refresh(&app_for_read);
                 (200, serde_json::json!({ "sessionId": r.session_id }).to_string())
             }
+            ReadRequest::Whoami(r) => handle_whoami(&app_for_read, r),
         }),
     );
 }
@@ -866,7 +877,7 @@ fn parse_spawn(url: &str, body: &str, expected_token: &str) -> Option<SpawnReque
 /// Whether the URL path is a read handled off the accept loop.
 fn is_read_path(url: &str) -> bool {
     let path = url.split_once('?').map(|(p, _)| p).unwrap_or(url);
-    path == "/refer" || path == "/search" || path == "/stat" || path == "/runs"
+    path == "/refer" || path == "/search" || path == "/stat" || path == "/runs" || path == "/whoami"
 }
 
 /// Validate `/refer` or `/search` plus their JSON body. Errors carry the status code and JSON body to
@@ -916,6 +927,13 @@ fn parse_read(url: &str, body: &str, expected_token: &str) -> Result<ReadRequest
         "/runs" => {
             let req: RunsRequest = serde_json::from_str(body).map_err(|_| invalid_json())?;
             Ok(ReadRequest::Runs(req))
+        }
+        "/whoami" => {
+            let req: WhoamiRequest = serde_json::from_str(body).map_err(|_| invalid_json())?;
+            if req.session_id.trim().is_empty() {
+                return Err((400, error_body("missing sessionId")));
+            }
+            Ok(ReadRequest::Whoami(req))
         }
         _ => Err((404, error_body("unknown endpoint"))),
     }
@@ -1666,6 +1684,48 @@ fn handle_stat(app: &AppCtx, req: StatRequest) -> (u16, String) {
             "version": version,
             "title": title,
             "sessions": sessions,
+        })
+        .to_string(),
+    )
+}
+
+/// Handle `/whoami`: report the calling session and the ancestor chain that spawned it.
+///
+/// Index 0 of `lineage` is the caller itself, index 1 its parent, and so on up to the top-level root.
+/// `parent` is a convenience shortcut to index 1. A caller that finds `parent` null is a top-level
+/// session that no `vspawn` created.
+fn handle_whoami(app: &AppCtx, req: WhoamiRequest) -> (u16, String) {
+    let lineage = {
+        let db = app.db();
+        let Ok(conn) = db.conn.lock() else {
+            return (500, error_body("database is unavailable"));
+        };
+        match crate::db::repo::session_lineage(&conn, &req.session_id) {
+            Ok(chain) => chain,
+            Err(e) => return (500, error_body(&e)),
+        }
+    };
+    if lineage.is_empty() {
+        return (404, error_body("no such session"));
+    }
+    let brief = |b: &crate::db::repo::SessionBrief| {
+        serde_json::json!({
+            "sessionId": b.session_id,
+            "name": b.name,
+            "kind": b.kind,
+            "cwd": b.cwd,
+            "archived": b.archived,
+        })
+    };
+    let session = brief(&lineage[0]);
+    let parent = lineage.get(1).map(brief);
+    let ancestors: Vec<serde_json::Value> = lineage[1..].iter().map(brief).collect();
+    (
+        200,
+        serde_json::json!({
+            "session": session,
+            "parent": parent,
+            "ancestors": ancestors,
         })
         .to_string(),
     )
@@ -2623,6 +2683,10 @@ mod tests {
                         serde_json::json!({ "sessionId": r.session_id }).to_string(),
                     ),
                     ReadRequest::Runs(_) => (200, "{}".to_string()),
+                    ReadRequest::Whoami(r) => (
+                        200,
+                        serde_json::json!({ "sessionId": r.session_id }).to_string(),
+                    ),
                 }),
             );
         });

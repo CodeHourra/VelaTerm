@@ -474,6 +474,8 @@ export interface ChatSnapshot {
   /** Codex: the service tier and personality chosen for this conversation, when set. */
   serviceTier?: string;
   personality?: string;
+  /** Claude: whether Claude in Chrome is attached to this conversation, running or not. */
+  chrome?: boolean;
   /** A usage limit stopped this conversation, and it continues on its own at the time given. */
   autoContinue?: ChatAutoContinue;
   auth?: ChatAuthState;
@@ -537,6 +539,8 @@ export type ChatEvent =
   | { type: "collaborationModes"; modes: ChatCollaborationMode[]; mode: string }
   | { type: "collaborationModeChanged"; mode: string }
   | { type: "codexSettingsChanged"; serviceTier?: string | null; personality?: string | null }
+  /** Claude in Chrome was attached or detached for this conversation, by this view or another one. */
+  | { type: "chromeChanged"; enabled: boolean }
   | { type: "settingsChanged"; model?: string | null; effort?: string | null; mode?: string; pendingPermissionMode?: PendingPermissionMode | null }
   /**
    * Which process is behind this conversation, announced as soon as it exists.
@@ -580,6 +584,11 @@ export function chatStart(
 /** Switch Claude's fast mode for the running conversation. */
 export function chatSetFastMode(sessionId: string, enabled: boolean): Promise<void> {
   return invoke("chat_set_fast_mode", { sessionId, enabled });
+}
+
+/** Attach or detach Claude in Chrome for this conversation, now and for every later process. */
+export function chatSetChrome(sessionId: string, enabled: boolean): Promise<void> {
+  return invoke("chat_set_chrome", { sessionId, enabled });
 }
 
 /** Choose the Codex service tier for subsequent turns; omit to return to the thread's own. */
@@ -632,6 +641,19 @@ export function chatMcpReconnect(
 /** Stop one of Claude's background tasks. */
 export function chatStopTask(sessionId: string, taskId: string): Promise<void> {
   return invoke("chat_stop_task", { sessionId, taskId });
+}
+
+/** The command a background shell task runs and the tail of its output. */
+export interface ChatTaskOutput {
+  command?: string;
+  /** Absent when the output file cannot be read. */
+  output?: string;
+  /** Earlier output exists beyond what was returned. */
+  truncated: boolean;
+}
+
+export function chatTaskOutput(sessionId: string, taskId: string): Promise<ChatTaskOutput> {
+  return invoke("chat_task_output", { sessionId, taskId });
 }
 
 /** Move every foreground task of the running turn to the background. */

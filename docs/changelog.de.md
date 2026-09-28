@@ -1,3 +1,23 @@
+## v0.2.5 — 2026-09-28
+
+- 🐧 In der Windows-Desktop-App lassen sich separate Arbeitsbereiche in WSL1 und WSL2 öffnen, die die Agenten, Dateien und den Sitzungsverlauf der ausgewählten Linux-Distribution verwenden.
+
+- 🔄 WSL-Arbeitsbereiche lassen sich nach dem Beenden des Servers erneut verbinden; beim Schließen eines Fensters können Sie den Server beenden oder die Sitzungen weiterlaufen lassen.
+
+- 🌐 Claude-Sitzungen haben im Eingabebereich die Option „Chrome“, mit der sich Claude in Chrome ein- und ausschalten lässt, ohne die Unterhaltung neu zu starten. Jede Sitzung speichert ihre eigene Auswahl, Sitzungen ohne Auswahl folgen der Standardeinstellung.
+
+- 📟 Der Tab einer Shell-Aufgabe im Hintergrund zeigt den ausgeführten Befehl und die neueste Ausgabe, die während der Ausführung laufend aktualisiert wird.
+
+- 🧩 Sind die Vela Skills nicht installiert, bietet die Statusleiste die Installation an. Der Dialog beschreibt die einzelnen Skills, installiert sie direkt und lässt sich so einstellen, dass er nicht mehr erinnert.
+
+- 🪪 Mit `vspawn` erstellte untergeordnete Sitzungen erhalten die ID ihrer übergeordneten Sitzung in `VLX_PARENT_SESSION_ID`, sodass ein Agent sie mit `vrefer` und `vtell` erreichen kann. Der neue Befehl `vself` zeigt die aktuelle Sitzung und die darüberliegenden Sitzungen.
+
+- 🖥️ Das Linux-AppImage öffnet auf neueren Distributionen wie Fedora 44 kein leeres Fenster mehr.
+
+- 🎨 Kleinere Änderungen: „Hintergrundaufgaben“ erscheint standardmäßig unter dem Eingabefeld und bleibt im Menü „Mehr“, wenn Sie es dorthin zurückverschieben; lässt sich ein Link nicht öffnen, weist eine Meldung darauf hin, dass die Adresse per Rechtsklick kopiert werden kann.
+
+---
+
 ## v0.2.4 — 2026-09-26
 
 - 📋 Kopieren aus der Unterhaltung liefert den Text so, wie er auf dem Bildschirm steht: keine Backticks um Inline-Code, keine Sternchen um Hervorhebungen, Links nur als ihr Text, Codeblöcke ohne Begrenzungszeilen, Tabellenzellen durch Tabulatoren getrennt und Listen mit den sichtbaren Aufzählungszeichen. Die formatierte Fassung landet weiterhin zusätzlich in der Zwischenablage, und das Kontextmenü bietet nun „Als Markdown kopieren“ für den Markdown-Quelltext der Auswahl.

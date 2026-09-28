@@ -41,6 +41,10 @@ export const remoteSshSession: string | null =
     (window as any).__VLX_REMOTE__?.session) ||
   null;
 
+/** WSL windows use the same remote session envelope with their own lifecycle events. */
+export const remoteConnectionKind: "ssh" | "wsl" =
+  typeof window !== "undefined" && (window as any).__VLX_REMOTE__?.transport === "wsl" ? "wsl" : "ssh";
+
 // PTY launch arguments and results.
 
 export interface PtySpawnArgs {
@@ -119,6 +123,7 @@ const DIRECT_DESKTOP_CMDS = new Set([
   "ssh_probe_host",
   "ssh_trust_host",
   "ssh_connect",
+  "wsl_connect",
   "ssh_disconnect",
   "browser_open",
   "browser_navigate",

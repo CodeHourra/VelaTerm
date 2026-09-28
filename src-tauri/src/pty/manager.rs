@@ -581,6 +581,16 @@ impl PtyManager {
         cmd.env("VLX_SESSION_ID", &id);
         cmd.env("VLX_TOKEN", &hook.token);
         cmd.env("VLX_SPAWN_URL", format!("http://127.0.0.1:{}", hook.port));
+        // A spawned session also learns who spawned it, so an agent can reach its parent with
+        // `vrefer`/`vtell` without guessing. Absent for top-level sessions. `vself` resolves the full
+        // chain from the id; this env var is the cheap, always-present shortcut to the immediate parent.
+        if let Ok(conn) = app.db().conn.lock() {
+            if let Ok(Some(parent)) =
+                crate::db::repo::get_session(&conn, &id).map(|s| s.and_then(|s| s.parent_session_id))
+            {
+                cmd.env("VLX_PARENT_SESSION_ID", parent);
+            }
+        }
 
         // The executable path is shared by Codex notify configuration and built-in command shims.
         let exe_path = std::env::current_exe()
@@ -2081,7 +2091,7 @@ fn decode_wsl_list_output(bytes: &[u8]) -> String {
 }
 
 #[cfg(any(windows, test))]
-fn parse_wsl_distros(stdout: &[u8]) -> Vec<String> {
+pub(crate) fn parse_wsl_distros(stdout: &[u8]) -> Vec<String> {
     let mut distros = Vec::<String>::new();
     for line in decode_wsl_list_output(stdout).lines() {
         let name = line.trim_matches(|c: char| c.is_whitespace() || c == '\0' || c == '\u{feff}');

@@ -363,6 +363,7 @@ const zhCN: typeof en = {
   "share.subtitle":
     "我们是 VelaTerm 背后的一个小团队。如果你喜欢它，欢迎把 VelaTerm 分享给更多人。让更多人知道我们，对我们真的很重要。谢谢你的支持！❤️", // We're a small team behind VelaTerm. If you enjoy it, please share VelaTerm with others…
   "share.copyLink": "复制链接", // Copy link
+  "share.openLinkFailed": "无法打开此链接，可右键复制链接地址。", // Could not open this link…
   "share.copied": "已复制！", // Copied!
   "share.wechatMoments": "微信朋友圈",
   "share.weibo": "微博",
@@ -632,6 +633,7 @@ const zhCN: typeof en = {
   "settings.composerChip.serviceTier": "速度",
   "settings.composerChip.personality": "语气",
   "settings.composerChip.mcp": "MCP 服务器",
+  "settings.composerChip.chrome": "Claude in Chrome",
   "settings.composerChip.tasks": "后台任务",
   "settings.composerChip.account": "账号",
   "settings.composerChip.codexCredits": "Codex 额度重置券",
@@ -731,6 +733,19 @@ const zhCN: typeof en = {
     "标签、分屏和当前会话在所有已连接设备上保持一致，各端的键盘焦点互不打扰。", // Tabs, splits, and the active session stay the same on every connected device. Keyboard focus stays put on each one.
 
   // ── Remote connection panel ──
+  "connect.wslUpgrade": "此工作区正在运行其他版本的服务端。重启服务端会结束此 WSL 工作区中的所有运行中会话。",
+  "connect.wslRestart": "重启服务端并连接",
+  "connect.wsl": "WSL",
+  "connect.wslTitle": "连接 WSL",
+  "connect.wslHint": "以此发行版的默认用户打开独立的 Linux 工作区。智能体、文件和历史记录均保留在 WSL 内。",
+  "connect.wslUnsupported": "WSL 连接仅在 Windows 桌面版中可用。",
+  "connect.wslEmpty": "未找到 WSL 发行版。请先安装并初始化发行版，然后刷新。",
+  "connect.wslDistribution": "Linux 发行版",
+  "connect.wslSelect": "选择发行版",
+  "connect.wslMissing": "此发行版已不可用，请选择其他发行版。",
+  "connect.wslSetup": "连接时会按需下载并启动匹配版本的 VelaTerm 服务端，无需配置 SSH。",
+  "conn.wslReconnecting": "正在重新连接 WSL 工作区…",
+  "conn.wslDown": "WSL 工作区不可用，请点击「立即重连」重试。",
   "connect.title": "连接远程服务",
   "connect.pairingPlaceholder": "粘贴配对链接",
   "connect.confirmConnect": "指纹无误，连接",
@@ -1579,6 +1594,24 @@ const zhCN: typeof en = {
   "statusbar.updateReady": "重启以完成更新",
   "statusbar.updateFailed": "更新失败",
   "statusbar.updateTooltip": "点击查看详情",
+  "statusbar.skillsAvailable": "安装 Vela 技能",
+  "skills.title": "安装 Vela 技能",
+  "skills.subtitle": "安装后，Claude Code 和 Codex 可以在对话中使用以下 VelaTerm 功能，例如在 Claude Code 中输入 /vspawn，在 Codex 中输入 $vspawn。",
+  "skills.vspawn": "新建子会话来处理任务。",
+  "skills.vspawnTree": "新建使用独立工作树的子会话。",
+  "skills.vopen": "在 VelaTerm 中打开文件或网页。",
+  "skills.vrefer": "读取其他会话的对话内容。",
+  "skills.vask": "就其他会话提问，并获得简要回答。",
+  "skills.vsearch": "搜索所有会话的对话内容。",
+  "skills.vstat": "查看哪些会话正在工作或等待输入。",
+  "skills.vtell": "向其他会话发送消息。",
+  "skills.vkb": "查询项目的 CodeGraph 和知识库。",
+  "skills.settingsHint": "之后也可以在「设置 > 高级」中安装。",
+  "skills.installFailed": (err) => `安装失败：${err}`,
+  "skills.dontRemind": "不再提醒",
+  "skills.later": "稍后",
+  "skills.install": "安装",
+  "skills.installing": "正在安装…",
 
   // ── 会话视图（把智能体会话读成对话） ──
   "session.showConversation": "会话视图",
@@ -1793,6 +1826,11 @@ const zhCN: typeof en = {
   "chat.fastMode.label": "快速",
   "chat.fastMode.on": "快速模式已开启",
   "chat.fastMode.off": "快速模式已关闭",
+  "chat.chrome.label": "Chrome",
+  "chat.chrome.on": "开启",
+  "chat.chrome.off": "关闭",
+  "chat.chrome.tooltipOn": "Claude in Chrome 已开启",
+  "chat.chrome.tooltipOff": "Claude in Chrome 已关闭",
   "chat.auth.login": "登录",
   "chat.auth.logout": "登出",
   "chat.auth.confirmLogout": "确认登出",
@@ -1881,6 +1919,10 @@ const zhCN: typeof en = {
   "chat.tasks.finished": "结束时间",
   "chat.tasks.summary": "摘要",
   "chat.tasks.outputFile": "输出文件",
+  "chat.tasks.command": "命令",
+  "chat.tasks.output": "输出",
+  "chat.tasks.noOutput": "暂无输出。",
+  "chat.tasks.outputTruncated": "仅显示最近的输出。",
   "chat.tasks.phases": "阶段",
   "chat.tasks.noProgress": "此任务未报告各智能体的进度。",
   "chat.tasks.attempt": (n: number) => `第 ${n} 次尝试`,

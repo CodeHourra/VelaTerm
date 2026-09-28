@@ -11,6 +11,7 @@ import { QuitConfirmModal } from "./components/QuitConfirmModal";
 import { SplitTaskConfirmModal } from "./components/SplitTaskConfirmModal";
 import { SpawnConfirmModal } from "./components/SpawnConfirmModal";
 import { UpdateModal } from "./components/UpdateModal";
+import { VelaSkillsModal } from "./components/VelaSkillsModal";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useNotifications } from "./hooks/useNotifications";
 import { CenterPane } from "./layout/CenterPane/CenterPane";
@@ -277,6 +278,7 @@ function App() {
       <ChangesModal />
       <NotifyGuideModal />
       <UpdateModal />
+      {!isShareSurface && <VelaSkillsModal />}
       <ConnectionBanner />
       <ErrorLogModal />
       <NotificationsManager />

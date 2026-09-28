@@ -11,7 +11,7 @@ vi.mock("../../../ipc/transport", async (original) => ({
 import { invoke, listen, onTransportReconnect, onTransportDisconnect } from "../../../ipc/transport";
 import { setLang } from "../../../i18n";
 import { useTermStore } from "../../../store/termStore";
-import { TaskView, fmtElapsed, taskStatusKey } from "./TaskView";
+import { TaskView, fmtElapsed, plainOutput, taskStatusKey } from "./TaskView";
 
 let eventCallback: ((event: ChatEvent) => void) | undefined;
 let unlisten: ReturnType<typeof vi.fn>;
@@ -296,4 +296,39 @@ it("hydrates a deep-link placeholder without changing focus or inventing an unkn
   expect(hydrate).toHaveBeenCalledWith("s", seed);
   expect(taskStatusKey(undefined)).toBeNull();
   hydrate.mockRestore();
+});
+
+it("shows a shell task's command and output, and keeps reading the output while it runs", async () => {
+  vi.useFakeTimers();
+  const shell: ChatBackgroundTask = { task_id: "b1", task_type: "local_bash", description: "Wait for batch", status: "running", finished: false, can_stop: true, elapsed_ms: 1000 };
+  snapshotTasks = [shell];
+  let reads = 0;
+  vi.mocked(invoke).mockImplementation((command, args) => {
+    if (command === "chat_snapshot") {
+      return Promise.resolve({ running: true, rows: [], queue: [], permissions: [], commands: [], configKeys: [], backgroundTasks: snapshotTasks }) as Promise<never>;
+    }
+    if (command === "chat_task_output") {
+      expect(args).toEqual({ sessionId: "s", taskId: "b1" });
+      reads++;
+      return Promise.resolve({ command: "sleep 60 && echo done", output: `\x1b[32mstep ${reads}\x1b[0m\n`, truncated: reads > 1 }) as Promise<never>;
+    }
+    return Promise.resolve(undefined) as Promise<never>;
+  });
+  await mount({ taskId: "b1", taskType: "local_bash", seed: shell, title: "Wait for batch" });
+  expect(screen.getByText("sleep 60 && echo done")).toBeTruthy();
+  expect(screen.getByText("step 1", { selector: ".sv-task-output" })).toBeTruthy();
+  expect(screen.queryByText("Only the most recent output is shown.")).toBeNull();
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  expect(screen.getByText("step 2", { selector: ".sv-task-output" })).toBeTruthy();
+  expect(screen.getByText("Only the most recent output is shown.")).toBeTruthy();
+});
+
+it("does not read output for tasks that are not shell commands", async () => {
+  await mount();
+  expect(vi.mocked(invoke).mock.calls.some(([command]) => command === "chat_task_output")).toBe(false);
+});
+
+it("renders terminal output as plain text", () => {
+  expect(plainOutput("\x1b[1;31mred\x1b[0m\r\n\x1b]0;title\x07ok")).toBe("red\nok");
+  expect(plainOutput("10%\r50%\r100%\nnext")).toBe("100%\nnext");
 });

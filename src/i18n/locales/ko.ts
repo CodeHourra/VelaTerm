@@ -364,6 +364,7 @@ const ko: typeof en = {
   "share.subtitle":
     "VelaTerm은 작은 팀이 만들고 있습니다. 마음에 드셨다면 주변에 VelaTerm을 공유해 주세요. 더 많은 분이 저희를 알게 되는 것은 팀에 정말 큰 힘이 됩니다. 감사합니다! ❤️", // We're a small team behind VelaTerm. If you enjoy it, please share VelaTerm with others…
   "share.copyLink": "링크 복사", // Copy link
+  "share.openLinkFailed": "이 링크를 열 수 없습니다. 마우스 오른쪽 버튼을 클릭하면 주소를 복사할 수 있습니다.", // Could not open this link…
   "share.copied": "복사됨!", // Copied!
   "share.wechatMoments": "WeChat 모멘트",
   "share.weibo": "Weibo",
@@ -641,6 +642,7 @@ const ko: typeof en = {
   "settings.composerChip.serviceTier": "속도",
   "settings.composerChip.personality": "말투",
   "settings.composerChip.mcp": "MCP 서버",
+  "settings.composerChip.chrome": "Claude in Chrome",
   "settings.composerChip.tasks": "백그라운드 작업",
   "settings.composerChip.account": "계정",
   "settings.composerChip.codexCredits": "Codex 초기화 이용권",
@@ -742,6 +744,19 @@ const ko: typeof en = {
     "탭, 분할, 활성 세션이 연결된 모든 기기에서 동일하게 유지됩니다. 키보드 포커스는 기기마다 그대로 유지됩니다.", // Tabs, splits, and the active session stay the same on every connected device. Keyboard focus stays put on each one.
 
   // ── Remote connection panel ──
+  "connect.wslUpgrade": "이 작업 공간에서 다른 버전의 서버가 실행 중입니다. 서버를 다시 시작하면 이 WSL 작업 공간의 모든 실행 중인 세션이 종료됩니다.",
+  "connect.wslRestart": "서버를 다시 시작하고 연결",
+  "connect.wsl": "WSL",
+  "connect.wslTitle": "WSL에 연결",
+  "connect.wslHint": "이 배포판의 기본 사용자로 별도의 Linux 작업 공간을 엽니다. 에이전트, 파일 및 기록은 WSL 내에서 관리됩니다.",
+  "connect.wslUnsupported": "WSL 연결은 Windows 데스크톱 앱에서 사용할 수 있습니다.",
+  "connect.wslEmpty": "WSL 배포판을 찾을 수 없습니다. 배포판을 설치하고 초기 설정을 완료한 후 새로 고치세요.",
+  "connect.wslDistribution": "Linux 배포판",
+  "connect.wslSelect": "배포판 선택",
+  "connect.wslMissing": "이 배포판은 더 이상 사용할 수 없습니다. 다른 배포판을 선택하세요.",
+  "connect.wslSetup": "연결 시 필요한 경우 해당 버전의 VelaTerm 서버를 WSL에 다운로드하고 시작합니다. SSH 설정은 필요하지 않습니다.",
+  "conn.wslReconnecting": "WSL 작업 공간에 다시 연결하는 중…",
+  "conn.wslDown": "WSL 작업 공간을 사용할 수 없습니다. ‘지금 다시 연결’을 선택하여 다시 시도하세요.",
   "connect.title": "원격 서버에 연결", // Connect to Remote Server
   "connect.pairingPlaceholder": "페어링 링크 붙여넣기", // Paste pairing link
   "connect.confirmConnect": "지문 확인 후 연결", // Fingerprint matches, connect
@@ -1612,6 +1627,24 @@ const ko: typeof en = {
   "statusbar.updateReady": "Restart to update", // TODO translate
   "statusbar.updateFailed": "Update failed", // TODO translate
   "statusbar.updateTooltip": "Click for details", // TODO translate
+  "statusbar.skillsAvailable": "Vela Skills 설치",
+  "skills.title": "Vela Skills 설치",
+  "skills.subtitle": "설치하면 Claude Code와 Codex의 대화에서 다음 VelaTerm 기능을 사용할 수 있습니다. Claude Code에서는 /vspawn, Codex에서는 $vspawn처럼 입력합니다.",
+  "skills.vspawn": "하위 세션을 만들어 작업을 맡깁니다.",
+  "skills.vspawnTree": "독립된 워크트리를 사용하는 하위 세션을 만듭니다.",
+  "skills.vopen": "파일이나 웹 페이지를 VelaTerm에서 엽니다.",
+  "skills.vrefer": "다른 세션의 대화 내용을 읽습니다.",
+  "skills.vask": "다른 세션에 관해 질문하고 간결한 답변을 받습니다.",
+  "skills.vsearch": "모든 세션의 대화 내용을 검색합니다.",
+  "skills.vstat": "작업 중이거나 입력을 기다리는 세션을 확인합니다.",
+  "skills.vtell": "다른 세션에 메시지를 보냅니다.",
+  "skills.vkb": "프로젝트의 CodeGraph와 지식 베이스를 조회합니다.",
+  "skills.settingsHint": "나중에 설정 > 고급에서도 설치할 수 있습니다.",
+  "skills.installFailed": (err) => `설치하지 못했습니다: ${err}`,
+  "skills.dontRemind": "다시 알리지 않음",
+  "skills.later": "나중에",
+  "skills.install": "설치",
+  "skills.installing": "설치 중…",
 
   // ── 세션 뷰(에이전트 세션을 대화로 읽기) ──
   "session.showConversation": "대화 보기",
@@ -1826,6 +1859,11 @@ const ko: typeof en = {
   "chat.fastMode.label": "고속",
   "chat.fastMode.on": "고속 모드가 켜져 있습니다",
   "chat.fastMode.off": "고속 모드가 꺼져 있습니다",
+  "chat.chrome.label": "Chrome",
+  "chat.chrome.on": "켜짐",
+  "chat.chrome.off": "꺼짐",
+  "chat.chrome.tooltipOn": "Claude in Chrome이 켜져 있습니다",
+  "chat.chrome.tooltipOff": "Claude in Chrome이 꺼져 있습니다",
   "chat.auth.login": "로그인",
   "chat.auth.logout": "로그아웃",
   "chat.auth.confirmLogout": "로그아웃 확인",
@@ -1914,6 +1952,10 @@ const ko: typeof en = {
   "chat.tasks.finished": "종료 시각",
   "chat.tasks.summary": "요약",
   "chat.tasks.outputFile": "출력 파일",
+  "chat.tasks.command": "명령",
+  "chat.tasks.output": "출력",
+  "chat.tasks.noOutput": "아직 출력이 없습니다.",
+  "chat.tasks.outputTruncated": "최근 출력만 표시합니다.",
   "chat.tasks.phases": "단계",
   "chat.tasks.noProgress": "이 작업은 에이전트별 진행 상황을 보고하지 않습니다.",
   "chat.tasks.attempt": (n: number) => `${n}번째 시도`,

@@ -58,6 +58,7 @@ fn main() {
         Some("--search") => velaterm_lib::run_search(&args),
         Some("--orch") => velaterm_lib::run_orch(&args),
         Some("--stat") => velaterm_lib::run_stat(&args),
+        Some("--self") => velaterm_lib::run_self(&args),
         Some("--knowledge") => velaterm_lib::run_knowledge(&args),
         _ => {}
     }

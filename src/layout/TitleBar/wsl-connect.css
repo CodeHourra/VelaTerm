@@ -1,0 +1,17 @@
+.connect-panel { --connect-gap: 12px; }
+.wsl-connect-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--connect-gap);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.wsl-connect-field {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--connect-gap) / 2);
+}
+.wsl-connect-hint { color: var(--text-dim); }
+.wsl-connect-error { color: var(--red); overflow-wrap: anywhere; }
+.wsl-connect-form .vlx-btn { align-self: flex-start; }
+.wsl-connect-form button:disabled { opacity: 0.6; cursor: default; }

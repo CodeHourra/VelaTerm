@@ -49,6 +49,7 @@ impl CallOrigin {
 /// topology (ports, URLs, fingerprint, interfaces). No remote UI calls them — the remote-access panel
 /// and its status polling are desktop/Electron-only — so gating is regression-free by construction.
 const MANAGEMENT_CMDS: &[&str] = &[
+    "wsl_options",
     "web_server_start",
     "web_server_stop",
     "web_server_status",
@@ -292,6 +293,7 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
             let data_dir = app.data_dir().ok();
             to_value(crate::pty::manager::available_shells(data_dir.as_deref()))
         }
+        "wsl_options" => to_value(crate::wsl_remote::options(app)?),
         // Git Bash status was previously desktop-only, causing every browser/remote mount probe to return
         // Unknown command. Register it here: query actual status on Windows and report unavailable elsewhere.
         "gitbash_status" => {
@@ -719,6 +721,11 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
             &req_str(args, "sessionId")?,
             args.get("enabled").and_then(Value::as_bool).unwrap_or(false),
         )?),
+        "chat_set_chrome" => to_value(core::chat_set_chrome(
+            app,
+            &req_str(args, "sessionId")?,
+            args.get("enabled").and_then(Value::as_bool).unwrap_or(false),
+        )?),
         "chat_set_service_tier" => {
             let tier = opt_str(args, "tier");
             to_value(core::chat_set_service_tier(app, &req_str(args, "sessionId")?, tier.as_deref())?)
@@ -754,6 +761,11 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
             &req_str(args, "server")?,
         ),
         "chat_stop_task" => to_value(core::chat_stop_task(
+            app,
+            &req_str(args, "sessionId")?,
+            &req_str(args, "taskId")?,
+        )?),
+        "chat_task_output" => to_value(core::chat_task_output(
             app,
             &req_str(args, "sessionId")?,
             &req_str(args, "taskId")?,
@@ -1626,6 +1638,7 @@ mod tests {
         // command were removed from MANAGEMENT_CMDS, silently un-gating it. The acceptance criterion names
         // these commands, so shrinking the set must fail HERE first.
         const EXPECTED_GATED: &[&str] = &[
+            "wsl_options",
             "web_server_start",
             "web_server_stop",
             "web_server_status",

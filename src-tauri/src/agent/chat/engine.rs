@@ -674,6 +674,10 @@ pub struct ChatSnapshot {
     pub service_tier: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub personality: Option<String>,
+    /// Claude only: whether Claude in Chrome is attached to this conversation. Filled from the database by
+    /// the command layer, which owns the conversation's settings whether or not a process is running.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chrome: Option<bool>,
     /// A usage limit stopped this conversation and it continues on its own at this time.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_continue: Option<super::auto_continue::Waiting>,
@@ -890,6 +894,16 @@ pub(crate) fn agent_environment(app: &AppCtx, session_id: &str, cmd: &mut std::p
     cmd.env("VLX_SESSION_ID", session_id);
     cmd.env("VLX_TOKEN", &hook.token);
     cmd.env("VLX_SPAWN_URL", format!("http://127.0.0.1:{}", hook.port));
+    // Give a spawned session the id of whoever spawned it, matching pty/manager.rs. Absent for
+    // top-level sessions; `vself` expands the id into the full ancestry when more than the parent is
+    // needed.
+    if let Ok(conn) = app.db().conn.lock() {
+        if let Ok(Some(parent)) = crate::db::repo::get_session(&conn, session_id)
+            .map(|s| s.and_then(|s| s.parent_session_id))
+        {
+            cmd.env("VLX_PARENT_SESSION_ID", parent);
+        }
+    }
     if let Ok(exe) = std::env::current_exe() {
         cmd.env("VLX_EXE", exe.as_os_str());
     }
@@ -2262,6 +2276,20 @@ impl ChatManager {
         Ok(())
     }
 
+    /// Attach or detach Claude in Chrome on the running Claude process. The conversation continues; the
+    /// tools appear or disappear from the next request the agent makes.
+    pub fn set_chrome(&self, session_id: &str, enabled: bool) -> Result<(), String> {
+        let proc = self.claude(session_id)?;
+        let servers = protocol::chrome_servers(&proc.bin, enabled);
+        let response = proc.request_and_wait("mcp_set_servers", |id| {
+            protocol::control_request(id, protocol::mcp_set_servers(servers))
+        })?;
+        match mcp_set_servers_error(&response) {
+            Some(message) => Err(message),
+            None => Ok(()),
+        }
+    }
+
     /// The MCP servers this Claude process knows, each with its connection state and tools.
     pub fn mcp_status(&self, session_id: &str) -> Result<Value, String> {
         let proc = self.get(session_id)?;
@@ -2399,17 +2427,42 @@ impl ChatManager {
         let proc = self.get(session_id)?;
         if epoch.is_some_and(|value| value != proc.started_at) { return Err("Chat history changed; synchronize the conversation again".into()); }
         let timeline = proc.timeline.lock().unwrap();
-        fn find<'a>(rows: &'a [ChatRow], id: &str) -> Option<&'a ChatRow> {
-            for row in rows {
-                if row.id() == id { return Some(row); }
-                if let ChatRow::Tool { children, .. } = row {
-                    if let Some(child) = find(children, id) { return Some(child); }
+        let row = find_row(&timeline.rows, row_id).ok_or("Chat row is no longer available")?;
+        Ok(detail_row(row))
+    }
+
+    /// The command a background shell task runs and the tail of what it has printed so far.
+    ///
+    /// The output path is never taken from the client: it comes from the task's final frame or from the
+    /// launching tool's result, and must name this task's own `tasks/<task_id>.output` file.
+    pub fn task_output(&self, session_id: &str, task_id: &str) -> Result<TaskOutput, String> {
+        let proc = self.claude(session_id)?;
+        let (tool_use_id, output_file) = {
+            let extras = proc.extras.lock().unwrap();
+            let task = extras.background_tasks.iter().find(|task| task.task_id == task_id)
+                .ok_or("Background task is no longer available")?;
+            (task.tool_use_id.clone(), task.output_file.clone())
+        };
+        let (command, announced) = match tool_use_id {
+            Some(id) => {
+                let timeline = proc.timeline.lock().unwrap();
+                match find_row(&timeline.rows, &id) {
+                    Some(ChatRow::Tool { input, output, .. }) => (
+                        input.get("command").and_then(Value::as_str).map(str::to_string),
+                        output.as_deref().and_then(announced_output_path),
+                    ),
+                    _ => (None, None),
                 }
             }
-            None
-        }
-        let row = find(&timeline.rows, row_id).ok_or("Chat row is no longer available")?;
-        Ok(detail_row(row))
+            None => (None, None),
+        };
+        let path = output_file.filter(|path| !path.is_empty()).or(announced)
+            .filter(|path| is_task_output_path(path, task_id));
+        let (output, truncated) = match path.as_deref().map(read_tail) {
+            Some(Ok((text, truncated))) => (Some(text), truncated),
+            _ => (None, false),
+        };
+        Ok(TaskOutput { command, output, truncated })
     }
 
     pub fn snapshot(&self, session_id: &str) -> ChatSnapshot {
@@ -2440,6 +2493,7 @@ impl ChatManager {
                 collaboration_modes: Vec::new(),
                 service_tier: None,
                 personality: None,
+                chrome: None,
                 auto_continue: super::auto_continue::waiting(session_id),
                 pid: None,
                 started_at: None,
@@ -2517,6 +2571,7 @@ impl ChatManager {
             collaboration_modes,
             service_tier,
             personality,
+            chrome: None,
             auto_continue: super::auto_continue::waiting(session_id),
             pid: Some(proc.pid),
             started_at: Some(proc.started_at),
@@ -2953,6 +3008,64 @@ fn fold_task_inventory(extras: &mut ClaudeExtras, tasks: &[Value]) {
         }
     }
     cap_finished_tasks(&mut extras.background_tasks);
+}
+
+/// What a task tab shows for a background shell task beyond its lifecycle.
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub struct TaskOutput {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    /// The last `TASK_OUTPUT_TAIL` bytes of the output file, cut at a line boundary; absent when unreadable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<String>,
+    /// Earlier output exists beyond what was returned.
+    pub truncated: bool,
+}
+
+/// How much of a task's output one request returns; the tab is polled, so this bounds every poll.
+const TASK_OUTPUT_TAIL: u64 = 64 * 1024;
+
+/// A row anywhere in the timeline, including a subagent's children.
+fn find_row<'a>(rows: &'a [ChatRow], id: &str) -> Option<&'a ChatRow> {
+    for row in rows {
+        if row.id() == id { return Some(row); }
+        if let ChatRow::Tool { children, .. } = row {
+            if let Some(child) = find_row(children, id) { return Some(child); }
+        }
+    }
+    None
+}
+
+/// The path in "Output is being written to: <path>.output." that Claude puts in a backgrounded shell's result.
+fn announced_output_path(result: &str) -> Option<String> {
+    const MARKER: &str = "Output is being written to";
+    let rest = &result[result.find(MARKER)? + MARKER.len()..];
+    let rest = rest.trim_start_matches(':').trim_start();
+    let end = rest.find(".output")? + ".output".len();
+    Some(rest[..end].to_string())
+}
+
+/// Only the task's own output file under a `tasks` directory may be read.
+fn is_task_output_path(path: &str, task_id: &str) -> bool {
+    let path = std::path::Path::new(path);
+    path.is_absolute()
+        && path.file_name().and_then(|name| name.to_str()) == Some(&format!("{task_id}.output"))
+        && path.parent().and_then(|dir| dir.file_name()).and_then(|name| name.to_str()) == Some("tasks")
+}
+
+/// The end of a file, starting at a line boundary when the beginning was cut off.
+fn read_tail(path: &str) -> std::io::Result<(String, bool)> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path)?;
+    let len = file.metadata()?.len();
+    let start = len.saturating_sub(TASK_OUTPUT_TAIL);
+    file.seek(SeekFrom::Start(start))?;
+    let mut bytes = Vec::new();
+    file.take(TASK_OUTPUT_TAIL).read_to_end(&mut bytes)?;
+    if start > 0 {
+        if let Some(newline) = bytes.iter().position(|byte| *byte == b'\n') { bytes.drain(..=newline); }
+    }
+    Ok((String::from_utf8_lossy(&bytes).into_owned(), start > 0))
 }
 
 /// The merged entry for `task_id`, created as a running task on first sight.
@@ -5621,6 +5734,13 @@ fn handle_control_response(
             }
             return;
         }
+        Some("mcp_set_servers") => {
+            // A refused server comes back inside a successful answer, one reason per server name.
+            if let Some(message) = mcp_set_servers_error(&response) {
+                emit(app, session_id, json!({"type":"error","message":message,"request":kind}));
+            }
+            return;
+        }
         Some("context_usage") => {
             if response.is_object() {
                 proc.extras.lock().unwrap().context_usage = Some(response);
@@ -5658,10 +5778,26 @@ fn handle_control_response(
     if proc.extras.lock().unwrap().fast_mode {
         requests.push(("apply_flag_settings", protocol::apply_flag_settings(json!({"fastMode":true}))));
     }
+    // Claude in Chrome is attached per process, so every new process for a conversation that wants it
+    // attaches it again, however the process came to be started.
+    let chrome = crate::agent::session_settings::chrome(&app.db().conn.lock().unwrap(), session_id);
+    if chrome.unwrap_or(false) {
+        requests.push(("mcp_set_servers", protocol::mcp_set_servers(protocol::chrome_servers(&proc.bin, true))));
+    }
     for (kind, request) in requests {
         let id = proc.request_id(kind);
         let _ = proc.write(&protocol::control_request(&id, request));
     }
+}
+
+/// The reasons an `mcp_set_servers` answer gives for servers it did not take, or None when it took them all.
+fn mcp_set_servers_error(response: &Value) -> Option<String> {
+    let errors = response.get("errors").and_then(Value::as_object)?;
+    let reasons: Vec<String> = errors
+        .iter()
+        .map(|(name, reason)| format!("{name}: {}", reason.as_str().map_or_else(|| reason.to_string(), str::to_string)))
+        .collect();
+    (!reasons.is_empty()).then(|| format!("Claude did not attach the MCP server ({})", reasons.join("; ")))
 }
 
 /// Publish the whole `extras` object. See `ClaudeExtras`.
@@ -5725,6 +5861,36 @@ fn emit_state(app: &AppCtx, session_id: &str, state: AgentState) {
 mod tests {
     use super::*;
     use std::process::Command;
+
+    /// The output path comes from Claude's own wording and must name the task's file, nothing else.
+    #[test]
+    fn a_background_shell_output_path_is_read_from_its_result() {
+        let result = "Command running in background with ID: b1. Output is being written to: /tmp/claude-501/p/s/tasks/b1.output. You will be notified when it completes.";
+        let path = announced_output_path(result).unwrap();
+        assert_eq!(path, "/tmp/claude-501/p/s/tasks/b1.output");
+        assert!(is_task_output_path(&path, "b1"));
+        assert!(!is_task_output_path(&path, "b2"));
+        assert!(!is_task_output_path("/tmp/claude-501/p/s/other/b1.output", "b1"));
+        assert!(!is_task_output_path("tasks/b1.output", "b1"));
+        assert_eq!(announced_output_path("exit 0"), None);
+    }
+
+    /// A long output returns its end, starting on a whole line.
+    #[test]
+    fn a_task_output_tail_starts_at_a_line() {
+        let dir = std::env::temp_dir().join(format!("vlx-task-tail-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("b1.output");
+        std::fs::write(&path, "short\n").unwrap();
+        assert_eq!(read_tail(path.to_str().unwrap()).unwrap(), ("short\n".to_string(), false));
+        let long: String = (0..20_000).map(|i| format!("line {i}\n")).collect();
+        std::fs::write(&path, &long).unwrap();
+        let (text, truncated) = read_tail(path.to_str().unwrap()).unwrap();
+        assert!(truncated);
+        assert!(text.starts_with("line "));
+        assert!(text.ends_with("line 19999\n"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     /// A missing executable must come back as the stable code the conversation view recognizes; every
     /// other spawn failure keeps the diagnostic message with the OS detail.

@@ -374,6 +374,7 @@ const ru: typeof en = {
   "share.subtitle":
     "VelaTerm создаёт небольшая команда. Если вам нравится продукт, поделитесь им с другими. Для нас очень важно, чтобы больше людей узнали о VelaTerm и о нашей команде. Спасибо за поддержку! ❤️", // We're a small team behind VelaTerm. If you enjoy it, please share VelaTerm with others…
   "share.copyLink": "Копировать ссылку", // Copy link
+  "share.openLinkFailed": "Не удалось открыть эту ссылку. Щёлкните её правой кнопкой, чтобы скопировать адрес.", // Could not open this link…
   "share.copied": "Скопировано!", // Copied!
   "share.wechatMoments": "WeChat Moments",
   "share.weibo": "Weibo",
@@ -651,6 +652,7 @@ const ru: typeof en = {
   "settings.composerChip.serviceTier": "Скорость",
   "settings.composerChip.personality": "Тон",
   "settings.composerChip.mcp": "Серверы MCP",
+  "settings.composerChip.chrome": "Claude in Chrome",
   "settings.composerChip.tasks": "Фоновые задачи",
   "settings.composerChip.account": "Аккаунт",
   "settings.composerChip.codexCredits": "Сбросы лимитов Codex",
@@ -754,6 +756,19 @@ const ru: typeof en = {
     "Вкладки, разделения и активная сессия одинаковы на всех подключённых устройствах. Фокус клавиатуры на каждом остаётся на месте.", // Tabs, splits, and the active session stay the same on every connected device. Keyboard focus stays put on each one.
 
   // ── Remote connection panel ──
+  "connect.wslUpgrade": "В этом рабочем пространстве запущена другая версия сервера. Перезапуск сервера завершит все активные сессии в этом рабочем пространстве WSL.",
+  "connect.wslRestart": "Перезапустить сервер и подключиться",
+  "connect.wsl": "WSL",
+  "connect.wslTitle": "Подключение к WSL",
+  "connect.wslHint": "Открывает отдельное рабочее пространство Linux от имени пользователя по умолчанию в этой системе WSL. Агенты, файлы и история остаются в WSL.",
+  "connect.wslUnsupported": "Подключение к WSL доступно в приложении для Windows.",
+  "connect.wslEmpty": "Дистрибутивы WSL не найдены. Установите и настройте дистрибутив, затем обновите список.",
+  "connect.wslDistribution": "Дистрибутив Linux",
+  "connect.wslSelect": "Выберите дистрибутив",
+  "connect.wslMissing": "Этот дистрибутив больше недоступен. Выберите другой.",
+  "connect.wslSetup": "При подключении нужная версия сервера VelaTerm при необходимости загружается и запускается в WSL. Настройка SSH не требуется.",
+  "conn.wslReconnecting": "Повторное подключение к рабочему пространству WSL…",
+  "conn.wslDown": "Рабочее пространство WSL недоступно. Нажмите «Переподключиться сейчас», чтобы повторить попытку.",
   "connect.title": "Подключиться к удалённому серверу", // Connect to Remote Server
   "connect.pairingPlaceholder": "Вставьте ссылку сопряжения", // Paste pairing link
   "connect.confirmConnect": "Отпечаток верный, подключиться", // Fingerprint matches, connect
@@ -1644,6 +1659,24 @@ const ru: typeof en = {
   "statusbar.updateReady": "Restart to update", // TODO translate
   "statusbar.updateFailed": "Update failed", // TODO translate
   "statusbar.updateTooltip": "Click for details", // TODO translate
+  "statusbar.skillsAvailable": "Установить Vela Skills",
+  "skills.title": "Установить Vela Skills",
+  "skills.subtitle": "После установки Claude Code и Codex смогут использовать в диалоге следующие функции VelaTerm, например /vspawn в Claude Code или $vspawn в Codex.",
+  "skills.vspawn": "Создаёт дочернюю сессию для выполнения задачи.",
+  "skills.vspawnTree": "Создаёт дочернюю сессию с собственным рабочим деревом.",
+  "skills.vopen": "Открывает файл или веб-страницу в VelaTerm.",
+  "skills.vrefer": "Читает диалог другой сессии.",
+  "skills.vask": "Задаёт вопрос о другой сессии и возвращает краткий ответ.",
+  "skills.vsearch": "Ищет по диалогам всех сессий.",
+  "skills.vstat": "Показывает, какие сессии работают или ожидают ввода.",
+  "skills.vtell": "Отправляет сообщение другой сессии.",
+  "skills.vkb": "Выполняет запросы к CodeGraph и базе знаний проекта.",
+  "skills.settingsHint": "Их также можно установить позже в разделе «Настройки > Дополнительно».",
+  "skills.installFailed": (err) => `Не удалось установить: ${err}`,
+  "skills.dontRemind": "Больше не напоминать",
+  "skills.later": "Позже",
+  "skills.install": "Установить",
+  "skills.installing": "Установка…",
 
   // ── Вид беседы (сессия агента, прочитанная как разговор) ──
   "session.showConversation": "Вид беседы",
@@ -1865,6 +1898,11 @@ const ru: typeof en = {
   "chat.fastMode.label": "Быстро",
   "chat.fastMode.on": "Быстрый режим включён",
   "chat.fastMode.off": "Быстрый режим выключен",
+  "chat.chrome.label": "Chrome",
+  "chat.chrome.on": "Включено",
+  "chat.chrome.off": "Выключено",
+  "chat.chrome.tooltipOn": "Claude in Chrome включён",
+  "chat.chrome.tooltipOff": "Claude in Chrome выключен",
   "chat.auth.login": "Войти",
   "chat.auth.logout": "Выйти",
   "chat.auth.confirmLogout": "Подтвердить выход",
@@ -1954,6 +1992,10 @@ const ru: typeof en = {
   "chat.tasks.finished": "Время окончания",
   "chat.tasks.summary": "Сводка",
   "chat.tasks.outputFile": "Файл вывода",
+  "chat.tasks.command": "Команда",
+  "chat.tasks.output": "Вывод",
+  "chat.tasks.noOutput": "Вывода пока нет.",
+  "chat.tasks.outputTruncated": "Показана только последняя часть вывода.",
   "chat.tasks.phases": "Этапы",
   "chat.tasks.noProgress": "Для этой задачи нет данных о ходе работы отдельных агентов.",
   "chat.tasks.attempt": (n: number) => `Попытка ${n}`,

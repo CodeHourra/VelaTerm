@@ -1091,6 +1091,7 @@ pub async fn ssh_connect(
             r.local_port,
             &r.password,
             r.desktop_link,
+            RemoteWindowKind::Ssh,
         ) {
             crate::diagnostic_warn!("open ssh login window failed: {e}");
         }
@@ -1109,6 +1110,49 @@ pub async fn ssh_disconnect(host: String, session: String, kill_remote: bool) {
     .await;
 }
 
+/// WSL preparation performs process, filesystem, and download I/O entirely off the UI thread.
+#[tauri::command]
+pub async fn wsl_connect(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    distribution: String,
+    restart_existing: Option<bool>,
+    diagnostic_request_id: Option<String>,
+) -> Result<String, String> {
+    if window.label() != "main" { return Err("WSL connections can only be opened from the main window".into()); }
+    let app_bg = app.clone();
+    let connection = tauri::async_runtime::spawn_blocking(move || {
+        let _context = crate::diagnostics::Context::enter(diagnostic_request_id.as_deref());
+        let mut span = crate::diagnostics::Span::new("wsl_connect", serde_json::json!({"command":"wsl_connect"}));
+        let result = crate::wsl_remote::connect(&crate::host::AppCtx::Tauri(app_bg.clone()), &distribution, restart_existing.unwrap_or(false), &|stage, percent| {
+            let _ = app_bg.emit_to("main", "wsl://progress", serde_json::json!({"stage":stage,"percent":percent}));
+        });
+        span.finish(&result);
+        result
+    }).await.map_err(|e| format!("WSL connection task failed: {e}"))??;
+    let (port, password) = connection.address()?;
+    // WebView2 creation must run from this async command, leaving the main event loop free.
+    if let Err(error) = open_login_window(&app, &connection.distribution, &connection.session, port, &password, false, RemoteWindowKind::Wsl) {
+        let session = connection.session.clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || crate::wsl_remote::connection_failed(&session)).await;
+        return Err(error);
+    }
+    Ok(connection.session.clone())
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum RemoteWindowKind { Ssh, Wsl }
+
+impl RemoteWindowKind {
+    fn name(self) -> &'static str { match self { Self::Ssh => "SSH", Self::Wsl => "WSL" } }
+    fn disconnect(self, host: &str, session: &str, stop: bool) -> Result<(), String> {
+        match self {
+            Self::Ssh => { crate::ssh_remote::disconnect(host, session, stop); Ok(()) }
+            Self::Wsl => crate::wsl_remote::disconnect(session, stop),
+        }
+    }
+}
+
 /// Open a window on the local HTTP forwarding port and inject its random password for LoginGate.
 /// Unlike URL remote windows, SSH already encrypts transport, so no TLS-stripping tunnel or E2EE
 /// pairing fragment is needed.
@@ -1123,21 +1167,22 @@ fn open_login_window(
     local_port: u16,
     password: &str,
     desktop_link: bool,
+    kind: RemoteWindowKind,
 ) -> Result<(), String> {
     let parsed: url::Url = format!("http://127.0.0.1:{local_port}/")
         .parse()
         .map_err(|e| format!("failed to build local forward address: {e}"))?;
-    let label = format!("ssh-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+    let label = format!("{}-{}", kind.name().to_lowercase(), &uuid::Uuid::new_v4().to_string()[..8]);
     let addr_js = serde_json::to_string(host).unwrap_or_else(|_| "\"\"".into());
     let pw_js = serde_json::to_string(password).unwrap_or_else(|_| "\"\"".into());
     let session_js = serde_json::to_string(session).unwrap_or_else(|_| "\"\"".into());
-    // Force WebSocket mode, provide auto-login, and identify the SSH session so its banner filters
-    // tunnel events and emits vlx://ssh-reconnect for the correct tunnel.
+    let kind_js = serde_json::to_string(&kind.name().to_lowercase()).unwrap();
+    // Force WebSocket mode, provide auto-login, and identify the native connection for recovery events.
     let init_script = format!(
         r#"(function(){{
   window.__VLX_FORCE_BROWSER__=true;
   if(typeof window.OffscreenCanvas!=='undefined')window.OffscreenCanvas=undefined;
-  window.__VLX_REMOTE__={{address:{addr_js},session:{session_js}}};
+  window.__VLX_REMOTE__={{address:{addr_js},session:{session_js},transport:{kind_js}}};
   window.__VLX_AUTOLOGIN__={{password:{pw_js}}};
 }})();"#
     );
@@ -1145,8 +1190,29 @@ fn open_login_window(
     let title = if desktop_link {
         format!("VelaTerm · SSH mirror: {host}")
     } else {
-        format!("VelaTerm · SSH: {host}")
+        format!("VelaTerm · {}: {host}", kind.name())
     };
+    // Grant the same minimal runtime capability as open_remote_window, scoped to this loopback window.
+    use tauri::ipc::CapabilityBuilder;
+    app.add_capability(
+        CapabilityBuilder::new(format!("connection-caps-{label}"))
+            .window(label.clone())
+            .remote("http://127.0.0.1:*".to_string())
+            .permission("local-fonts:allow-catalog")
+            .permission("local-download:allow-start")
+            .permission("local-download:allow-cancel")
+            .permission("clipboard-manager:allow-write-text")
+            .permission("clipboard-manager:allow-write-image")
+            .permission("notification:default")
+            .permission("opener:allow-open-url")
+            .permission("opener:allow-default-urls")
+            .permission("core:event:allow-listen")
+            .permission("core:event:allow-unlisten")
+            .permission("core:event:allow-emit")
+            .permission("core:window:allow-set-focus"),
+    )
+    .map_err(|e| format!("Failed to grant connection window capability: {e}"))?;
+
     let win = with_download_handler(tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::External(parsed)))
         .title(title)
         .inner_size(1280.0, 820.0)
@@ -1156,25 +1222,32 @@ fn open_login_window(
         .initialization_script(&init_script)
         .disable_drag_drop_handler()
         .build()
-        .map_err(|e| format!("failed to create SSH remote window: {e}"))?;
+        .map_err(|e| format!("Failed to create {} window: {e}", kind.name()))?;
 
-    // On SSH-window close, ask whether to stop or preserve the detached remote service for run.json reuse.
+    // On connection-window close, ask whether to stop or preserve the detached service for reuse.
     // A window attached to the remote desktop app has nothing to stop: drop the tunnel and close.
     let host_owned = host.to_string();
     let session_owned = session.to_string();
     let app_for_close = app.clone();
     let label_for_close = label.clone();
+    let closing = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     win.on_window_event(move |event| {
+        if matches!(event, tauri::WindowEvent::Destroyed) && kind == RemoteWindowKind::Wsl {
+            let session = session_owned.clone();
+            std::thread::spawn(move || { let _ = crate::wsl_remote::disconnect(&session, false); });
+        }
         if let tauri::WindowEvent::CloseRequested { api, .. } = event {
             // Prevent closing until the user's choice has been handled.
             api.prevent_close();
+            if closing.swap(true, std::sync::atomic::Ordering::SeqCst) { return; }
             let host = host_owned.clone();
             let session = session_owned.clone();
             let app2 = app_for_close.clone();
             let label2 = label_for_close.clone();
+            let closing = closing.clone();
             if desktop_link {
                 std::thread::spawn(move || {
-                    crate::ssh_remote::disconnect(&host, &session, false);
+                    let _ = kind.disconnect(&host, &session, false);
                     if let Some(w) = app2.get_webview_window(&label2) {
                         let _ = w.destroy();
                     }
@@ -1191,7 +1264,7 @@ fn open_login_window(
             app_for_close
                 .dialog()
                 .message(
-                    "\"Stop server\" shuts down vela-server on the remote (ending all its sessions).\n\
+                    "\"Stop server\" shuts down the server and ends all active sessions in this workspace.\n\
                      \"Keep running\" leaves it running so the next connection reuses it — sessions are preserved.\n\
                      \"Cancel\" keeps this window open.",
                 )
@@ -1207,11 +1280,15 @@ fn open_login_window(
                     let close_service = match result {
                         MessageDialogResult::Custom(s) if s == BTN_STOP => true,
                         MessageDialogResult::Custom(s) if s == BTN_KEEP => false,
-                        _ => return,
+                        _ => { closing.store(false, std::sync::atomic::Ordering::SeqCst); return; },
                     };
-                    // Perform blocking SSH disconnect/shutdown in the background, then destroy the window.
+                    // Perform blocking disconnect/shutdown in the background, then destroy the window.
                     std::thread::spawn(move || {
-                        crate::ssh_remote::disconnect(&host, &session, close_service);
+                        if let Err(error) = kind.disconnect(&host, &session, close_service) {
+                            closing.store(false, std::sync::atomic::Ordering::SeqCst);
+                            app2.dialog().message(error).title("Cannot disconnect").kind(MessageDialogKind::Error).show(|_| {});
+                            return;
+                        }
                         if let Some(w) = app2.get_webview_window(&label2) {
                             let _ = w.destroy();
                         }
@@ -1220,22 +1297,5 @@ fn open_login_window(
         }
     });
 
-    // Grant the same minimal runtime capability as open_remote_window, scoped to this loopback window.
-    use tauri::ipc::CapabilityBuilder;
-    app.add_capability(
-        CapabilityBuilder::new(format!("ssh-caps-{label}"))
-            .window(label.clone())
-            .remote("http://127.0.0.1:*".to_string())
-            .permission("local-fonts:allow-catalog")
-            .permission("local-download:allow-start")
-            .permission("local-download:allow-cancel")
-            .permission("clipboard-manager:allow-write-text")
-            .permission("clipboard-manager:allow-write-image")
-            .permission("notification:default")
-            .permission("core:event:allow-listen")
-            .permission("core:event:allow-unlisten")
-            .permission("core:event:allow-emit"),
-    )
-    .map_err(|e| format!("failed to grant SSH window capability: {e}"))?;
     Ok(())
 }

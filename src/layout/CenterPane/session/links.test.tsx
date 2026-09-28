@@ -50,11 +50,13 @@ it("uses the platform opener for web links, including clicks on formatted labels
   expect(openDocTab).not.toHaveBeenCalled();
 });
 
-it("reports an opener failure in the message", async () => {
-  vi.mocked(platform.opener.openExternal).mockRejectedValue(new Error("Open failed"));
+it("reports an opener failure with a readable message instead of the raw error", async () => {
+  vi.mocked(platform.opener.openExternal).mockRejectedValue(new Error("Command plugin:opener|open_url not allowed by ACL"));
   render(<Markdown text="[官网](https://example.com)" />);
   fireEvent.click(screen.getByRole("link"));
-  expect((await screen.findByRole("alert")).textContent).toContain("Open failed");
+  const alert = (await screen.findByRole("alert")).textContent;
+  expect(alert).toContain("Could not open this link");
+  expect(alert).not.toContain("ACL");
 });
 
 it("routes a middle click on a file to the application viewer", () => {

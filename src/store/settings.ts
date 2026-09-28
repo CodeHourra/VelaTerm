@@ -182,6 +182,9 @@ export interface PersistedSettings {
   chatEffortByModel: Record<string, string>;
   /** Whether a new Claude conversation opens with fast mode on, per agent protocol. */
   chatFastModeByKind: Record<string, boolean>;
+  /** Whether a Claude conversation that never chose otherwise has Claude in Chrome attached. The backend
+   * reads this key from `vlx-settings` whenever it starts a Claude process for such a conversation. */
+  chatChromeDefault: boolean;
   /** Last agent, model and reasoning effort chosen for each planning/execution role, so a repeated
    * workflow opens on the setup that was used last time rather than on the parent session's. */
   planExecutePrefs: { plan: PlanExecuteRolePrefs; exec: PlanExecuteRolePrefs };
@@ -199,6 +202,9 @@ export interface PersistedSettings {
   /** Composer chips shown inline under the message input, in display order. Chips missing from the list
    * are off: they stay reachable in the settings and move into the More row whenever it appears. */
   composerInlineChips: ComposerChipId[];
+  /** The revision of the default inline set that the saved list has been brought up to. A list saved
+   * before a revision gains that revision's chips once; removing them again in the settings sticks. */
+  composerInlineChipsRevision: number;
 }
 
 /** Every composer chip the toolbar can show, in the order the toolbar used before the list became
@@ -212,13 +218,16 @@ export const COMPOSER_CHIP_IDS = [
   "serviceTier",
   "personality",
   "mcp",
+  "chrome",
   "tasks",
   "account",
   "codexCredits",
 ] as const;
 export type ComposerChipId = (typeof COMPOSER_CHIP_IDS)[number];
-/** The chips that sat beside the message before the list became configurable. */
-export const DEFAULT_COMPOSER_INLINE_CHIPS: ComposerChipId[] = ["model", "effort", "collaboration", "permission"];
+/** The chips that sat beside the message before the list became configurable, plus Tasks. */
+export const DEFAULT_COMPOSER_INLINE_CHIPS: ComposerChipId[] = ["model", "effort", "collaboration", "permission", "tasks"];
+/** Revision 1 made Tasks an inline chip by default. */
+export const COMPOSER_INLINE_CHIPS_REVISION = 1;
 
 const SETTINGS_DEFAULTS: PersistedSettings = {
   accent: "auto",
@@ -254,12 +263,14 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
   chatModelByKind: {},
   chatEffortByModel: {},
   chatFastModeByKind: {},
+  chatChromeDefault: false,
   planExecutePrefs: { plan: {}, exec: {} },
   memoryPrefs: {},
   referSummary: { enabled: false, agent: "claude", model: "", effort: "" },
   showSystemResources: true,
   infoCollapsed: {},
   composerInlineChips: DEFAULT_COMPOSER_INLINE_CHIPS,
+  composerInlineChipsRevision: COMPOSER_INLINE_CHIPS_REVISION,
 };
 
 /** Keeps only known chip ids, once each and in the saved order. A missing or malformed value falls back
@@ -336,6 +347,13 @@ export function loadSettings(): PersistedSettings {
     merged.memoryPrefs = sanitizeLaunchChoice(parsed.memoryPrefs);
     merged.referSummary = sanitizeReferSummary(parsed.referSummary);
     merged.composerInlineChips = sanitizeComposerInlineChips(parsed.composerInlineChips);
+    // A list saved before revision 1 gains Tasks at the end. The bumped revision is written with the next
+    // save, so switching Tasks off again afterwards is kept.
+    const inlineRevision = typeof parsed.composerInlineChipsRevision === "number" ? parsed.composerInlineChipsRevision : 0;
+    if (inlineRevision < 1 && !merged.composerInlineChips.includes("tasks")) {
+      merged.composerInlineChips = [...merged.composerInlineChips, "tasks"];
+    }
+    merged.composerInlineChipsRevision = COMPOSER_INLINE_CHIPS_REVISION;
     // Migrate boolean gpuRender to termRenderer only when the new key is absent, preserving WebGL for
     // existing users. Future saves write only the new structure and naturally discard the old field.
     if (parsed.termRenderer === undefined && typeof parsed.gpuRender === "boolean") {

@@ -1004,6 +1004,23 @@ pub fn chat_set_fast_mode(ctx: &AppCtx, session_id: &str, enabled: bool) -> Resu
     ctx.chat().set_fast_mode(ctx, session_id, enabled)
 }
 
+/// Attach or detach Claude in Chrome for a Claude conversation: saved with the conversation so every later
+/// process gets it too, and applied to the running process at once.
+pub fn chat_set_chrome(ctx: &AppCtx, session_id: &str, enabled: bool) -> Result<(), String> {
+    if ctx.chat().snapshot(session_id).running {
+        ctx.chat().set_chrome(session_id, enabled)?;
+    }
+    {
+        let conn = ctx.db().conn.lock().unwrap();
+        session_settings::set_chrome(&conn, session_id, enabled)?;
+    }
+    ctx.emit(
+        &format!("chat://event/{session_id}"),
+        serde_json::json!({"type":"chromeChanged","enabled":enabled}),
+    );
+    Ok(())
+}
+
 /// Choose the Codex service tier for subsequent turns; None returns to the thread's own.
 pub fn chat_set_service_tier(
     ctx: &AppCtx,
@@ -1120,6 +1137,15 @@ pub fn chat_mcp_reconnect(
 /// Stop one of Claude's background tasks.
 pub fn chat_stop_task(ctx: &AppCtx, session_id: &str, task_id: &str) -> Result<(), String> {
     ctx.chat().stop_task(session_id, task_id)
+}
+
+/// The command and recent output of one background shell task, for its task tab.
+pub fn chat_task_output(
+    ctx: &AppCtx,
+    session_id: &str,
+    task_id: &str,
+) -> Result<crate::agent::chat::engine::TaskOutput, String> {
+    ctx.chat().task_output(session_id, task_id)
 }
 
 /// Move every foreground task of the running turn to the background.
@@ -1586,6 +1612,9 @@ pub fn chat_snapshot_window(
         let (tier, personality) = repo::codex_chat_settings(&conn, session_id)?;
         snapshot.service_tier = tier;
         snapshot.personality = personality;
+        if repo::get_session_kind(&conn, session_id)? == Some(SessionKind::Claude) {
+            snapshot.chrome = Some(session_settings::chrome(&conn, session_id)?);
+        }
     }
     // No process has run this conversation since the backend started, so the engine holds no timeline for
     // it. The agent's own recording still does. Reading it here means a reopened session shows what was

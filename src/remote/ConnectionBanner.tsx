@@ -17,6 +17,7 @@ import {
   isRemoteWindow,
   listenNative,
   remoteSshSession,
+  remoteConnectionKind,
 } from "../ipc/transport";
 import { wsClient } from "../ipc/wsClient";
 
@@ -53,7 +54,7 @@ export function ConnectionBanner() {
         // Native rather than the regular transport listen: this window's WebSocket goes to the remote
         // server, which knows nothing about the local tunnel carrying it.
         const un = await listenNative<{ session: string; state: string }>(
-          "ssh://tunnel-state",
+          remoteConnectionKind === "wsl" ? "wsl://connection-state" : "ssh://tunnel-state",
           (payload) => {
             if (payload.session !== remoteSshSession) return;
             const s = payload.state;
@@ -88,7 +89,7 @@ export function ConnectionBanner() {
     if (isRemoteWindow && remoteSshSession) {
       void (async () => {
         try {
-          await emitNative("vlx://ssh-reconnect", { session: remoteSshSession });
+          await emitNative(remoteConnectionKind === "wsl" ? "vlx://wsl-reconnect" : "vlx://ssh-reconnect", { session: remoteSshSession });
         } catch {
           /* Continue with WebSocket reconnection if emitting fails. */
         }
@@ -99,9 +100,9 @@ export function ConnectionBanner() {
 
   const message =
     tunnel === "down"
-      ? t("conn.sshDown")
+      ? t(remoteConnectionKind === "wsl" ? "conn.wslDown" : "conn.sshDown")
       : tunnel === "reconnecting"
-        ? t("conn.sshReconnecting")
+        ? t(remoteConnectionKind === "wsl" ? "conn.wslReconnecting" : "conn.sshReconnecting")
         : t("conn.reconnecting");
 
   return (

@@ -1,3 +1,23 @@
+## v0.2.5 — 2026-09-28
+
+- 🐧 L’application de bureau Windows permet d’ouvrir des espaces de travail distincts dans WSL1 et WSL2, avec les agents, les fichiers et l’historique des sessions de la distribution Linux choisie.
+
+- 🔄 Les espaces de travail WSL permettent de se reconnecter après l’arrêt du serveur et, à la fermeture d’une fenêtre, de choisir entre arrêter le serveur et laisser les sessions actives.
+
+- 🌐 Les sessions Claude disposent d’une option « Chrome » dans la zone de saisie, qui active ou désactive Claude in Chrome sans redémarrer la conversation. Chaque session conserve son propre choix, et les sessions sans choix suivent la valeur par défaut.
+
+- 📟 L’onglet d’une tâche shell en arrière-plan affiche la commande exécutée et sa sortie la plus récente, actualisée pendant l’exécution de la tâche.
+
+- 🧩 Tant que les Vela Skills ne sont pas installées, la barre d’état propose de les installer. La fenêtre décrit chaque compétence, les installe directement et permet de ne plus afficher ce rappel.
+
+- 🪪 Les sessions enfants créées avec `vspawn` reçoivent l’identifiant de leur session parente dans `VLX_PARENT_SESSION_ID`, ce qui permet à un agent de la joindre avec `vrefer` et `vtell`. La nouvelle commande `vself` affiche la session courante et les sessions situées au-dessus.
+
+- 🖥️ L’AppImage Linux n’ouvre plus de fenêtre vide sur les distributions récentes comme Fedora 44.
+
+- 🎨 Changements mineurs : « Tâches en arrière-plan » s’affiche par défaut sous la zone de saisie et reste dans le menu « Plus » si vous l’y replacez ; lorsqu’un lien ne peut pas être ouvert, un message indique qu’un clic droit permet d’en copier l’adresse.
+
+---
+
 ## v0.2.4 — 2026-09-26
 
 - 📋 Une copie depuis la conversation reprend le texte tel qu'il apparaît à l'écran : pas d'accents graves autour du code en ligne, pas d'astérisques autour de la mise en valeur, les liens réduits à leur libellé, les blocs de code sans délimiteurs, les cellules de tableau séparées par des tabulations et les listes conservant les puces visibles. La mise en forme enrichie reste placée dans le presse-papiers en parallèle, et le menu contextuel propose désormais « Copier en Markdown » pour obtenir le source Markdown de la sélection.

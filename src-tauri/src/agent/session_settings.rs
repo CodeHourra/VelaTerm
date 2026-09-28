@@ -66,6 +66,8 @@ pub fn save(
 pub fn copy(conn: &Connection, source: &str, target: &str) -> Result<(), String> {
     conn.execute("INSERT INTO session_model_settings(session_id, model, effort, native_state) SELECT ?2, model, effort, native_state FROM session_model_settings WHERE session_id = ?1",
         params![source, target]).map_err(|e| e.to_string())?;
+    conn.execute("INSERT INTO chat_claude_settings(session_id, chrome) SELECT ?2, chrome FROM chat_claude_settings WHERE session_id = ?1",
+        params![source, target]).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -145,6 +147,33 @@ pub fn keeps_automatic_effort(ctx: &AppCtx, id: &str) -> bool {
         .ok()
         .flatten()
         .is_some_and(|(selection, _)| selection.effort.is_none())
+}
+
+/// Whether Claude in Chrome is attached to this Claude conversation: the conversation's own choice, or the
+/// `chatChromeDefault` preference when it never made one.
+pub fn chrome(conn: &Connection, id: &str) -> Result<bool, String> {
+    let stored: Option<bool> = conn
+        .query_row("SELECT chrome FROM chat_claude_settings WHERE session_id = ?1", [id], |row| row.get(0))
+        .optional()
+        .map_err(|e| e.to_string())?
+        .flatten();
+    if let Some(enabled) = stored {
+        return Ok(enabled);
+    }
+    Ok(repo::get_app_settings(conn)?
+        .get("vlx-settings")
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .and_then(|settings| settings["chatChromeDefault"].as_bool())
+        .unwrap_or(false))
+}
+
+pub fn set_chrome(conn: &Connection, id: &str, enabled: bool) -> Result<(), String> {
+    if repo::get_session_kind(conn, id)? != Some(SessionKind::Claude) {
+        return Err("Claude in Chrome is available only for Claude conversations".into());
+    }
+    conn.execute("INSERT INTO chat_claude_settings(session_id, chrome) VALUES (?1, ?2) ON CONFLICT(session_id) DO UPDATE SET chrome = excluded.chrome",
+        params![id, enabled]).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 fn plain_command_output(text: &str) -> String {
@@ -491,6 +520,22 @@ pub fn terminal_args(
 mod tests {
     use super::super::inject::ShellKind;
     use super::*;
+
+    #[test]
+    fn chrome_follows_the_default_until_the_conversation_chooses() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(crate::db::schema::SCHEMA).unwrap();
+        conn.execute("INSERT INTO projects(id,name,root_path,created_at) VALUES ('p','p','/tmp',0)", []).unwrap();
+        conn.execute("INSERT INTO sessions(id,project_id,name,kind,created_at) VALUES ('c','p','c','claude',0)", []).unwrap();
+        conn.execute("INSERT INTO sessions(id,project_id,name,kind,created_at) VALUES ('x','p','x','codex',0)", []).unwrap();
+        assert!(!chrome(&conn, "c").unwrap());
+        repo::set_app_settings(&conn, &std::collections::HashMap::from([("vlx-settings".into(),
+            json!({"chatChromeDefault":true}).to_string())])).unwrap();
+        assert!(chrome(&conn, "c").unwrap());
+        set_chrome(&conn, "c", false).unwrap();
+        assert!(!chrome(&conn, "c").unwrap(), "an explicit choice outranks the default");
+        assert!(set_chrome(&conn, "x", true).is_err(), "only Claude conversations take the switch");
+    }
 
     fn pair(model: &str, effort: &str) -> Selection {
         Selection {

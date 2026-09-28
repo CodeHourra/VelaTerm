@@ -1,3 +1,23 @@
+## v0.2.5 — 2026-09-28
+
+- 🐧 La aplicación de escritorio para Windows permite abrir espacios de trabajo independientes en WSL1 y WSL2 con los agentes, archivos e historial de sesiones de la distribución de Linux seleccionada.
+
+- 🔄 Los espacios de trabajo de WSL permiten volver a conectarse cuando el servidor se detiene, y al cerrar una ventana puede detener el servidor o mantener las sesiones en ejecución.
+
+- 🌐 Las sesiones de Claude incluyen la opción «Chrome» en el área de entrada, que activa o desactiva Claude in Chrome sin reiniciar la conversación. Cada sesión guarda su propia elección y las sesiones sin elección usan el valor predeterminado.
+
+- 📟 La pestaña de una tarea de shell en segundo plano muestra el comando que ejecuta y su salida más reciente, que se actualiza mientras la tarea está en ejecución.
+
+- 🧩 Si las Vela Skills no están instaladas, la barra de estado ofrece instalarlas. El cuadro de diálogo describe cada una, permite instalarlas directamente y puede configurarse para no volver a recordarlo.
+
+- 🪪 Las sesiones hijas creadas con `vspawn` reciben el ID de su sesión padre en `VLX_PARENT_SESSION_ID`, de modo que un agente puede comunicarse con ella mediante `vrefer` y `vtell`. El nuevo comando `vself` muestra la sesión actual y las sesiones superiores.
+
+- 🖥️ El AppImage de Linux ya no abre una ventana en blanco en distribuciones recientes como Fedora 44.
+
+- 🎨 Cambios menores: «Tareas en segundo plano» aparece de forma predeterminada debajo del área de entrada y permanece en el menú «Más» si se vuelve a mover allí; cuando un enlace no se puede abrir, un mensaje indica que puede copiar su dirección con el botón derecho.
+
+---
+
 ## v0.2.4 — 2026-09-26
 
 - 📋 Al copiar desde la conversación se obtiene el texto tal como aparece en pantalla: sin comillas invertidas alrededor del código en línea, sin asteriscos en el énfasis, los enlaces reducidos a su texto, los bloques de código sin delimitadores, las celdas de tabla separadas por tabuladores y las listas con las viñetas que se ven. El formato enriquecido se sigue colocando también en el portapapeles, y el menú contextual incorpora «Copiar como Markdown» para obtener el código Markdown de la selección.

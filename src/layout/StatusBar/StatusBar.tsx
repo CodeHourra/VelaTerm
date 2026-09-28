@@ -20,6 +20,8 @@ import {
   requestEffectiveNotifyPermission,
 } from "../../notify";
 import { openUpdateModal, useUpdateState } from "../../ipc/updater";
+import { checkVelaSkills, openVelaSkillsModal, useVelaSkillsState } from "../../ipc/velaSkills";
+import { isShareSurface } from "../../ipc/shareBase";
 import { webServerStatus, type WebServerStatus } from "../../ipc/webServer";
 import { env } from "../../platform";
 import { useTermStore } from "../../store/termStore";
@@ -200,6 +202,7 @@ export function StatusBar() {
           <Icons.globe size={11} />:{web.port}
         </span>
       )}
+      <VelaSkillsSeg />
       <UpdateSeg />
     </div>
   );
@@ -256,6 +259,33 @@ function UpdateSeg() {
     >
       <Icon size={11} />
       {label}
+    </span>
+  );
+}
+
+/**
+ * Vela Skills prompt. A startup check only shows this section when the skills are missing; clicking it
+ * opens VelaSkillsModal to explain them. Installing or choosing "Don't remind me again" removes it.
+ * Share surfaces never show it because guests must not change the host's agent setup.
+ */
+function VelaSkillsSeg() {
+  const t = useT();
+  const { installed, dismissed } = useVelaSkillsState();
+  // Check once at mount; a dismissed prompt needs no check.
+  useEffect(() => {
+    if (!isShareSurface && !dismissed) void checkVelaSkills();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  if (isShareSurface || dismissed || installed !== false) return null;
+  return (
+    <span
+      className="seg btn"
+      style={{ color: "var(--accent)" }}
+      title={t("statusbar.updateTooltip")}
+      onClick={openVelaSkillsModal}
+    >
+      <Icons.sparkle size={11} />
+      {t("statusbar.skillsAvailable")}
     </span>
   );
 }

@@ -38,6 +38,7 @@ import {
   chatSetModel,
   chatSetEffort,
   chatSetFastMode,
+  chatSetChrome,
   chatSetPersonality,
   chatSetServiceTier,
   chatCompact,
@@ -344,6 +345,8 @@ export function ChatPane({
   // the chips read before a catalogue says the selected model offers anything else.
   const [serviceTier, setServiceTier] = useState("");
   const [personality, setPersonality] = useState("");
+  /** Claude: whether Claude in Chrome is attached to this conversation. The backend owns the value. */
+  const [chrome, setChrome] = useState(false);
   // Callers waiting for the agent to open its native session, which the `session` event announces.
   // `/compact` and `/review` need the thread before they can be asked, unlike a message, which waits
   // in the backend queue on its own.
@@ -544,6 +547,9 @@ export function ChatPane({
           if ("serviceTier" in event) setServiceTier(event.serviceTier ?? "");
           if ("personality" in event) setPersonality(event.personality ?? "");
           break;
+        case "chromeChanged":
+          setChrome(event.enabled);
+          break;
         case "collaborationModeChanged":
           if (isCollaborationMode(event.mode)) setCollaborationMode(event.mode);
           break;
@@ -683,6 +689,7 @@ export function ChatPane({
           setServiceTier(snapshot.serviceTier ?? "");
           setPersonality(snapshot.personality ?? "");
         }
+        if (session.kind === "claude") setChrome(snapshot.chrome ?? false);
         setAutoContinue(snapshot.autoContinue ?? null);
         // Only while a process is actually behind the conversation: a snapshot taken after one exited
         // still names it, and reporting that as running would light the session up in every sidebar.
@@ -1552,6 +1559,23 @@ export function ChatPane({
     session.kind === "claude" &&
     (model ? catalogue.some((m) => m.id === model && m.supportsFastMode) : catalogue.some((m) => m.supportsFastMode));
 
+  /** Attach or detach Claude in Chrome for this conversation; ticking the box also makes it the default. */
+  const chromeDefault = useTermStore((s) => s.chatChromeDefault);
+  const pickChrome = (value: "on" | "off", keep: boolean) => {
+    const enabled = value === "on";
+    void (async () => {
+      if (enabled !== chrome) {
+        await chatSetChrome(session.id, enabled);
+        setChrome(enabled);
+      }
+      if (keep) useTermStore.getState().setChatChromeDefault(enabled);
+    })().catch((err) => setError(String(err)));
+  };
+  const chromeOptions: ChipOption<"on" | "off">[] = [
+    { value: "on", label: t("chat.chrome.on") },
+    { value: "off", label: t("chat.chrome.off") },
+  ];
+
   /** Save this conversation's choice before reflecting it in the controls. */
   const pickServiceTier = (value: string) => {
     void chatSetServiceTier(session.id, value || undefined)
@@ -1931,6 +1955,21 @@ export function ChatPane({
   // the process cannot be found by someone who just switched it on.
   if (session.kind === "claude" || session.kind === "codex") composerChips.push({ id: "mcp", node: (
     <McpChip sessionId={session.id} codex={session.kind === "codex"} disabled={!engineRunning} />
+  ) });
+  if (session.kind === "claude") composerChips.push({ id: "chrome", node: (
+    <ControlChip
+      glyph={<Icons.globe size={14} style={chrome ? { color: "var(--accent)" } : undefined} />}
+      label={t("chat.chrome.label")}
+      title={chrome ? t("chat.chrome.tooltipOn") : t("chat.chrome.tooltipOff")}
+      value={chrome ? "on" : "off"}
+      options={chromeOptions}
+      defaultValue={chromeDefault ? "on" : "off"}
+      defaultLabel={t("chat.savedModelDefault")}
+      onPick={pickChrome}
+      keepLabel={t("chat.keepChoice")}
+      onKeepCurrent={(value) => useTermStore.getState().setChatChromeDefault(value === "on")}
+      menuWidth={240}
+    />
   ) });
   if (session.kind === "claude") composerChips.push({ id: "tasks", node: (
     <TasksChip

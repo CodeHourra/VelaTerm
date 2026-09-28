@@ -1,9 +1,29 @@
 # Changelog
 
-> Created: 2026-07-09 16:10 · Updated: 2026-09-26
+> Created: 2026-07-09 16:10 · Updated: 2026-09-28
 
 All notable changes to VelaTerm are documented here, newest first.
 v0.1.91 is the first public release; earlier version numbers were internal iterations and are not covered.
+
+---
+
+## v0.2.5 — 2026-09-28
+
+- 🐧 The Windows desktop app can open separate workspaces in WSL1 and WSL2, using the agents, files, and session history inside the selected Linux distribution.
+
+- 🔄 WSL workspaces can reconnect after the server stops, and closing a workspace lets you stop its server or keep its sessions running.
+
+- 🌐 Claude sessions have a Chrome option in the composer that turns Claude in Chrome on or off without restarting the conversation. Each session keeps its own choice, and sessions without one use the default.
+
+- 📟 The tab of a background shell task shows the command it runs and its latest output, refreshed while the task is running.
+
+- 🧩 When the Vela Skills are not installed, the status bar offers to install them. The dialog describes each skill, installs them directly, and can be told not to remind you again.
+
+- 🪪 Child sessions created with `vspawn` receive their parent's ID in `VLX_PARENT_SESSION_ID`, so an agent can reach the parent with `vrefer` and `vtell`. The new `vself` command shows the current session and the sessions above it.
+
+- 🖥️ The Linux AppImage no longer opens a blank window on newer distributions such as Fedora 44.
+
+- 🎨 Smaller changes: "Background tasks" appears below the input box by default and stays in the "More" menu if you move it back there, and a link that cannot be opened shows a message suggesting you right-click it to copy the address.
 
 ---
 

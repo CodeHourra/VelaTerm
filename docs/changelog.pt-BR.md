@@ -1,3 +1,23 @@
+## v0.2.5 — 2026-09-28
+
+- 🐧 O aplicativo para Windows permite abrir espaços de trabalho separados no WSL1 e no WSL2, usando os agentes, arquivos e histórico de sessões da distribuição Linux selecionada.
+
+- 🔄 Os espaços de trabalho do WSL permitem reconectar após a parada do servidor e, ao fechar uma janela, escolher entre parar o servidor ou manter as sessões em execução.
+
+- 🌐 As sessões do Claude ganham a opção “Chrome” na área de entrada, que ativa ou desativa o Claude in Chrome sem reiniciar a conversa. Cada sessão guarda a própria escolha, e as sessões sem escolha seguem o padrão.
+
+- 📟 A aba de uma tarefa de shell em segundo plano mostra o comando executado e a saída mais recente, atualizada enquanto a tarefa está em execução.
+
+- 🧩 Quando as Vela Skills não estão instaladas, a barra de status oferece a instalação. A caixa de diálogo descreve cada uma, instala todas diretamente e pode ser configurada para não lembrar novamente.
+
+- 🪪 As sessões filhas criadas com `vspawn` recebem o ID da sessão pai em `VLX_PARENT_SESSION_ID`, o que permite que um agente se comunique com ela por meio de `vrefer` e `vtell`. O novo comando `vself` mostra a sessão atual e as sessões acima dela.
+
+- 🖥️ O AppImage para Linux não abre mais uma janela em branco em distribuições recentes como o Fedora 44.
+
+- 🎨 Mudanças menores: “Tarefas em segundo plano” aparece por padrão abaixo da área de entrada e continua no menu “Mais” se você a mover de volta para lá; quando um link não pode ser aberto, uma mensagem informa que é possível copiar o endereço com o botão direito.
+
+---
+
 ## v0.2.4 — 2026-09-26
 
 - 📋 Copiar da conversa entrega o texto como ele aparece na tela: sem crases em torno do código em linha, sem asteriscos no destaque, links apenas com seu texto, blocos de código sem cercas, células de tabela separadas por tabulações e listas com os marcadores que você vê. O formato com estilos continua indo junto para a área de transferência, e o menu de contexto ganha "Copiar como Markdown" para obter o código Markdown da seleção.
