@@ -701,6 +701,7 @@ const ru: typeof en = {
   "settings.scSplitDown": "Разделить вниз", // Split down
   "settings.scSearch": "Поиск в терминале", // Find in terminal
   "settings.scGlobalSearch": "Поиск по всем сеансам", // Search all sessions
+  "settings.scSelectAllTerminal": "Выделить всё в терминале", // Select all in terminal
   "settings.scSaveDoc": "Сохранить документ", // Save document
   "settings.scRecording": "Нажмите клавиши…", // Press keys…
   "settings.scHint":

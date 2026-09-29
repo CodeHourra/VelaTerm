@@ -693,6 +693,7 @@ const ptBR: typeof en = {
   "settings.scSplitDown": "Dividir abaixo", // Split down
   "settings.scSearch": "Buscar no terminal", // Find in terminal
   "settings.scGlobalSearch": "Buscar em todas as sessões", // Search all sessions
+  "settings.scSelectAllTerminal": "Selecionar tudo no terminal", // Select all in terminal
   "settings.scSaveDoc": "Salvar documento", // Save document
   "settings.scRecording": "Pressione as teclas…", // Press keys…
   "settings.scHint":

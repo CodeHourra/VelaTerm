@@ -693,6 +693,7 @@ const fr: typeof en = {
   "settings.scSplitDown": "Diviser en bas", // Split down
   "settings.scSearch": "Rechercher dans le terminal", // Find in terminal
   "settings.scGlobalSearch": "Rechercher dans toutes les sessions", // Search all sessions
+  "settings.scSelectAllTerminal": "Tout sélectionner dans le terminal", // Select all in terminal
   "settings.scSaveDoc": "Enregistrer le document", // Save document
   "settings.scRecording": "Appuyez sur les touches…", // Press keys…
   "settings.scHint":

@@ -686,6 +686,7 @@ const vi: typeof en = {
   "settings.scSplitDown": "Chia xuống dưới",
   "settings.scSearch": "Tìm trong terminal",
   "settings.scGlobalSearch": "Tìm mọi phiên",
+  "settings.scSelectAllTerminal": "Chọn tất cả trong terminal", // Select all in terminal
   "settings.scSaveDoc": "Lưu tài liệu",
   "settings.scRecording": "Nhấn phím…",
   "settings.scHint":
