@@ -92,6 +92,26 @@ pub fn verify_signature(data: &[u8], sig_b64: &str) -> Result<(), String> {
         .map_err(|e| format!("signature verification failed: {e}"))
 }
 
+/// `velaterm --verify-update <file> <signature>`: verify a downloaded desktop update with the embedded
+/// release key. The signature is the base64 `.sig` text from the updater manifest. Returns the process
+/// exit status (0 verified, 1 rejected, 2 misuse) and prints only the failure reason.
+pub fn run_verify_update(args: &[String]) -> i32 {
+    let (Some(path), Some(sig)) = (args.get(2), args.get(3)) else {
+        eprintln!("usage: velaterm --verify-update <file> <signature>");
+        return 2;
+    };
+    let result = std::fs::read(path)
+        .map_err(|e| format!("failed to read {path}: {e}"))
+        .and_then(|data| verify_signature(&data, sig));
+    match result {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("{e}");
+            1
+        }
+    }
+}
+
 /// Compute lowercase hexadecimal SHA-256 for bytes.
 pub fn sha256_hex(data: &[u8]) -> String {
     use sha2::{Digest, Sha256};
@@ -111,9 +131,27 @@ pub fn fetch_manifest(version: &str) -> Result<ServerManifest, String> {
     serde_json::from_str(&body).map_err(|e| format!("failed to parse server manifest: {e}"))
 }
 
+/// Newest published vela-server version: `server/latest.json`, falling back to the desktop updater's root
+/// `latest.json` for releases published before the server pointer existed.
+pub fn fetch_latest_version() -> Result<String, String> {
+    let read = |path: &str| -> Option<String> {
+        let body = ureq::get(&format!("{DL_BASE}/{path}"))
+            .timeout(Duration::from_secs(30))
+            .call()
+            .ok()?
+            .into_string()
+            .ok()?;
+        let value: serde_json::Value = serde_json::from_str(&body).ok()?;
+        value["version"].as_str().map(str::to_string)
+    };
+    read("server/latest.json")
+        .or_else(|| read("latest.json"))
+        .ok_or_else(|| "cannot determine the latest vela-server version".to_string())
+}
+
 /// Download URL bytes and report received/Content-Length percentages from 0 through 100. Without
 /// Content-Length, emit no percentage so the caller retains indeterminate stage text.
-fn download(url: &str, on_pct: &dyn Fn(u8)) -> Result<Vec<u8>, String> {
+pub fn download(url: &str, on_pct: &dyn Fn(u8)) -> Result<Vec<u8>, String> {
     let resp = ureq::get(url)
         .timeout(Duration::from_secs(180))
         .call()

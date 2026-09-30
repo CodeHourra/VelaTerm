@@ -15,6 +15,7 @@ import {
   useTermStore,
 } from "../../store/termStore";
 import {
+  collectionsFirst,
   effectiveStatus,
   isVirtualProject,
   type Group,
@@ -281,7 +282,8 @@ export function ProjectTree(h: TreeHandlers) {
     isPrimary,
   } = h;
 
-  const projects = useTermStore((s) => s.projects);
+  const storeProjects = useTermStore((s) => s.projects);
+  const projects = useMemo(() => collectionsFirst(storeProjects), [storeProjects]);
   const treeLoaded = useTermStore((s) => s.treeLoaded);
   // Delay the loading row so a fast load stays blank instead of flashing a spinner for one frame.
   const [showLoadingHint, setShowLoadingHint] = useState(false);

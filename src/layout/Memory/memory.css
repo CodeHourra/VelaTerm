@@ -89,6 +89,7 @@
 .memory-status.running { color: var(--accent); }
 .memory-job progress { width: 100%; accent-color: var(--accent); margin-bottom: 14px; }
 .memory-job-entries { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 15px; }
+.memory-job-entries .btn { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .memory-pagination { display: flex; justify-content: space-between; padding: 12px 16px; gap: 8px; border-top: 1px solid var(--border); font-size: 12px; }
 @media (max-width: 780px) {
  .memory-shell { width: 98vw; height: 96vh; }

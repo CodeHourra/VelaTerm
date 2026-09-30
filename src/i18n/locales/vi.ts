@@ -325,6 +325,7 @@ const vi: typeof en = {
   "status.working": "Đang làm việc",
   "status.asking": "Cần xác nhận",
   "status.waiting": "Đã xem",
+  "status.background": "Đang chạy tác vụ nền",
   "status.unavailable": "Không có trạng thái",
   "indicator.unread": "Chưa đọc · đang chờ xem xét",
 
@@ -548,6 +549,7 @@ const vi: typeof en = {
   "git.deleteFile": "Xóa",
   "git.viewAll": "Xem tất cả",
   "git.detached": "(detached)",
+  "git.repository": "Kho git",
   "git.aheadBehind": "Số commit trước và sau nhánh upstream",
   "git.commitPlaceholder": "Nội dung commit",
   "git.amend": "Sửa commit gần nhất",
@@ -801,6 +803,7 @@ const vi: typeof en = {
   "tree.newChildSession": "Phiên con mới",
   "tree.openSelected": "Mở các phiên đã chọn",
   "tree.archiveSelected": "Lưu trữ các phiên đã chọn",
+  "tree.archiveSelectedItems": (n: number) => `Lưu trữ ${n} mục đã chọn`,
   "tree.moveSelected": "Di chuyển mục đã chọn đến…",
   "tree.deleteSelected": (n: number) => `Xóa ${n} mục đã chọn`,
   "tree.removeProject": "Gỡ dự án",
@@ -835,6 +838,8 @@ const vi: typeof en = {
   "tree.closeScratch": "Đóng bản nháp",
   "tree.importProject": "Nhập dự án",
   "tree.createProject": "Tạo dự án",
+  "tree.openInSplit": "Mở trong khung chia",
+  "tree.dropFoldersHint": "Thả thư mục vào đây để thêm làm dự án",
   // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
   "tree.newCollection": "Bộ sưu tập mới",
   "tree.deleteCollection": "Xóa bộ sưu tập",
@@ -913,6 +918,7 @@ const vi: typeof en = {
   "mark.urgent": "Khẩn cấp", // Urgent
   "mark.important": "Quan trọng", // Important
   "mark.bug": "Lỗi", // Bug
+  "tree.filterBackground": "Đang chạy nền",
   "mark.done": "Hoàn thành", // Done
   "mark.wip": "Đang làm", // In progress
   "mark.pinned": "Ghim", // Pinned
@@ -1118,6 +1124,7 @@ const vi: typeof en = {
   // Application-exit confirmation and dormant restored sessions.
   "quit.title": "Thoát VelaTerm?", // Quit VelaTerm?
   "quit.body": "Mọi phiên terminal và tác nhân đang chạy sẽ bị dừng.", // Any running terminal and agent sessions will be stopped.
+  "quit.remoteWindows": "Các cửa sổ kết nối từ xa đang mở cũng sẽ bị đóng.", // Open remote windows will also be closed.
   "quit.saveWorkspace": "Lưu không gian làm việc", // Save workspace
   "quit.saveWorkspaceHint":
     "Lần sau mở lại đúng các thẻ và khung chia này. Terminal được khôi phục nhưng không tự khởi động lại.", // Reopen the same tabs and splits next time. Terminals are restored but not restarted.
@@ -1237,6 +1244,14 @@ const vi: typeof en = {
   "doc.exportPdf": "Xuất PDF",
   "doc.pdfFilter": "Tệp PDF",
   "doc.diagramError": "Lỗi sơ đồ",
+  "doc.frontMatter": "Siêu dữ liệu YAML",
+  "doc.focusMode": "Chế độ tập trung",
+  "doc.typewriterMode": "Chế độ máy đánh chữ",
+  "doc.statsLabel": "Thống kê tài liệu",
+  "doc.statWords": (_n: number, count: string) => `${count} từ`,
+  "doc.statCharacters": (_n: number, count: string) => `${count} ký tự`,
+  "doc.statLines": (_n: number, count: string) => `${count} dòng`,
+  "doc.statMinutes": (_n: number, count: string) => `${count} phút đọc`,
 
   // Bảng thông tin và tệp
   "panel.noSession": "Chưa chọn phiên",

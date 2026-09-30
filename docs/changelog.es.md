@@ -1,3 +1,35 @@
+## v0.2.6 — 2026-09-30
+
+- 🐧 La versión para Linux ahora se basa en Electron. El AppImage conserva su nombre de archivo y tus datos, ya no requiere WebKitGTK ni libfuse2, y las instalaciones existentes se actualizan a ella mediante el actualizador integrado.
+
+- 🛰️ Los equipos a los que no se puede acceder por SSH, como WSL en otro ordenador o un contenedor Docker, pueden vincularse a tu cuenta tras instalar `vela-server` con un solo comando y aparecen entonces en la lista Remote para conversar con la IA. Cuando el propietario concede acceso completo en el host, la aplicación de escritorio también puede usar su terminal, sus archivos y su panel Git.
+
+- 📂 Las carpetas que se arrastran a la barra lateral desde Finder, el Explorador de archivos o un gestor de archivos de Linux se añaden como proyectos.
+
+- 📝 El editor de Markdown incorpora los atajos de Typora para encabezados, listas, bloques de código y tablas, el cierre automático de paréntesis y comillas, la apertura de enlaces con Cmd/Ctrl+clic, los modos de concentración y máquina de escribir, y el recuento de palabras y caracteres en la barra de estado. El front matter YAML aparece en un cuadro independiente sobre el documento y no cambia a menos que lo edites.
+
+- 🗃️ Cuando una carpeta no es un repositorio Git pero contiene varios, el panel Git ofrece un selector de repositorio y trabaja con el repositorio elegido.
+
+- ⏳ En la vista de conversación, una sesión cuya respuesta ha terminado mientras siguen ejecutándose tareas en segundo plano muestra el nuevo estado «Tareas activas», con un punto cian, en lugar de quedarse en «En curso». Las sesiones que ejecutan tareas largas con `vrun` muestran el mismo estado.
+
+- 🍴 En la vista de conversación, una sesión bifurcada inicia su propia conversación la primera vez que se ejecuta, y la sesión de origen ya no recibe sus mensajes.
+
+- 🛡️ En la vista de conversación, la etiqueta de modo de una sesión de Claude sigue el modo de permisos que Claude usa realmente, por ejemplo después de entrar en el modo Plan, y las tarjetas de permisos muestran el motivo que Claude indica para su solicitud.
+
+- 📏 El cuadro de entrada de la vista de conversación se puede redimensionar arrastrando su borde superior, y un doble clic en el borde restablece la altura predeterminada. La altura se aplica a todos los paneles y se conserva tras reiniciar.
+
+- 🗂️ Cuando se seleccionan varias carpetas en la barra lateral, el menú contextual permite archivarlas junto con sus sesiones.
+
+- 📚 Las colecciones aparecen siempre por encima de los proyectos en la barra lateral.
+
+- 🧠 Cuando un registro de procesamiento de la base de conocimientos ha creado una sola entrada, su título abre esa entrada directamente, y los botones de entrada muestran los títulos en lugar de números.
+
+- 📊 El panel Info muestra el límite de contexto correcto para los modelos de Claude más recientes, como Opus 5.5, en lugar de 200k.
+
+- 🎨 Cambios menores: las tres opciones de apertura en panel dividido del menú contextual de las sesiones se agrupan en el submenú «Abrir en panel dividido», la confirmación de salida avisa de que las ventanas remotas abiertas también se cerrarán y las listas desplegables de los formularios se cierran en cuanto se elige una opción.
+
+---
+
 ## v0.2.5 — 2026-09-28
 
 - 🐧 La aplicación de escritorio para Windows permite abrir espacios de trabajo independientes en WSL1 y WSL2 con los agentes, archivos e historial de sesiones de la distribución de Linux seleccionada.

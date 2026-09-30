@@ -16,6 +16,17 @@ vi.mock("@tauri-apps/plugin-updater", () => ({ check }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ message }));
 vi.mock("@tauri-apps/plugin-process", () => ({ relaunch }));
 vi.mock("./transport", () => ({ isTauri: true, invoke }));
+// The desktop updater capability, reduced to the plugin calls above.
+vi.mock("../platform", () => ({
+  platform: {
+    updater: {
+      supported: true,
+      check: (headers?: Record<string, string>) => check(headers ? { headers } : undefined),
+      relaunch,
+      message,
+    },
+  },
+}));
 
 import {
   checkForUpdates,

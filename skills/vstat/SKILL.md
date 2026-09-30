@@ -12,8 +12,8 @@ allowed-tools: Bash(vstat:*)
 
 # vstat
 
-`vstat` prints which vlx-term sessions are working, asking, or waiting. The answer comes from the same
-authoritative status the sidebar displays, not from reading screens.
+`vstat` prints which vlx-term sessions are working, asking, waiting, or running background work. The
+answer comes from the same authoritative status the sidebar displays, not from reading screens.
 
 For planning/execution task progress, use `vflow status <workflow-id>`: it includes task states, independent rounds and delivery receipts. `vstat` reports activity only; idle does not establish acceptance.
 
@@ -45,6 +45,8 @@ the session has not reported yet, which usually means it is still starting.
 - `asking`: it is blocked on a permission prompt and needs a person.
 - `waiting`: it has stopped and is waiting for input. For a child session that was given one task, this
   means the task is finished, or the agent gave up; read its conversation with `vrefer` to tell which.
+- `background`: its turn has ended, but work that turn started (a background task or a `vrun` command) is
+  still running. The agent usually resumes on its own when that work finishes, so the task is not done.
 
 ## Notes
 

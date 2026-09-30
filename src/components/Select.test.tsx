@@ -46,6 +46,20 @@ describe("Select", () => {
     expect(trigger.textContent).toContain("high");
   });
 
+  it("stays closed after a choice when wrapped in a label", () => {
+    function Labeled() {
+      const [v, setV] = useState("low");
+      return <label>Model<Select width="100%" value={v} onChange={setV} options={OPTIONS} ariaLabel="model" /></label>;
+    }
+    render(<Labeled />);
+    const trigger = screen.getByRole("combobox");
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("option", { name: "high" }));
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(trigger.textContent).toContain("high");
+  });
+
   it("arrows move the highlight and only Enter commits", () => {
     const onChange = vi.fn();
     render(<Select value="low" onChange={onChange} options={OPTIONS} ariaLabel="effort" />);

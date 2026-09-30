@@ -7,6 +7,7 @@ import { ContextMenu, type MenuItem } from "../../components/ContextMenu";
 import { FormModal } from "../../components/FormModal";
 import Icons from "../../components/Icons";
 import { useT } from "../../i18n";
+import { env, platform } from "../../platform";
 import { knowledgeUrl } from "../Knowledge/navigation";
 import { securityUrl } from "../Security/navigation";
 import { securityText } from "../Security/text";
@@ -42,16 +43,18 @@ import {
   type SidebarViewRect,
 } from "./sidebarTreeLayout";
 
-/** Status filters: working (pulsing green), attention (pulsing yellow), and replied (magenta). */
+/** Status filters: working (pulsing green), attention (pulsing yellow), replied (magenta), and replied with
+ * background work still running (cyan). */
 const STATUS_FILTERS: {
   st: AgentState;
   color: string;
   pulse: boolean;
-  labelKey: "tree.filterWorking" | "tree.filterAsking" | "tree.filterWaiting";
+  labelKey: "tree.filterWorking" | "tree.filterAsking" | "tree.filterWaiting" | "tree.filterBackground";
 }[] = [
   { st: "working", color: "var(--status-working)", pulse: true, labelKey: "tree.filterWorking" },
   { st: "asking", color: "var(--status-asking)", pulse: true, labelKey: "tree.filterAsking" },
   { st: "waiting", color: "var(--status-waiting)", pulse: false, labelKey: "tree.filterWaiting" },
+  { st: "background", color: "var(--status-background)", pulse: false, labelKey: "tree.filterBackground" },
 ];
 
 /** Isolated filter button/dropdown subscribing to high-frequency runtime/notification changes. Agent updates
@@ -391,6 +394,7 @@ export function LeftSidebar() {
   const shortcutOverrides = useTermStore((s) => s.shortcutOverrides);
   const width = useTermStore((s) => s.leftWidth);
   const importProject = useTermStore((s) => s.importProject);
+  const openProjectPath = useTermStore((s) => s.openProjectPath);
   const addVirtualProject = useTermStore((s) => s.addVirtualProject);
   const setCloneModalOpen = useTermStore((s) => s.setCloneModalOpen);
   const renameNode = useTermStore((s) => s.renameNode);
@@ -594,18 +598,22 @@ export function LeftSidebar() {
           selection.filter((s) => s.kind === "session").map((s) => s.id),
         );
         if (moveItem) items.push(moveItem);
+      }
+      // Archive covers sessions and groups; projects cannot be archived and are left out.
+      const archivable = selection.filter((s) => s.kind === "session" || s.kind === "group");
+      if (archivable.length) {
         items.push({
-          label: t("tree.archiveSelected"),
+          label: archivable.some((s) => s.kind === "group")
+            ? t("tree.archiveSelectedItems", archivable.length)
+            : t("tree.archiveSelected"),
           onClick: () => {
             // archiveMany processes sequentially and reloads once. Concurrent per-session archiveSession
             // calls caused loadTree races and React #185. archiveMany also clears selection.
-            void archiveMany(
-              selection.filter((s) => s.kind === "session").map((s) => s.id),
-            );
+            void archiveMany(archivable);
           },
         });
-        items.push({ label: "", separator: true });
       }
+      if (items.length) items.push({ label: "", separator: true });
       items.push({
         label: t("tree.deleteSelected", selection.length),
         danger: true,
@@ -742,8 +750,46 @@ export function LeftSidebar() {
     });
   };
 
+  // Folders dragged in from the OS file manager are added as projects. Only desktop shells can resolve a drop
+  // to local paths, and sidebar rows must not treat an external drag as a reorder, so these handlers run in
+  // the capture phase and stop the event before it reaches the rows.
+  const [folderDropOver, setFolderDropOver] = useState(false);
+  const acceptsFolderDrop = env.isTauri || env.isElectron;
+  const isExternalFileDrag = (e: React.DragEvent) =>
+    acceptsFolderDrop && e.dataTransfer.types.includes("Files");
+  const folderDropProps = {
+    onDragOverCapture: (e: React.DragEvent) => {
+      if (!isExternalFileDrag(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = "copy";
+      setFolderDropOver(true);
+    },
+    onDragLeaveCapture: (e: React.DragEvent) => {
+      // Leaving a child element also fires dragleave; clear only once the pointer is outside the sidebar.
+      const rect = e.currentTarget.getBoundingClientRect();
+      if (e.clientX <= rect.left || e.clientX >= rect.right || e.clientY <= rect.top || e.clientY >= rect.bottom) {
+        setFolderDropOver(false);
+      }
+    },
+    onDropCapture: (e: React.DragEvent) => {
+      if (!isExternalFileDrag(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setFolderDropOver(false);
+      void platform.dialog
+        .droppedFolders(e.dataTransfer)
+        .then(async (paths) => {
+          for (const path of paths) await openProjectPath(path);
+        })
+        // Failures are already reported by the request error banner.
+        .catch(() => {});
+    },
+  };
+
   return (
-    <aside className="col col-left" style={{ width, borderRight: "none" }}>
+    <aside className="col col-left" style={{ width, borderRight: "none" }} {...folderDropProps}>
+      {folderDropOver && <div className="sidebar-folder-drop">{t("tree.dropFoldersHint")}</div>}
       <div className="col-head">
         <span className="title">Workspace</span>
         <span className="sp" />

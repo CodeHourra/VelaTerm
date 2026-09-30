@@ -335,6 +335,7 @@ const ru: typeof en = {
   "status.working": "В работе", // Working
   "status.asking": "Нужно подтверждение", // Needs confirmation
   "status.waiting": "Просмотрено", // Viewed
+  "status.background": "Выполняются фоновые задачи", // Background tasks running
   "status.unavailable": "Статус недоступен",
   "indicator.unread": "Непрочитано · к просмотру", // Unread · awaiting review
 
@@ -558,6 +559,7 @@ const ru: typeof en = {
   "git.deleteFile": "Удалить",
   "git.viewAll": "Показать всё",
   "git.detached": "(отсоединённый HEAD)",
+  "git.repository": "Репозиторий",
   "git.aheadBehind": "Коммиты впереди и позади вышестоящей ветки",
   "git.commitPlaceholder": "Сообщение коммита",
   "git.amend": "Изменить последний коммит",
@@ -821,6 +823,8 @@ const ru: typeof en = {
   "tree.newChildSession": "Новая дочерняя сессия", // New Child Session
   "tree.openSelected": "Открыть выбранные сессии", // Open Selected Sessions
   "tree.archiveSelected": "Архивировать выбранные сессии", // Archive Selected Sessions
+  "tree.archiveSelectedItems": (n) =>
+    `Архивировать ${n} ${plural(n, "выбранный элемент", "выбранных элемента", "выбранных элементов")}`, // Archive {n} Selected Items
   "tree.moveSelected": "Переместить выбранное…", // Move Selected to…
   "tree.deleteSelected": (n) =>
     `Удалить ${n} ${plural(n, "выбранный элемент", "выбранных элемента", "выбранных элементов")}`, // Delete {n} Selected Items
@@ -856,7 +860,9 @@ const ru: typeof en = {
   "tree.persistDoc": "Сохранить на диск…", // Save to Disk…
   "tree.closeScratch": "Закрыть черновик", // Close Scratch
   "tree.importProject": "Импортировать проект", // Import Project
+  "tree.openInSplit": "Открыть в панели", // Open in Split
   "tree.createProject": "Создать проект",
+  "tree.dropFoldersHint": "Перетащите папки сюда, чтобы добавить их как проекты",
   // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
   "tree.newCollection": "Новая коллекция",
   "tree.deleteCollection": "Удалить коллекцию",
@@ -935,6 +941,7 @@ const ru: typeof en = {
   "mark.urgent": "Срочно", // Urgent
   "mark.important": "Важно", // Important
   "mark.bug": "Ошибка", // Bug
+  "tree.filterBackground": "Фоновые задачи", // Tasks running
   "mark.done": "Готово", // Done
   "mark.wip": "В работе", // In progress
   "mark.pinned": "Закреплено", // Pinned
@@ -1158,6 +1165,7 @@ const ru: typeof en = {
   // Application-exit confirmation and dormant restored sessions.
   "quit.title": "Закрыть VelaTerm?", // Quit VelaTerm?
   "quit.body": "Все запущенные сеансы терминала и агента будут остановлены.", // Any running terminal and agent sessions will be stopped.
+  "quit.remoteWindows": "Открытые окна удалённого подключения также будут закрыты.", // Open remote windows will also be closed.
   "quit.saveWorkspace": "Сохранить рабочее пространство", // Save workspace
   "quit.saveWorkspaceHint":
     "В следующий раз откроются те же вкладки и разделения. Терминалы восстанавливаются, но не запускаются заново.", // Reopen the same tabs and splits next time. Terminals are restored but not restarted.
@@ -1275,6 +1283,14 @@ const ru: typeof en = {
   "doc.imgActual": "1:1", // 1:1
   "doc.exportPdf": "Экспорт в PDF", // Export PDF
   "doc.diagramError": "Ошибка диаграммы", // Diagram error
+  "doc.frontMatter": "Метаданные YAML", // Front matter
+  "doc.focusMode": "Режим фокусировки", // Focus Mode
+  "doc.typewriterMode": "Режим печатной машинки", // Typewriter Mode
+  "doc.statsLabel": "Статистика документа", // Document statistics
+  "doc.statWords": (n: number, count: string) => `${count} ${plural(n, "слово", "слова", "слов")}`, // N words
+  "doc.statCharacters": (n: number, count: string) => `${count} ${plural(n, "символ", "символа", "символов")}`, // N characters
+  "doc.statLines": (n: number, count: string) => `${count} ${plural(n, "строка", "строки", "строк")}`, // N lines
+  "doc.statMinutes": (_n: number, count: string) => `${count} мин чтения`, // N min read
 
   // ── Right information panel ──
   "panel.noSession": "Сессия не выбрана", // No session selected

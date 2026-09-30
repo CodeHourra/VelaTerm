@@ -1,9 +1,9 @@
 import { safeError } from "./diagnosticSafety";
-//! Automatic updates for the desktop Tauri client.
+//! Automatic updates for the desktop app.
 //!
-//! `check()` fetches the updater endpoint configured under `plugins.updater` in tauri.conf.json and
-//! compares it with the installed version, returning an Update for a newer release or null otherwise.
-//! The client performs this check directly; no separate server API is required.
+//! `platform.updater.check()` asks the update service for a newer release: the Tauri updater plugin with the
+//! endpoint under `plugins.updater` in tauri.conf.json, or the Electron shell's AppImage updater, which uses
+//! the same service and signing key. It returns a handle for a newer release or null otherwise.
 //!
 //! UX: discovering a release never interrupts the user with a modal. The silent startup check adds an
 //! indicator to the status bar; clicking it opens UpdateModal for release notes and installation.
@@ -17,20 +17,19 @@ import { safeError } from "./diagnosticSafety";
 //! State lives in the small store below. Only this module writes it, while the status bar and modal
 //! read it, keeping updater concerns out of termStore.
 //!
-//! Browser and remote clients lack the updater plugin and do not self-update, so `!isTauri` skips it.
+//! Browser and remote clients, and Electron installations other than an AppImage, do not self-update:
+//! `platform.updater.supported` is false and every entry point here returns early.
 //!
 //! Every check carries the `X-Install-Id` header, an anonymous identifier the backend generates once per
 //! installation. It lets the update server count installations instead of IP addresses, which merge users
 //! behind one NAT and split a single user whose address changes. Checks repeat on a schedule as well as at
 //! startup, because a terminal often stays open for days and would otherwise never report again.
 
-import { message } from "@tauri-apps/plugin-dialog";
-import { relaunch } from "@tauri-apps/plugin-process";
-import { check, type Update } from "@tauri-apps/plugin-updater";
 import { useSyncExternalStore } from "react";
 
 import { LOCALES, t, type Locale } from "../i18n";
-import { invoke, isTauri } from "./transport";
+import { platform, type UpdateHandle } from "../platform";
+import { invoke } from "./transport";
 import { compareVersions, localizeReleaseNotes, sliceReleaseNotes } from "./updateNotes";
 
 /** Version recorded by Skip This Version. It affects only silent startup checks; explicit menu checks
@@ -65,8 +64,8 @@ export function clearSkippedVersion() {
 
 /** Immutable information for one update prompt, fixed once a new release is found. */
 export interface UpdatePrompt {
-  /** Plugin Update handle used for download and installation; close it when dismissing the prompt. */
-  update: Update;
+  /** Update handle used for download and installation; close it when dismissing the prompt. */
+  update: UpdateHandle;
   version: string;
   currentVersion: string;
   /** Changelog Markdown sliced after the installed version; empty when no notes apply. */
@@ -183,7 +182,7 @@ export async function startInstall(): Promise<void> {
 
 /** Restart the application after installation on macOS or Linux. */
 export async function restartApp(): Promise<void> {
-  await relaunch();
+  await platform.updater.relaunch();
 }
 
 /** Reentrancy guard for repeated menu clicks or overlapping silent and explicit checks. */
@@ -229,9 +228,9 @@ async function installId(): Promise<string | null> {
 }
 
 /** Call the updater endpoint with the installation header attached. */
-async function checkWithId(): Promise<Update | null> {
+async function checkWithId(): Promise<UpdateHandle | null> {
   const id = await installId();
-  return check(id ? { headers: { "X-Install-Id": id } } : undefined);
+  return platform.updater.check(id ? { "X-Install-Id": id } : undefined);
 }
 
 /**
@@ -249,7 +248,7 @@ async function checkWithId(): Promise<Update | null> {
 export async function checkForUpdates({
   manual = false,
 }: { manual?: boolean } = {}): Promise<boolean> {
-  if (!isTauri) return false;
+  if (!platform.updater.supported) return false;
   // A check is already in flight. Reopening the dialog needs no network, and letting the menu item do
   // nothing at all because a background check happens to overlap is worse than showing what is known.
   if (checking) {
@@ -269,7 +268,7 @@ export async function checkForUpdates({
         await pending.update.close().catch(() => {});
       }
       if (manual) {
-        await message(t("updater.upToDate"), { title: t("updater.title") });
+        await platform.updater.message(t("updater.upToDate"), { title: t("updater.title") });
       }
       return true;
     }
@@ -311,7 +310,7 @@ export async function checkForUpdates({
   } catch (err) {
     console.error("[updater] update check failed", safeError(err));
     if (manual) {
-      await message(t("updater.failed", String(err)), {
+      await platform.updater.message(t("updater.failed", String(err)), {
         title: t("updater.title"),
         kind: "error",
       });
@@ -341,7 +340,7 @@ const TICK_MS = 5 * 60 * 1000;
  * instead of waiting out a timer that stood still. Returns a function that stops the schedule.
  */
 export function startUpdateSchedule(): () => void {
-  if (!isTauri) return () => {};
+  if (!platform.updater.supported) return () => {};
   let lastCheckAt = Date.now();
   const run = () => {
     // Advance the clock only when a check actually ran. A scheduled run that collided with a manual

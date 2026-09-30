@@ -2,6 +2,7 @@
 
 import {
   invoke,
+  isElectronShell,
   isTauri,
   ptyTeardown,
   readRecordingStream,
@@ -105,7 +106,7 @@ export function ptyTeardownSession(sessionId: string): Promise<void> {
   const at = mirrorDetaches.get(sessionId);
   if (at !== undefined) {
     mirrorDetaches.delete(sessionId);
-    if (isTauri && Date.now() - at < MIRROR_DETACH_WINDOW_MS) return Promise.resolve();
+    if ((isTauri || isElectronShell) && Date.now() - at < MIRROR_DETACH_WINDOW_MS) return Promise.resolve();
   }
   return ptyTeardown(sessionId);
 }
@@ -649,6 +650,19 @@ export interface FileDiff {
 /** Lists files changed from HEAD for View Changes. */
 export function gitChangedFiles(cwd: string): Promise<ChangedFile[]> {
   return invoke<ChangedFile[]>("git_changed_files", { cwd });
+}
+
+/** A repository found below a folder that is not itself a repository. */
+export interface NestedRepo {
+  /** Absolute path of the repository's top-level directory. */
+  path: string;
+  /** Path relative to the scanned folder, for display. */
+  name: string;
+}
+
+/** Lists repositories up to three levels below `path`, for the Git panel's repository picker. */
+export function gitDiscoverRepos(path: string): Promise<NestedRepo[]> {
+  return invoke<NestedRepo[]>("git_discover_repos", { path });
 }
 
 /** Gets HEAD/worktree text for line-by-line View Changes diff. */

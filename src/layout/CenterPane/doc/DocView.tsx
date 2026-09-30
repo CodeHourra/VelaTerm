@@ -7,7 +7,7 @@ import { safeError } from "../../../ipc/diagnosticSafety";
 //! never invokes a serializer, preserving the source exactly. Reloads and mode changes rebuild via a new key.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { t as tt, useT } from "../../../i18n";
+import { getLocale, t as tt, useT } from "../../../i18n";
 import { readTextFile, statFile, writeTextFile } from "../../../ipc/info";
 import { isTauri } from "../../../ipc/transport";
 import { env, platform } from "../../../platform";
@@ -24,6 +24,9 @@ import type { DocSearchControl } from "./docSearch";
 import { ImageDocView } from "./ImageDocView";
 import { SourceEditor, type SourceHandle } from "./SourceEditor";
 import { MarkdownEditor, type MarkdownHandle } from "./MarkdownEditor";
+import { countDocument, type DocStats } from "./docStats";
+import { splitFrontMatter } from "./frontMatter";
+import { toggleWritingMode, useWritingModes } from "./writingModes";
 import "./docTheme.css";
 
 /** External-change polling interval. Only the active tab stats mtime, a microsecond-scale operation. */
@@ -39,6 +42,9 @@ const SIDE_MAX_W = 480;
 
 /** Debounce heading extraction while typing. */
 const OUTLINE_DEBOUNCE_MS = 600;
+
+/** Debounce status-bar statistics while typing; counting serializes the visual document. */
+const STATS_DEBOUNCE_MS = 500;
 
 /** Routes images to ImageViewer and markdown/code to the TextDocView editing path. */
 export function DocView({ tab, hidden }: { tab: DocTab; hidden: boolean }) {
@@ -87,6 +93,10 @@ function TextDocView({ tab, hidden }: { tab: DocTab; hidden: boolean }) {
   );
   /** Document heading outline, maintained only when the markdown outline page is visible. */
   const [outline, setOutline] = useState<OutlineHeading[]>([]);
+  /** Status-bar statistics for Markdown documents. */
+  const [stats, setStats] = useState<DocStats | null>(null);
+  const statsTimerRef = useRef<number | null>(null);
+  const writingModes = useWritingModes();
   /** Shared search bar for both modes, opened with Cmd+F. */
   const [searchOpen, setSearchOpen] = useState(false);
   /** True file size when a file over 10 MB is truncated; non-null means read-only and unsavable. */
@@ -155,9 +165,18 @@ function TextDocView({ tab, hidden }: { tab: DocTab; hidden: boolean }) {
   useEffect(
     () => () => {
       if (outlineTimerRef.current != null) clearTimeout(outlineTimerRef.current);
+      if (statsTimerRef.current != null) clearTimeout(statsTimerRef.current);
     },
     [],
   );
+
+  const refreshStats = useCallback(() => {
+    const md = pullText();
+    setStats(md == null ? null : countDocument(md));
+  }, [pullText]);
+  useEffect(() => {
+    if (tab.kind === "markdown") refreshStats();
+  }, [tab.kind, text, editorEpoch, refreshStats]);
 
   /** Outline navigation: source mode scrolls by line; preview scrolls to the Nth heading element. Both
    *  derive from the same markdown and skip fenced-code headings, so their indices align naturally. */
@@ -355,6 +374,8 @@ function TextDocView({ tab, hidden }: { tab: DocTab; hidden: boolean }) {
     if (mode === tab.mode) return;
     // Mode switching rebuilds the editor, invalidating its search state; close the search bar until Cmd+F reopens it.
     setSearchOpen(false);
+    // Record the reading position so the next view opens at the same place.
+    markdownRef.current?.prepareModeChange(mode);
     // Keep Markdown editor instances and their undo history across view changes.
     setDocTabMode(tab.id, mode);
   };
@@ -401,7 +422,8 @@ function TextDocView({ tab, hidden }: { tab: DocTab; hidden: boolean }) {
     try {
       // Keep react-pdf and font payloads off the document-open path by loading them only during export.
       const { buildDocPdfBlob } = await import("./docPdf");
-      pdfBlob = await buildDocPdfBlob(content, theme);
+      // YAML front matter is metadata, not document content.
+      pdfBlob = await buildDocPdfBlob(splitFrontMatter(content).body, theme);
     } catch (e) {
       console.error("[exportPdf] failed to generate the PDF:", safeError(e));
       return;
@@ -455,7 +477,11 @@ function TextDocView({ tab, hidden }: { tab: DocTab; hidden: boolean }) {
       if (outlineTimerRef.current != null) clearTimeout(outlineTimerRef.current);
       outlineTimerRef.current = window.setTimeout(refreshOutline, OUTLINE_DEBOUNCE_MS);
     }
-  }, [tab.id, setDocTabDirty, refreshOutline]);
+    if (tab.kind === "markdown") {
+      if (statsTimerRef.current != null) clearTimeout(statsTimerRef.current);
+      statsTimerRef.current = window.setTimeout(refreshStats, STATS_DEBOUNCE_MS);
+    }
+  }, [tab.id, tab.kind, setDocTabDirty, refreshOutline, refreshStats]);
 
   // Code files keep the existing clipboard menu. Markdown editors keep their native editing menus.
   const editableEl = () => rootRef.current?.querySelector<HTMLElement>(".cm-content") ?? null;
@@ -528,6 +554,12 @@ function TextDocView({ tab, hidden }: { tab: DocTab; hidden: boolean }) {
         switchMode(tab.mode === "source" ? "visual" : "source");
       }}
       onKeyDown={(e) => {
+        // F8 focus mode and F9 typewriter mode, Typora's defaults.
+        if (useMarkdownEditor && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && (e.key === "F8" || e.key === "F9")) {
+          e.preventDefault();
+          toggleWritingMode(e.key === "F8" ? "focus" : "typewriter");
+          return;
+        }
         // Cmd+F opens the shared search bar and stops propagation so global terminal search does not open.
         if ((e.metaKey || e.ctrlKey) && (e.key === "f" || e.key === "F" || e.code === "KeyF")) {
           e.preventDefault();
@@ -705,6 +737,7 @@ function TextDocView({ tab, hidden }: { tab: DocTab; hidden: boolean }) {
                 defaultValue={text}
                 docPath={tab.path}
                 mode={tab.mode}
+                modes={writingModes}
                 onEdited={onEdited}
                 onReady={() => setEditorReadyEpoch(n => n + 1)}
                 onImageError={showImagePasteError}
@@ -744,6 +777,28 @@ function TextDocView({ tab, hidden }: { tab: DocTab; hidden: boolean }) {
           />
         )}
       </div>
+
+      {useMarkdownEditor && !loading && !error && text != null && (
+        <div className="docview-status">
+          <button
+            className={writingModes.focus ? "on" : ""}
+            aria-pressed={writingModes.focus}
+            title={`${t("doc.focusMode")} (F8)`}
+            onClick={() => toggleWritingMode("focus")}
+          >
+            {t("doc.focusMode")}
+          </button>
+          <button
+            className={writingModes.typewriter ? "on" : ""}
+            aria-pressed={writingModes.typewriter}
+            title={`${t("doc.typewriterMode")} (F9)`}
+            onClick={() => toggleWritingMode("typewriter")}
+          >
+            {t("doc.typewriterMode")}
+          </button>
+          {stats && <StatusStats stats={stats} />}
+        </div>
+      )}
 
       {editMenu && (
         <ContextMenu
@@ -793,6 +848,23 @@ function TextDocView({ tab, hidden }: { tab: DocTab; hidden: boolean }) {
           ]}
         />
       )}
+    </div>
+  );
+}
+
+/** Word, character, line, and reading-time counts for the status bar. */
+function StatusStats({ stats }: { stats: DocStats }) {
+  const t = useT();
+  const format = new Intl.NumberFormat(getLocale()).format;
+  const items = [
+    t("doc.statWords", stats.words, format(stats.words)),
+    t("doc.statCharacters", stats.characters, format(stats.characters)),
+    t("doc.statLines", stats.lines, format(stats.lines)),
+  ];
+  if (stats.minutes > 0) items.push(t("doc.statMinutes", stats.minutes, format(stats.minutes)));
+  return (
+    <div className="docview-stats" role="group" aria-label={t("doc.statsLabel")}>
+      {items.map((item) => <span key={item}>{item}</span>)}
     </div>
   );
 }

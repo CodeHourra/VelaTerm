@@ -49,13 +49,13 @@ pub struct RunBrief {
 /// How often live runs are checked for work that ended without an announcement.
 const POLL: Duration = Duration::from_secs(3);
 
-/// How long a session held on working waits, once its last run ends, for its agent to report on the
+/// How long a session held on background waits, once its last run ends, for its agent to report on the
 /// result before it is returned to waiting on its own.
 ///
 /// An agent that started the work in the background is woken when it ends and answers in a turn of its
 /// own; that turn's end reports waiting through the normal path. In a terminal nothing announces the
 /// start of that turn, so the hold simply outlasts it. An agent that is not woken at all leaves the
-/// session on working for this long after the work is done.
+/// session on background for this long after the work is done.
 #[cfg(not(test))]
 const DRAIN_GRACE: Duration = Duration::from_secs(30);
 #[cfg(test)]
@@ -69,7 +69,7 @@ const LOG_LINES: usize = 400;
 struct Registry {
     /// Live runs by session, ordered by start.
     live: HashMap<String, Vec<RunBrief>>,
-    /// Sessions whose agent last reported waiting while their runs kept them on working.
+    /// Sessions whose agent last reported waiting while their runs kept them on background.
     held: HashSet<String>,
 }
 
@@ -194,7 +194,7 @@ pub fn has_live(session_id: &str) -> bool {
 
 /// The state to report for a session whose agent just reported `state`.
 ///
-/// An agent that finished its turn while its runs go on is still busy, so waiting becomes working and
+/// An agent that finished its turn while its runs go on is not done, so waiting becomes background and
 /// the session is remembered as held. Every other report passes through and ends the hold: the agent
 /// has spoken again, and what it says next is what counts.
 pub fn hold(session_id: &str, state: AgentState) -> AgentState {
@@ -202,7 +202,7 @@ pub fn hold(session_id: &str, state: AgentState) -> AgentState {
     let live = registry.live.get(session_id).is_some_and(|runs| !runs.is_empty());
     if state == AgentState::Waiting && live {
         registry.held.insert(session_id.to_string());
-        AgentState::Working
+        AgentState::Background
     } else {
         registry.held.remove(session_id);
         state
@@ -338,10 +338,10 @@ mod tests {
         assert_eq!(live["s1"][0].command, "sleep 60");
     }
 
-    /// While a run goes on, an agent finishing its turn keeps the session working. Once the run ends and
-    /// the agent says nothing more, the session returns to waiting by itself.
+    /// While a run goes on, an agent finishing its turn leaves the session on background. Once the run ends
+    /// and the agent says nothing more, the session returns to waiting by itself.
     #[test]
-    fn a_live_run_holds_working_until_it_ends() {
+    fn a_live_run_holds_background_until_it_ends() {
         let _lock = test_lock();
         let _state = crate::session_state::test_lock();
         let (app, runs) = ctx("hold");
@@ -351,9 +351,9 @@ mod tests {
         assert!(has_live(&sid));
         assert_eq!(crate::session_state::snapshot()[&sid].runs.len(), 1);
 
-        assert_eq!(hold(&sid, AgentState::Waiting), AgentState::Working);
+        assert_eq!(hold(&sid, AgentState::Waiting), AgentState::Background);
         assert_eq!(hold(&sid, AgentState::Asking), AgentState::Asking, "a question always gets through");
-        assert_eq!(hold(&sid, AgentState::Waiting), AgentState::Working);
+        assert_eq!(hold(&sid, AgentState::Waiting), AgentState::Background);
 
         std::fs::write(runs.join("build").join("exit"), "0").unwrap();
         refresh(&app);
@@ -374,7 +374,7 @@ mod tests {
         let sid = format!("cancel-{}", uuid::Uuid::new_v4());
         record(&runs, "build", &sid, std::process::id(), 1);
         refresh(&app);
-        assert_eq!(hold(&sid, AgentState::Waiting), AgentState::Working);
+        assert_eq!(hold(&sid, AgentState::Waiting), AgentState::Background);
 
         std::fs::write(runs.join("build").join("exit"), "0").unwrap();
         refresh(&app);

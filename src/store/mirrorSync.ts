@@ -32,6 +32,20 @@ import {
   sanitizeMirrorLayout,
 } from "./mirrorLayout";
 import { useTermStore } from "./termStore";
+import { env } from "../platform";
+import type { RemoteClient } from "../ipc/mirror";
+
+/**
+ * Drop this window's own connection from the attached-client list. The Electron shell reaches its own
+ * backend over WebSocket, so the host window is itself one of the listed connections and would otherwise
+ * always report one peer. Elsewhere the host talks over IPC and never appears in the list.
+ */
+function withoutSelf(count: number, clients: RemoteClient[]): [number, RemoteClient[]] {
+  if (!env.isElectron) return [count, clients];
+  const self = getClientSource();
+  const others = clients.filter((c) => c.source !== self);
+  return [count - (clients.length - others.length), others];
+}
 
 /** Coalescing window for local edits. Long enough to swallow a drag's worth of resize events, short enough
  * that a peer sees a tab switch as immediate. */
@@ -174,7 +188,7 @@ export function startMirrorSync(): () => void {
         // and this reply is the only place a freshly started client learns it.
         store
           .getState()
-          .setRemoteClients(status.clients ?? 0, status.clientList ?? []);
+          .setRemoteClients(...withoutSelf(status.clients ?? 0, status.clientList ?? []));
         store.getState().setMirrorEnabled(status.enabled);
         if (!status.enabled) {
           settleFirstMirrorAlign(false);
@@ -231,7 +245,7 @@ export function startMirrorSync(): () => void {
   // reason mirroring does: on a host, a peer's rearranging is invisible until you know a peer is there.
   void onRemoteClients((count, clients) => {
     if (stopped) return;
-    store.getState().setRemoteClients(count, clients);
+    store.getState().setRemoteClients(...withoutSelf(count, clients));
   }).then((un) => (stopped ? un() : unlisteners.push(un)));
   void onMirrorMode((enabled) => {
     if (stopped) return;

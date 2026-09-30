@@ -92,3 +92,19 @@ it("preserves an older action rebound onto the new action's default", () => {
   expect(state.newScratchTab).toHaveBeenCalledOnce();
   expect(new URLSearchParams(window.location.search).has("newAgent")).toBe(false);
 });
+
+it("switches tabs with mod+digit but leaves mod+Alt+digit to editors", () => {
+  const setActiveTab = vi.fn();
+  Object.assign(state, { openTabs: ["tab-1", "tab-2"], setActiveTab });
+  const digit = (modifiers: KeyboardEventInit) => {
+    const event = new KeyboardEvent("keydown", { key: "1", code: "Digit1", bubbles: true, cancelable: true, ...modifiers });
+    document.body.dispatchEvent(event);
+    return event;
+  };
+  // This suite runs as a plain browser on macOS, where mod is Ctrl.
+  expect(digit({ ctrlKey: true }).defaultPrevented).toBe(true);
+  expect(setActiveTab).toHaveBeenCalledWith("tab-1");
+  setActiveTab.mockClear();
+  expect(digit({ ctrlKey: true, altKey: true }).defaultPrevented).toBe(false);
+  expect(setActiveTab).not.toHaveBeenCalled();
+});

@@ -325,8 +325,9 @@ export default function Select<T extends string>({
             role="listbox"
             aria-label={ariaLabel}
             // A wrapping <label> would otherwise forward a row click on to the trigger button as a
-            // second activation, reopening the popup the moment a choice closed it.
-            onClick={(e) => e.stopPropagation()}
+            // second activation, reopening the popup the moment a choice closed it. Label activation
+            // is a default action, so only preventDefault cancels it; stopPropagation alone does not.
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
             style={{
               ...SELECT_PANEL,
               left: align === "left" ? 0 : undefined,

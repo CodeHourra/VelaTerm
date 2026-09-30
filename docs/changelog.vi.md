@@ -1,3 +1,35 @@
+## v0.2.6 — 2026-09-30
+
+- 🐧 Phiên bản Linux nay được xây dựng trên Electron. AppImage giữ nguyên tên tệp và dữ liệu của bạn, không còn yêu cầu WebKitGTK hay libfuse2, và các bản đã cài đặt có thể cập nhật lên qua trình cập nhật tích hợp.
+
+- 🛰️ Các máy không thể kết nối qua SSH, chẳng hạn WSL trên một máy tính khác hoặc một container Docker, có thể liên kết với tài khoản của bạn sau khi cài `vela-server` bằng một lệnh duy nhất, rồi xuất hiện trong danh sách Remote để trò chuyện với AI. Khi chủ sở hữu cấp quyền truy cập đầy đủ trên máy chủ, ứng dụng máy tính còn có thể dùng terminal, tệp và bảng Git của máy đó.
+
+- 📂 Thư mục được kéo vào thanh bên từ Finder, File Explorer hoặc trình quản lý tệp trên Linux sẽ được thêm thành dự án.
+
+- 📝 Trình soạn thảo Markdown bổ sung các phím tắt giống Typora cho tiêu đề, danh sách, khối mã và bảng, tự động đóng ngoặc và dấu nháy, Cmd/Ctrl+nhấp để mở liên kết, chế độ tập trung và chế độ máy đánh chữ, cùng số từ và số ký tự trên thanh trạng thái. Front matter YAML hiển thị trong một ô riêng phía trên tài liệu và được giữ nguyên nếu bạn không chỉnh sửa.
+
+- 🗃️ Khi một thư mục không phải là kho Git nhưng chứa nhiều kho, bảng Git cung cấp ô chọn kho và thao tác trên kho đã chọn.
+
+- ⏳ Trong chế độ hội thoại, phiên đã trả lời xong nhưng vẫn còn tác vụ nền đang chạy sẽ hiển thị trạng thái mới "Đang chạy nền" với chấm màu lục lam, thay vì vẫn ở trạng thái "Đang làm việc". Các phiên chạy tác vụ dài bằng `vrun` cũng hiển thị trạng thái này.
+
+- 🍴 Trong chế độ hội thoại, phiên được phân nhánh sẽ bắt đầu cuộc hội thoại riêng ở lần chạy đầu tiên, và phiên gốc không còn nhận tin nhắn của nó.
+
+- 🛡️ Trong chế độ hội thoại, nhãn chế độ của phiên Claude đi theo chế độ quyền mà Claude thực sự đang dùng, ví dụ sau khi chuyển sang chế độ Plan, và thẻ cấp quyền hiển thị lý do Claude đưa ra khi hỏi.
+
+- 📏 Ô nhập trong chế độ hội thoại có thể thay đổi chiều cao bằng cách kéo cạnh trên, và nhấp đúp vào cạnh để khôi phục chiều cao mặc định. Chiều cao áp dụng cho mọi khung và được giữ lại sau khi khởi động lại.
+
+- 🗂️ Khi chọn nhiều thư mục trên thanh bên, menu chuột phải cho phép lưu trữ các thư mục đó cùng các phiên bên trong.
+
+- 📚 Trên thanh bên, bộ sưu tập luôn nằm phía trên các dự án.
+
+- 🧠 Khi một bản ghi xử lý của cơ sở tri thức chỉ tạo một mục, tiêu đề của bản ghi sẽ mở thẳng mục đó, và các nút mục hiển thị tiêu đề mục thay cho số thứ tự.
+
+- 📊 Bảng Info hiển thị đúng giới hạn ngữ cảnh cho các mô hình Claude mới như Opus 5.5, thay vì 200k.
+
+- 🎨 Thay đổi nhỏ: ba tùy chọn mở trong khung chia ở menu chuột phải của phiên được gom vào menu con "Mở trong khung chia", hộp xác nhận thoát cho biết các cửa sổ từ xa đang mở cũng sẽ đóng theo, và danh sách thả xuống trong biểu mẫu đóng ngay khi chọn một mục.
+
+---
+
 ## v0.2.5 — 2026-09-28
 
 - 🐧 Ứng dụng máy tính Windows hỗ trợ mở không gian làm việc riêng trong WSL1 và WSL2, sử dụng tác tử, tệp và lịch sử phiên của bản phân phối Linux đã chọn.

@@ -35,7 +35,7 @@ fn merge_system_families(families: Vec<String>) -> FontCatalog {
     catalog
 }
 
-#[cfg(feature = "gui")]
+#[cfg(any(feature = "gui", feature = "sidecar"))]
 pub fn system_font_catalog() -> FontCatalog {
     // CoreText on macOS, DirectWrite on Windows, and Fontconfig on Linux. No browser measurements.
     match font_kit::source::SystemSource::new().all_families() {
@@ -61,7 +61,7 @@ pub fn plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 }
 
 /// Electron reads the same native catalog without starting a GUI, server, or database.
-#[cfg(feature = "gui")]
+#[cfg(any(feature = "gui", feature = "sidecar"))]
 pub fn print_font_catalog() {
     println!(
         "{}",

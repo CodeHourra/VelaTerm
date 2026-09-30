@@ -98,7 +98,7 @@ import type {
   SessionKind,
   SessionRuntime,
 } from "../types";
-import { effectiveStatus, matchesAgentState } from "../types";
+import { AGENT_STATES, effectiveStatus, matchesAgentState } from "../types";
 import {
   CLEAN_IMAGES_KEY,
   NOTIFY_KEY,
@@ -169,6 +169,7 @@ function pickEvictTab(
         st === "working" ||
         st === "asking" ||
         st === "waiting" ||
+        st === "background" ||
         sid in notifications
       );
     });
@@ -289,8 +290,6 @@ function defaultSidebarViews(): {
 
 /** Upper bound on persisted per-view ID maps so a corrupted payload cannot grow without limit. */
 const SIDEBAR_VIEW_MAP_LIMIT = 20000;
-
-const AGENT_STATES: AgentState[] = ["working", "asking", "waiting"];
 
 function loadStatusFilter(candidate: unknown): AgentState[] | null {
   if (!Array.isArray(candidate)) return null;
@@ -1221,7 +1220,7 @@ interface TermStore {
   /** Archives a session without deleting data, closing any visible/background tab first. */
   archiveSession: (id: SessionId) => Promise<void>;
   /** Archives many sessions, then reloads and reconciles once to avoid concurrent tree-refresh races. */
-  archiveMany: (ids: SessionId[]) => Promise<void>;
+  archiveMany: (nodes: SelNode[]) => Promise<void>;
   /** Archives an entire group and keeps a hidden tombstone that returns when any child is restored. */
   archiveGroup: (id: string) => Promise<void>;
   /** Restores an archived session to the normal tree. */
@@ -1582,9 +1581,10 @@ interface TermStore {
 }
 
 /**
- * Agent states that trigger system notifications. Asking and waiting notify; working stays quiet.
+ * Agent states that trigger system notifications. Asking, waiting, and background notify; working stays
+ * quiet. A turn that ends on background has a reply to read even though its work is still running.
  */
-const NOTIFY_STATES: AgentState[] = ["asking", "waiting"];
+const NOTIFY_STATES: AgentState[] = ["asking", "waiting", "background"];
 
 /**
  * Last working timestamp per session, used for the 1200 ms working-to-idle hold. Keep it outside reactive
@@ -2508,11 +2508,15 @@ export const useTermStore = create<TermStore>((set, get) => ({
     saveLayoutTick();
   },
 
-  archiveMany: async (ids) => {
+  archiveMany: async (nodes) => {
     // Archive sequentially, then reload/reconcile/save once. Concurrent refreshes can destabilize virtualized
-    // rows and trigger React's maximum-update-depth failure.
-    for (const id of ids) {
-      await tree.setSessionArchived(id, true).catch(() => {});
+    // rows and trigger React's maximum-update-depth failure. Sessions go before groups so a session inside a
+    // selected group is still addressable; projects have no archive state and are skipped.
+    for (const n of nodes) {
+      if (n.kind === "session") await tree.setSessionArchived(n.id, true).catch(() => {});
+    }
+    for (const n of nodes) {
+      if (n.kind === "group") await tree.archiveGroup(n.id).catch(() => {});
     }
     await get().loadTree();
     set((state) => ({

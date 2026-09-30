@@ -445,12 +445,16 @@ function ToolPermissionCard({ request, cwd, onAnswer }: PermissionCardProps) {
     () => parsePermissionSuggestions(request.permission_suggestions),
     [request.permission_suggestions],
   );
+  // Shown as the agent wrote it: it names the check that stopped the call, which is what explains a
+  // prompt that arrives even though the chosen mode would normally allow the tool.
+  const reason = typeof request.decision_reason === "string" ? request.decision_reason.trim() : "";
   return (
     <div className="sv-permission">
       <div className="sv-permission-head">
         <Icons.lock size={13} />
         <span className="sv-permission-title">{t("chat.permissionAsk", name ?? "")}</span>
       </div>
+      {reason && <div className="sv-permission-reason">{reason}</div>}
       <ToolCard
         name={request.tool_name}
         input={request.input}

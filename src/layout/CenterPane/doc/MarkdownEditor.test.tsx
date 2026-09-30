@@ -1,10 +1,11 @@
 import * as React from "react";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MarkdownEditor } from "./MarkdownEditor";
+import { MarkdownEditor, type MarkdownHandle } from "./MarkdownEditor";
 
 const calls = vi.hoisted(() => ({
   visualFocus: vi.fn(), sourceFocus: vi.fn(), setMarkdown: vi.fn(), setText: vi.fn(), placeCaret: vi.fn(),
+  visualModes: vi.fn(), sourceModes: vi.fn(), readingPosition: vi.fn(), revealAnchor: vi.fn(),
 }));
 vi.mock("./WysiwygEditor", () => ({
   WysiwygEditor: React.forwardRef(function Visual(props: { defaultValue: string; onReady(): void; onEdited(): void }, ref) {
@@ -14,6 +15,9 @@ vi.mock("./WysiwygEditor", () => ({
       setMarkdown: (text: string) => { calls.setMarkdown(text); input.current!.value = text; },
       placeCaret: calls.placeCaret,
       focus: () => { calls.visualFocus(); input.current?.focus(); },
+      setWritingModes: calls.visualModes,
+      readingAnchor: () => null,
+      revealAnchor: calls.revealAnchor,
     }));
     // The real editor initializes once, independently of callback identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -29,6 +33,9 @@ vi.mock("./SourceEditor", () => ({
       getText: () => input.current!.value,
       setText: (text: string) => { calls.setText(text); input.current!.value = text; },
       focus: () => { calls.sourceFocus(); input.current?.focus(); },
+      setWritingModes: calls.sourceModes,
+      readingPosition: calls.readingPosition,
+      revealPosition: vi.fn(),
     }));
     return <textarea data-testid="source" ref={input} defaultValue={props.defaultValue} onChange={props.onEdited} />;
   }),
@@ -74,5 +81,57 @@ describe("Markdown writing interactions", () => {
     fireEvent.mouseDown(pane, { button: 2, clientX: 20 });
     fireEvent.mouseDown(pane, { button: 0, clientX: 601 });
     expect(calls.placeCaret).not.toHaveBeenCalled();
+  });
+
+  it("keeps YAML front matter out of the visual editor and writes it back unchanged", () => {
+    vi.useFakeTimers();
+    const ref = React.createRef<MarkdownHandle>();
+    const text = "---\ntitle: Notes\n---\n# Heading\n";
+    const view = render(<MarkdownEditor {...props} ref={ref} defaultValue={text} mode="compare" />);
+    const visual = view.getByTestId("visual") as HTMLTextAreaElement;
+    expect(visual.value).toBe("# Heading\n");
+    fireEvent.change(visual, { target: { value: "# Changed\n" } });
+    expect(ref.current!.getText()).toBe("---\ntitle: Notes\n---\n# Changed\n");
+    act(() => vi.advanceTimersByTime(200));
+    expect(calls.setText).toHaveBeenLastCalledWith("---\ntitle: Notes\n---\n# Changed\n");
+  });
+
+  it("edits front matter in its own field and follows front matter edits from the source", () => {
+    vi.useFakeTimers();
+    const ref = React.createRef<MarkdownHandle>();
+    const view = render(<MarkdownEditor {...props} ref={ref} defaultValue={"---\ntitle: A\n---\nBody\n"} mode="compare" />);
+    const yaml = view.getByLabelText("Front matter") as HTMLTextAreaElement;
+    expect(yaml.value).toBe("title: A");
+    fireEvent.change(yaml, { target: { value: "title: B\ntags: [x]" } });
+    expect(ref.current!.getText()).toBe("---\ntitle: B\ntags: [x]\n---\nBody\n");
+    act(() => vi.advanceTimersByTime(200));
+    expect(calls.setText).toHaveBeenLastCalledWith("---\ntitle: B\ntags: [x]\n---\nBody\n");
+    fireEvent.change(view.getByTestId("source"), { target: { value: "---\ntitle: C\n---\nBody\n" } });
+    act(() => vi.advanceTimersByTime(200));
+    expect(yaml.value).toBe("title: C");
+    expect(calls.setMarkdown).not.toHaveBeenCalled();
+  });
+
+  it("applies writing modes to both editors", () => {
+    const view = render(<MarkdownEditor {...props} mode="compare" modes={{ focus: true, typewriter: false }} />);
+    expect(calls.visualModes).toHaveBeenLastCalledWith({ focus: true, typewriter: false });
+    expect(calls.sourceModes).toHaveBeenLastCalledWith({ focus: true, typewriter: false });
+    expect(view.container.querySelector(".doc-markdown-layout")!.classList).toContain("doc-focus-mode");
+    view.rerender(<MarkdownEditor {...props} mode="compare" modes={{ focus: false, typewriter: true }} />);
+    expect(calls.sourceModes).toHaveBeenLastCalledWith({ focus: false, typewriter: true });
+    expect(view.container.querySelector(".doc-markdown-layout")!.classList).toContain("doc-typewriter");
+  });
+
+  it("carries the reading position from the source view to the visual view", () => {
+    const ref = React.createRef<MarkdownHandle>();
+    const text = "# One\n\nalpha\n\n# Two\n\nbeta\n\ngamma\n";
+    const view = render(<MarkdownEditor {...props} ref={ref} defaultValue={text} mode="source" />);
+    // Caret on "gamma": section 1 ("# Two"), the second block after the heading.
+    calls.readingPosition.mockReturnValue({ line: 8, offset: 120, caret: true });
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation(callback => { callback(0); return 0; });
+    ref.current!.prepareModeChange("visual");
+    view.rerender(<MarkdownEditor {...props} ref={ref} defaultValue={text} mode="visual" />);
+    expect(calls.revealAnchor).toHaveBeenCalledWith(expect.any(HTMLElement),
+      { section: 1, ordinal: 2, fraction: 0, offset: 120, caret: true });
   });
 });

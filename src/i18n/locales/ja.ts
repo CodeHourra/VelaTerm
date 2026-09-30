@@ -325,6 +325,7 @@ const ja: typeof en = {
   "status.working": "処理中", // Working
   "status.asking": "要確認", // Needs confirmation
   "status.waiting": "確認済み", // Viewed
+  "status.background": "バックグラウンドタスク実行中", // Background tasks running
   "status.unavailable": "ステータス取得不可",
   "indicator.unread": "未読 · 確認待ち", // Unread · awaiting review
 
@@ -548,6 +549,7 @@ const ja: typeof en = {
   "git.deleteFile": "削除",
   "git.viewAll": "すべて表示",
   "git.detached": "(detached)",
+  "git.repository": "リポジトリ",
   "git.aheadBehind": "上流ブランチに対する先行・遅延コミット数",
   "git.commitPlaceholder": "コミットメッセージ",
   "git.amend": "直前のコミットを修正",
@@ -811,6 +813,7 @@ const ja: typeof en = {
   "tree.newChildSession": "新規子セッション", // New Child Session
   "tree.openSelected": "選択したセッションを開く", // Open Selected Sessions
   "tree.archiveSelected": "選択したセッションをアーカイブ", // Archive Selected Sessions
+  "tree.archiveSelectedItems": (n) => `選択した ${n} 件をアーカイブ`, // Archive {n} Selected Items
   "tree.moveSelected": "選択項目を移動…", // Move Selected to…
   "tree.deleteSelected": (n) => `選択した ${n} 件を削除`, // Delete {n} Selected Items
   "tree.removeProject": "プロジェクトを削除", // Remove Project
@@ -845,7 +848,9 @@ const ja: typeof en = {
   "tree.persistDoc": "ディスクに保存…", // Save to Disk…
   "tree.closeScratch": "下書きを閉じる", // Close Scratch
   "tree.importProject": "プロジェクトをインポート", // Import Project
+  "tree.openInSplit": "分割して開く", // Open in Split
   "tree.createProject": "プロジェクトを作成",
+  "tree.dropFoldersHint": "フォルダーをここにドロップすると、プロジェクトとして追加されます",
   // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
   "tree.newCollection": "新規コレクション",
   "tree.deleteCollection": "コレクションを削除",
@@ -925,6 +930,7 @@ const ja: typeof en = {
   "mark.urgent": "緊急", // Urgent
   "mark.important": "重要", // Important
   "mark.bug": "バグ", // Bug
+  "tree.filterBackground": "タスク実行中", // Tasks running
   "mark.done": "完了", // Done
   "mark.wip": "進行中", // In progress
   "mark.pinned": "ピン留め", // Pinned
@@ -1142,6 +1148,7 @@ const ja: typeof en = {
   "quit.title": "VelaTerm を終了しますか？", // Quit VelaTerm?
   "quit.body":
     "実行中のターミナルとエージェントのセッションはすべて停止します。", // Any running terminal and agent sessions will be stopped.
+  "quit.remoteWindows": "開いている接続先の画面もすべて閉じます。", // Open remote windows will also be closed.
   "quit.saveWorkspace": "ワークスペースを保存", // Save workspace
   "quit.saveWorkspaceHint":
     "次回、同じタブと分割を復元します。ターミナルは復元されますが再起動はされません。", // Reopen the same tabs and splits next time. Terminals are restored but not restarted.
@@ -1262,6 +1269,14 @@ const ja: typeof en = {
   "doc.imgActual": "1:1", // 1:1
   "doc.exportPdf": "PDFとして書き出す", // Export PDF
   "doc.diagramError": "図の構文エラー", // Diagram error
+  "doc.frontMatter": "YAML フロントマター", // Front matter
+  "doc.focusMode": "フォーカスモード", // Focus Mode
+  "doc.typewriterMode": "タイプライターモード", // Typewriter Mode
+  "doc.statsLabel": "ドキュメントの統計", // Document statistics
+  "doc.statWords": (_n: number, count: string) => `${count} 語`, // N words
+  "doc.statCharacters": (_n: number, count: string) => `${count} 文字`, // N characters
+  "doc.statLines": (_n: number, count: string) => `${count} 行`, // N lines
+  "doc.statMinutes": (_n: number, count: string) => `約 ${count} 分で読了`, // N min read
 
   // ── Right information panel ──
   "panel.noSession": "セッション未選択", // No session selected

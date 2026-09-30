@@ -1,9 +1,41 @@
 # Changelog
 
-> Created: 2026-07-09 16:10 · Updated: 2026-09-28
+> Created: 2026-07-09 16:10 · Updated: 2026-09-30
 
 All notable changes to VelaTerm are documented here, newest first.
 v0.1.91 is the first public release; earlier version numbers were internal iterations and are not covered.
+
+---
+
+## v0.2.6 — 2026-09-30
+
+- 🐧 The Linux version is now built on Electron. The AppImage keeps its file name and your data, no longer requires WebKitGTK or libfuse2, and existing installations update to it through the built-in updater.
+
+- 🛰️ Machines that cannot be reached over SSH, such as WSL on another computer or a Docker container, can join your account after installing `vela-server` with a single command, and then appear in the Remote list for AI chat. Once the owner grants full access on the host, the desktop app can also use its terminal, files, and Git panel.
+
+- 📂 Folders dragged onto the sidebar from Finder, File Explorer, or a Linux file manager are added as projects.
+
+- 📝 The Markdown editor adds Typora-style shortcuts for headings, lists, code blocks, and tables, automatic pairing of brackets and quotes, Cmd/Ctrl+click to follow links, focus and typewriter modes, and word and character counts in the status bar. YAML front matter appears in a separate box above the document and stays unchanged unless you edit it.
+
+- 🗃️ When a folder is not a Git repository itself but contains several, the Git panel offers a repository selector and works on the selected repository.
+
+- ⏳ In the conversation view, a session whose reply has finished while background tasks are still running shows the new "Tasks running" status with a cyan dot instead of staying on "Working". Sessions running long tasks with `vrun` show the same status.
+
+- 🍴 In the conversation view, a forked session starts a conversation of its own the first time it runs, and the source session no longer receives its messages.
+
+- 🛡️ In the conversation view, the mode label of a Claude session follows the permission mode Claude actually uses, for example after it enters Plan mode, and permission cards show the reason Claude gives for asking.
+
+- 📏 The input box in the conversation view can be resized by dragging its top edge, and double-clicking the edge restores the default height. The height applies to all panes and is kept after a restart.
+
+- 🗂️ When several folders are selected in the sidebar, the context menu can archive them together with their sessions.
+
+- 📚 Collections always appear above projects in the sidebar.
+
+- 🧠 When a knowledge base processing record created a single entry, its title opens that entry directly, and entry buttons show entry titles instead of numbers.
+
+- 📊 The Info panel shows the correct context limit for newer Claude models such as Opus 5.5 instead of 200k.
+
+- 🎨 Smaller changes: the three split options in the session context menu are grouped under an "Open in Split" submenu, the quit confirmation notes that open remote windows will also close, and dropdowns in forms close as soon as an option is selected.
 
 ---
 

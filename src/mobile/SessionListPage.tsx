@@ -21,6 +21,7 @@ import { t, useT } from "../i18n";
 import { useTermStore } from "../store/termStore";
 import {
   type AgentState,
+  collectionsFirst,
   countByAgentState,
   effectiveStatus,
   type Group,
@@ -49,11 +50,12 @@ const STATUS_CHIPS: {
   st: AgentState;
   color: string;
   pulse: boolean;
-  labelKey: "tree.filterWorking" | "tree.filterAsking" | "tree.filterWaiting";
+  labelKey: "tree.filterWorking" | "tree.filterAsking" | "tree.filterWaiting" | "tree.filterBackground";
 }[] = [
   { st: "working", color: "var(--status-working)", pulse: true, labelKey: "tree.filterWorking" },
   { st: "asking", color: "var(--status-asking)", pulse: true, labelKey: "tree.filterAsking" },
   { st: "waiting", color: "var(--status-waiting)", pulse: false, labelKey: "tree.filterWaiting" },
+  { st: "background", color: "var(--status-background)", pulse: false, labelKey: "tree.filterBackground" },
 ];
 
 function StatusChips() {
@@ -157,7 +159,8 @@ export function SessionListPage({ onOpen, loading=false, error=null, onRefresh }
   onOpen:(id:SessionId)=>void;loading?:boolean;error?:string|null;onRefresh?:()=>void;
 }) {
   const tr = useT();
-  const projects = useTermStore((s) => s.projects);
+  const storeProjects = useTermStore((s) => s.projects);
+  const projects = useMemo(() => collectionsFirst(storeProjects), [storeProjects]);
   const groups = useTermStore((s) => s.groups);
   const allSessions = useTermStore((s) => s.sessions);
   const treeFilter = useTermStore((s) => s.treeFilter);

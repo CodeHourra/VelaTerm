@@ -325,6 +325,7 @@ const ko: typeof en = {
   "status.working": "작업 중", // Working
   "status.asking": "확인 필요", // Needs confirmation
   "status.waiting": "확인함", // Viewed
+  "status.background": "백그라운드 작업 실행 중", // Background tasks running
   "status.unavailable": "상태 확인 불가",
   "indicator.unread": "읽지 않음 · 확인 대기", // Unread · awaiting review
 
@@ -548,6 +549,7 @@ const ko: typeof en = {
   "git.deleteFile": "삭제",
   "git.viewAll": "모두 보기",
   "git.detached": "(detached)",
+  "git.repository": "저장소",
   "git.aheadBehind": "업스트림 브랜치 대비 앞선/뒤처진 커밋 수",
   "git.commitPlaceholder": "커밋 메시지",
   "git.amend": "마지막 커밋 수정",
@@ -807,6 +809,7 @@ const ko: typeof en = {
   "tree.newChildSession": "새 하위 세션", // New Child Session
   "tree.openSelected": "선택한 세션 열기", // Open Selected Sessions
   "tree.archiveSelected": "선택한 세션 보관", // Archive Selected Sessions
+  "tree.archiveSelectedItems": (n) => `선택한 ${n}개 항목 보관`, // Archive {n} Selected Items
   "tree.moveSelected": "선택 항목 이동…", // Move Selected to…
   "tree.deleteSelected": (n) => `선택한 ${n}개 항목 삭제`, // Delete {n} Selected Items
   "tree.removeProject": "프로젝트 제거", // Remove Project
@@ -841,7 +844,9 @@ const ko: typeof en = {
   "tree.persistDoc": "디스크에 저장…", // Save to Disk…
   "tree.closeScratch": "초안 닫기", // Close Scratch
   "tree.importProject": "프로젝트 가져오기", // Import Project
+  "tree.openInSplit": "분할 창에서 열기", // Open in Split
   "tree.createProject": "프로젝트 만들기",
+  "tree.dropFoldersHint": "폴더를 여기에 놓으면 프로젝트로 추가됩니다",
   // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
   "tree.newCollection": "새 컬렉션",
   "tree.deleteCollection": "컬렉션 삭제",
@@ -920,6 +925,7 @@ const ko: typeof en = {
   "mark.urgent": "긴급", // Urgent
   "mark.important": "중요", // Important
   "mark.bug": "버그", // Bug
+  "tree.filterBackground": "백그라운드 실행 중", // Tasks running
   "mark.done": "완료", // Done
   "mark.wip": "진행 중", // In progress
   "mark.pinned": "고정", // Pinned
@@ -1133,6 +1139,7 @@ const ko: typeof en = {
   // Application-exit confirmation and dormant restored sessions.
   "quit.title": "VelaTerm을 종료할까요?", // Quit VelaTerm?
   "quit.body": "실행 중인 터미널과 에이전트 세션이 모두 중지됩니다.", // Any running terminal and agent sessions will be stopped.
+  "quit.remoteWindows": "열려 있는 원격 창도 함께 닫힙니다.", // Open remote windows will also be closed.
   "quit.saveWorkspace": "작업 공간 저장", // Save workspace
   "quit.saveWorkspaceHint":
     "다음에 같은 탭과 분할을 복원합니다. 터미널은 복원되지만 다시 실행되지는 않습니다.", // Reopen the same tabs and splits next time. Terminals are restored but not restarted.
@@ -1250,6 +1257,14 @@ const ko: typeof en = {
   "doc.imgActual": "1:1", // 1:1
   "doc.exportPdf": "PDF로 내보내기", // Export PDF
   "doc.diagramError": "다이어그램 오류", // Diagram error
+  "doc.frontMatter": "YAML 프런트 매터", // Front matter
+  "doc.focusMode": "집중 모드", // Focus Mode
+  "doc.typewriterMode": "타자기 모드", // Typewriter Mode
+  "doc.statsLabel": "문서 통계", // Document statistics
+  "doc.statWords": (_n: number, count: string) => `${count}단어`, // N words
+  "doc.statCharacters": (_n: number, count: string) => `${count}자`, // N characters
+  "doc.statLines": (_n: number, count: string) => `${count}줄`, // N lines
+  "doc.statMinutes": (_n: number, count: string) => `읽는 데 약 ${count}분`, // N min read
 
   // ── Right information panel ──
   "panel.noSession": "선택된 세션 없음", // No session selected

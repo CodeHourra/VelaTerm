@@ -35,6 +35,20 @@ import { pmHtmlAnchorPlugin } from "./pmHtmlAnchor";
 import { onUploadDocImage, proxyDocImageURL } from "./docImageIO";
 import { stripImageRatioAlt } from "./docImage";
 import { replaceChangedContent, withHeadingIds } from "./milkdownSync";
+import {
+  autoPairPlugin,
+  focusBlockPlugin,
+  linkClickPlugin,
+  refreshWritingModes,
+  typewriterPlugin,
+  typoraKeymap,
+} from "./pmTypora";
+import { headingSlug, resolveDocLink } from "./docLinks";
+import { anchorAt, resolveAnchor, type ReadingAnchor } from "./readingAnchor";
+import { docKindOf } from "../../../store/docTab";
+import { useTermStore } from "../../../store/termStore";
+import { env, platform } from "../../../platform";
+import { safeError } from "../../../ipc/diagnosticSafety";
 
 /** Localize Crepe's slash menu, placeholders, and link/image/code widgets. Capture the current locale
  * at mount; DocView rebuilds the editor by key instead of hot-switching it. docPath locates pasted
@@ -111,6 +125,72 @@ export interface WysiwygHandle {
   search: DocSearchControl;
   /** Position the caret from an editor-gutter click, preserving the anchor for Shift-click. */
   placeCaret: (x: number, y: number, extend: boolean) => void;
+  /** Reading position inside `scroller`: the caret when it is on screen, otherwise the top line. */
+  readingAnchor: (scroller: HTMLElement) => ReadingAnchor | null;
+  /** Scroll `scroller` so the anchor sits at its recorded height, moving the caret there if it was the caret. */
+  revealAnchor: (scroller: HTMLElement, anchor: ReadingAnchor) => void;
+  /** Toggle focus mode and typewriter mode. */
+  setWritingModes: (modes: WritingModes) => void;
+}
+
+export interface WritingModes {
+  focus: boolean;
+  typewriter: boolean;
+}
+
+/** Top-level blocks with their heading flag and on-screen box. */
+function topBlocks(view: EditorView) {
+  const blocks: { pos: number; heading: boolean; rect: DOMRect | null }[] = [];
+  view.state.doc.forEach((node, offset) => {
+    const dom = view.nodeDOM(offset);
+    blocks.push({
+      pos: offset,
+      heading: node.type.name === "heading",
+      rect: dom instanceof HTMLElement ? dom.getBoundingClientRect() : null,
+    });
+  });
+  return blocks;
+}
+
+/** Follow a Cmd/Ctrl+clicked link: in-document anchors scroll, external URLs open in the browser. */
+function followLink(view: EditorView, href: string, docPath: string) {
+  const target = resolveDocLink(href, docPath);
+  if (!target) return;
+  if (target.kind === "external") {
+    void platform.opener.openExternal(target.url).catch((error: unknown) => {
+      console.warn("[doc] failed to open link", safeError(error));
+    });
+    return;
+  }
+  if (target.kind === "anchor") {
+    const id = target.id;
+    const slug = headingSlug(id);
+    let found: number | null = null;
+    view.state.doc.descendants((node, pos) => {
+      if (found != null) return false;
+      if (node.type.name === "heading" && (node.attrs.id === id || headingSlug(node.textContent) === slug)) found = pos;
+      return true;
+    });
+    // Explicit HTML anchors such as <a id="x"></a> or <a name="x">.
+    const element = found == null
+      ? view.dom.querySelector(`[id="${CSS.escape(id)}"], [name="${CSS.escape(id)}"]`)
+      : view.nodeDOM(found);
+    if (element instanceof HTMLElement) element.scrollIntoView({ block: "start" });
+    if (found != null) {
+      view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(found + 1))));
+      view.focus();
+    }
+    return;
+  }
+  const kind = docKindOf(target.path);
+  // Files the document viewer cannot show go to the system's default application on a local desktop.
+  if (kind === "code" && (env.isTauri || env.isElectron)) {
+    void platform.opener.openPath(target.path).catch((error: unknown) => {
+      console.warn("[doc] failed to open linked file", safeError(error));
+    });
+    return;
+  }
+  useTermStore.getState().openDocTab(target.path);
 }
 
 export const WysiwygEditor = forwardRef<
@@ -137,6 +217,9 @@ export const WysiwygEditor = forwardRef<
   lifecycleRef.current = { onReady, onError };
   const onEditedRef = useRef(onEdited);
   onEditedRef.current = onEdited;
+  const modesRef = useRef<WritingModes>({ focus: false, typewriter: false });
+  const docPathRef = useRef(docPath);
+  docPathRef.current = docPath;
 
   useEffect(() => {
     const root = rootRef.current;
@@ -152,6 +235,18 @@ export const WysiwygEditor = forwardRef<
     crepe.editor.use($prose(() => pmMermaidPlugin()));
     // Empty HTML anchors such as `<a id="x"></a>` are hidden rather than shown as literal tags.
     crepe.editor.use($prose(() => pmHtmlAnchorPlugin()));
+    // Typora-style shortcuts, pairing, link following, and writing modes. $prose plugins precede
+    // Milkdown's keymap, so these bindings win over its defaults for the same keys.
+    crepe.editor.use($prose(ctx => typoraKeymap(ctx)));
+    crepe.editor.use($prose(() => autoPairPlugin()));
+    crepe.editor.use($prose(() => linkClickPlugin(href => {
+      if (viewRef.current) followLink(viewRef.current, href, docPathRef.current);
+    })));
+    crepe.editor.use($prose(() => focusBlockPlugin(() => modesRef.current.focus)));
+    crepe.editor.use($prose(() => typewriterPlugin(
+      () => modesRef.current.typewriter,
+      () => root.parentElement,
+    )));
     // The block handle hit-tests the editor's horizontal center at the pointer's height. When an inline
     // atom (inline HTML, an image) sits there, the handle anchors to it and lands mid-line; resolving
     // inline nodes to their enclosing block keeps it in the left gutter. Runs after Crepe's own config.
@@ -241,6 +336,48 @@ export const WysiwygEditor = forwardRef<
         : near;
       view.dispatch(view.state.tr.setSelection(selection).scrollIntoView());
       view.focus();
+    },
+    readingAnchor: scroller => {
+      const view = viewRef.current;
+      if (!view) return null;
+      const box = scroller.getBoundingClientRect();
+      const blocks = topBlocks(view);
+      let y = box.top + 1;
+      let caret = false;
+      try {
+        const coords = view.coordsAtPos(view.state.selection.head);
+        if (coords.top >= box.top && coords.bottom <= box.bottom) {
+          y = coords.top;
+          caret = true;
+        }
+      } catch {
+        /* Fall back to the viewport top when the caret has no coordinates. */
+      }
+      let index = blocks.findIndex(block => block.rect && block.rect.bottom > y);
+      if (index < 0) index = blocks.length - 1;
+      const rect = blocks[index]?.rect;
+      const fraction = rect && rect.height > 0 ? Math.min(1, Math.max(0, (y - rect.top) / rect.height)) : 0;
+      return anchorAt(blocks.map(block => block.heading), index, fraction, y - box.top, caret);
+    },
+    revealAnchor: (scroller, anchor) => {
+      const view = viewRef.current;
+      if (!view) return;
+      const blocks = topBlocks(view);
+      const { index, fraction } = resolveAnchor(blocks.map(block => block.heading), anchor);
+      const rect = blocks[index]?.rect;
+      if (!rect) return;
+      const y = rect.top + fraction * rect.height;
+      scroller.scrollTop += y - (scroller.getBoundingClientRect().top + anchor.offset);
+      if (!anchor.caret) return;
+      const after = view.nodeDOM(blocks[index].pos);
+      const box = after instanceof HTMLElement ? after.getBoundingClientRect() : rect;
+      const hit = view.posAtCoords({ left: box.left + 1, top: Math.min(box.bottom - 1, box.top + fraction * box.height) });
+      const pos = hit?.pos ?? blocks[index].pos + 1;
+      view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(pos))));
+    },
+    setWritingModes: modes => {
+      modesRef.current = modes;
+      if (viewRef.current && readyRef.current) refreshWritingModes(viewRef.current);
     },
     getMarkdown: () => {
       const crepe = crepeRef.current;

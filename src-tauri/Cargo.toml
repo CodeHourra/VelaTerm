@@ -1,6 +1,6 @@
 [package]
 name = "velaterm"
-version = "0.2.5"
+version = "0.2.6"
 description = "VelaTerm multi-session terminal manager"
 authors = ["vlinx"]
 edition = "2021"
@@ -27,12 +27,16 @@ gui = [
     "dep:tauri-plugin-updater",
     "dep:tauri-plugin-process",
     "dep:tauri-plugin-single-instance",
-    # GUI SSH client verification of vela-server minisign signatures using the updater public key.
-    "dep:minisign-verify",
     # Pure-Rust russh transport required only by the GUI SSH client.
     "dep:russh",
     "dep:russh-sftp",
+    # Linux GTK signal access for recovering the paths of files dropped from the file manager.
+    "dep:gtk",
 ]
+# Backend for the Electron shell on Linux: the headless server plus native font enumeration, with no
+# Tauri/WebKit/GTK, so the packaged app runs on hosts without WebKitGTK. It keeps the desktop release
+# identity (see `serve_identifier`) so it opens the same data directory the desktop app always used.
+sidecar = ["dep:font-kit"]
 
 [profile.release]
 # Strip desktop and minimal-server release artifacts without affecting development/debugging.
@@ -72,8 +76,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Kimi hooks safely merge into existing config.toml only after parsing validates it.
 toml_edit = "0.25"
-# GUI-only minisign verification for the SSH-downloaded vela-server.
-minisign-verify = { version = "0.2", optional = true }
+# Minisign verification of vela-server artifacts: GUI SSH provisioning and headless `vela-server update`.
+minisign-verify = "0.2"
 # Pure-Rust russh multiplexes exec, SFTP, and forwarding over one connection, currently avoiding Windows
 # OpenSSH ControlMaster/ConPTY issues. The ring backend builds without NASM/cmake. GUI only.
 russh = { version = "0.62", default-features = false, features = ["ring", "flate2", "rsa"], optional = true }
@@ -153,6 +157,11 @@ jieba-rs = "0.10.3"
 rlimit = "0.10"
 # Kill the separate process group when canceling Git clone so git-remote children cannot retain pipes.
 libc = "0.2"
+
+# The GTK version wry already uses; only the GUI connects to the WebKitGTK drag signal (native_drop.rs), so the
+# headless vela-server build keeps no GTK dependency.
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = { version = "0.18", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 # On-demand full Git Bash self-extractor download with blocking streamed progress, default Windows schannel

@@ -26,6 +26,8 @@ export function QuitConfirmModal() {
 
   const [asking, setAsking] = useState(false);
   const [save, setSave] = useState(saveWorkspaceOnQuit);
+  /** Remote windows live in this process, so the exit closes them as well. */
+  const [remoteWindows, setRemoteWindows] = useState(0);
   /** Set once the exit is approved, to keep the in-flight settings flush from being re-entered. */
   const [exiting, setExiting] = useState(false);
 
@@ -33,9 +35,10 @@ export function QuitConfirmModal() {
     let unlisten: (() => void) | null = null;
     let disposed = false;
     void platform.quit
-      .onRequested(() => {
+      .onRequested((request) => {
         // Seed from the remembered preference each time, then acknowledge so the shell keeps waiting for us.
         setSave(useTermStore.getState().saveWorkspaceOnQuit);
+        setRemoteWindows(request.remoteWindows);
         setAsking(true);
         void platform.quit.ack();
       })
@@ -92,6 +95,7 @@ export function QuitConfirmModal() {
         <div className="quit-head">
           <div className="quit-title">{t("quit.title")}</div>
           <div className="quit-body">{t("quit.body")}</div>
+          {remoteWindows > 0 && <div className="quit-body">{t("quit.remoteWindows")}</div>}
         </div>
 
         <label className={save ? "quit-opt on" : "quit-opt"}>

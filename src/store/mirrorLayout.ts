@@ -24,7 +24,7 @@ import {
   type SidebarViewPaneNode,
 } from "../layout/LeftSidebar/sidebarTreeLayout";
 import type { InspectorTab } from "../theme";
-import type { AgentState, Session } from "../types";
+import { AGENT_STATES, type AgentState, type Session } from "../types";
 import type { DocTab } from "./docTab";
 import type { BrowserTab, SelNode, SidebarTreeView, TaskTab } from "./termStore";
 
@@ -33,9 +33,6 @@ export const MIRROR_LAYOUT_VERSION = 2;
 
 /** Upper bound on a published per-view ID map, so a corrupt payload cannot grow without limit. */
 const VIEW_MAP_LIMIT = 20000;
-
-/** The session states a status filter may name. */
-const AGENT_STATES: AgentState[] = ["working", "asking", "waiting"];
 
 /** Center-pane arrangement: the tabs, their pane trees, and what is active. */
 export interface MirrorCenter {

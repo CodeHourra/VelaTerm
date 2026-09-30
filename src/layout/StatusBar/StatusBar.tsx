@@ -54,7 +54,7 @@ function kindLabel(kind: SessionKind): string {
 }
 
 /**
- * Three-state aggregate on the right. Clicking a state replaces the primary sidebar's current status
+ * Agent-state aggregate on the right. Clicking a state replaces the primary sidebar's current status
  * selection; clicking the sole active state again clears it. Working and waiting icons use the same
  * pulse animation as sidebar status dots. Labels reuse the `tree.filter*` keys so wording stays
  * synchronized across both controls.
@@ -81,9 +81,16 @@ const STATUS_SEGS = [
     color: "var(--status-waiting)",
     labelKey: "tree.filterWaiting",
   },
+  {
+    st: "background",
+    icon: Icons.layers,
+    pulse: false,
+    color: "var(--status-background)",
+    labelKey: "tree.filterBackground",
+  },
 ] as const;
 
-/** Three-state aggregate isolated to absorb frequent runtime updates and the full `countByAgentState`
+/** Agent-state aggregate isolated to absorb frequent runtime updates and the full `countByAgentState`
  * scan. Agent status changes then rerender only this small section instead of recomputing and
  * rerendering the entire status bar in O(N) session time. */
 function StatusSegs() {

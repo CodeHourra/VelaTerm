@@ -10,7 +10,9 @@ vi.mock("./transport", () => ({
   invoke: vi.fn(),
   invokeNative: vi.fn(),
   copyText: vi.fn(),
-  openPath: vi.fn(),
+}));
+vi.mock("../platform", () => ({
+  platform: { opener: { openPath: vi.fn(), revealPath: vi.fn(), openExternal: vi.fn() } },
 }));
 
 import { invoke, invokeNative } from "./transport";

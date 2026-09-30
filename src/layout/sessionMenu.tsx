@@ -315,14 +315,14 @@ export function useSessionMenu(): SessionMenu {
     return { label: t("mark.menu"), submenu };
   };
 
-  // Place a session beside or into the focused pane of the active tab. They need a visible pane tree, and a focused
-  // pane that already shows this session has nothing to split or replace.
-  const paneItems = (sessionId: string): MenuItem[] => {
+  // Place a session beside or into the focused pane of the active tab, grouped under one submenu. They need a visible
+  // pane tree, and a focused pane that already shows this session has nothing to split or replace.
+  const paneItem = (sessionId: string): MenuItem => {
     const st = useTermStore.getState();
     const tree = st.activeTabId ? st.paneTrees[st.activeTabId] : null;
     const focused = tree && st.focusedPaneId ? findLeaf(tree, st.focusedPaneId) : null;
     const disabled = !focused || focused.sessionId === sessionId;
-    return [
+    const submenu: MenuItem[] = [
       {
         label: t("tree.openSplitRight"),
         disabled,
@@ -335,6 +335,7 @@ export function useSessionMenu(): SessionMenu {
       },
       { label: t("tree.openInFocusedPane"), disabled, onClick: () => openSessionInPane(sessionId) },
     ];
+    return { label: t("tree.openInSplit"), disabled, submenu };
   };
 
   // Quick create/resume inherits a parent group's worktree into cwd/path/baseRef for local sessions. Browser nodes
@@ -1003,7 +1004,7 @@ export function useSessionMenu(): SessionMenu {
     const items: MenuItem[] = [
       { label: t("common.open"), onClick: () => openSession(node.id) },
       { label: t("tree.openNewTab"), onClick: () => openSession(node.id, { newTab: true }) },
-      ...paneItems(node.id),
+      paneItem(node.id),
       { label: t("tree.newChildSession"), submenu: newSessionItems(node.projectId, node.groupId, node.id) },
       ...shellMenu,
       ...(canFork
@@ -1150,7 +1151,7 @@ export function useSessionMenu(): SessionMenu {
         items.push(
           { label: t("common.open"), onClick: () => openSession(node.id) },
           { label: t("tree.openNewTab"), onClick: () => openSession(node.id, { newTab: true }) },
-          ...paneItems(node.id),
+          paneItem(node.id),
         );
       } else {
         items.push({ label: t("common.open"), onClick: () => setActiveTab(node.id) });

@@ -24,6 +24,8 @@ export interface MemoryCollections { projects: MemoryCollectionProject[]; sessio
 export interface MemoryJob {
   id: string; sourceId: string; sessionName: string; agent: string; agentLabel: string; model: string; effort: string; status: string; stage: string;
   progress: number; total: number; error: string; entries: string[]; createdAt: number; updatedAt: number;
+  /** Entries this job produced that still exist, with their current titles. */
+  entryLinks: { id: string; title: string }[];
 }
 export interface MemoryOptions { agents: { id: string; label: string; available: boolean }[]; defaultAgent: string; maxSourceChars: number; catalog: { id: string; title: string }[] }
 export type MemoryEdit = Pick<MemoryEntry, "title" | "summary" | "content" | "tags" | "related" | "version"> & { id: string | null };

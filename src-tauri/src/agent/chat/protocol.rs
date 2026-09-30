@@ -50,6 +50,20 @@ pub fn launch_permission_mode(stored: Option<&str>, extra_args: &[String]) -> St
     if bypass { "bypassPermissions".into() } else { mode }
 }
 
+/// The permission mode a `system`/`status` frame reports, when it carries one.
+///
+/// Claude attaches `permissionMode` to status frames whenever its own mode changes, including changes it
+/// makes by itself, such as entering plan mode. Any status value can carry it, `compacting` included, so
+/// this is read beside the timeline parse rather than as one of its cases.
+pub fn reported_permission_mode(v: &Value) -> Option<&str> {
+    if v.get("type").and_then(Value::as_str) != Some("system")
+        || v.get("subtype").and_then(Value::as_str) != Some("status")
+    {
+        return None;
+    }
+    v.get("permissionMode").and_then(Value::as_str).filter(|mode| !mode.is_empty())
+}
+
 /// Command line that starts an agent in streaming JSON mode.
 ///
 /// Every flag here is load-bearing:
@@ -67,8 +81,11 @@ pub fn launch_permission_mode(stored: Option<&str>, extra_args: &[String]) -> St
 ///   arrive, but every `thinking` field is an empty string, so the view can tell that the agent thought and
 ///   can show nothing of it. Measured on claude 2.1.259; the same pair is recorded in the protocol-engine
 ///   design document.
+/// - `fork` marks the first launch of a forked session. `--fork-session` makes Claude copy the source
+///   conversation into a new one instead of appending to it, so the source and the fork stay separate.
 pub fn launch_args(
     resume: Option<&str>,
+    fork: bool,
     model: Option<&str>,
     effort: Option<&str>,
     permission_mode: &str,
@@ -91,6 +108,9 @@ pub fn launch_args(
     if let Some(id) = resume {
         args.push("--resume".into());
         args.push(id.into());
+        if fork {
+            args.push("--fork-session".into());
+        }
     }
     if let Some(model) = model {
         args.push("--model".into());
@@ -707,8 +727,21 @@ mod tests {
     }
 
     #[test]
+    fn status_frames_report_the_mode_the_agent_switched_to() {
+        let mode = |line: &str| reported_permission_mode(&serde_json::from_str(line).unwrap()).map(str::to_string);
+        assert_eq!(mode(r#"{"type":"system","subtype":"status","status":null,"permissionMode":"plan"}"#), Some("plan".into()));
+        assert_eq!(
+            mode(r#"{"type":"system","subtype":"status","status":"compacting","permissionMode":"default"}"#),
+            Some("default".into()),
+        );
+        assert_eq!(mode(r#"{"type":"system","subtype":"status","status":"compacting"}"#), None);
+        assert_eq!(mode(r#"{"type":"system","subtype":"status","status":null,"permissionMode":""}"#), None);
+        assert_eq!(mode(r#"{"type":"system","subtype":"init","permissionMode":"plan"}"#), None);
+    }
+
+    #[test]
     fn launch_args_always_ask_for_streaming_and_permission_routing() {
-        let args = launch_args(None, None, None, "default");
+        let args = launch_args(None, false, None, None, "default");
         let joined = args.join(" ");
         assert!(joined.contains("--input-format stream-json"));
         assert!(joined.contains("--output-format stream-json"));
@@ -728,11 +761,20 @@ mod tests {
 
     #[test]
     fn launch_args_append_only_what_was_asked_for() {
-        let args = launch_args(Some("sid-1"), Some("opus"), Some("high"), "plan").join(" ");
+        let args = launch_args(Some("sid-1"), false, Some("opus"), Some("high"), "plan").join(" ");
         assert!(args.contains("--resume sid-1"));
         assert!(args.contains("--model opus"));
         assert!(args.contains("--effort high"));
         assert!(args.contains("--permission-mode plan"));
+        assert!(!args.contains("--fork-session"), "a plain resume must continue the same conversation");
+    }
+
+    #[test]
+    fn launch_args_fork_copies_the_source_conversation() {
+        let args = launch_args(Some("source"), true, None, None, "default").join(" ");
+        assert!(args.contains("--resume source --fork-session"), "{args}");
+        let fresh = launch_args(None, true, None, None, "default").join(" ");
+        assert!(!fresh.contains("--fork-session"), "there is nothing to fork without a source: {fresh}");
     }
 
     #[test]
@@ -808,7 +850,7 @@ mod tests {
 
     #[test]
     fn thinking_off_is_a_cap_rather_than_a_command_line_level() {
-        let joined = launch_args(None, None, Some(THINKING_OFF), "default").join(" ");
+        let joined = launch_args(None, false, None, Some(THINKING_OFF), "default").join(" ");
         assert!(!joined.contains("--effort"), "{joined}");
         assert_eq!(
             set_max_thinking_tokens(Some(0)),

@@ -104,6 +104,7 @@ const commands = new Set([
   "git_commit_file_diff",
   "git_commit_files",
   "git_discard",
+  "git_discover_repos",
   "git_file_diff",
   "git_log_page",
   "git_merge_apply",

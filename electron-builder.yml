@@ -1,10 +1,11 @@
 # electron-builder packaging configuration for the Electron edition of VelaTerm.
 #
-# Output: scripts/release.sh deep-signs the macOS Electron build with a Developer ID. The script controls
-# the signing identity, so it is not hard-coded here.
-# Remaining release work: macOS notarization, Windows signing, and an autoUpdater release channel. These
-# require an Apple ID and the corresponding certificates; see the mac section below and the publish notes
-# at the end. Signing alone, without notarization, is sufficient for native UNUserNotificationCenter alerts.
+# Output: scripts/release.sh builds the Linux AppImage (the Linux desktop release) and deep-signs the optional
+# macOS Electron build with a Developer ID. The script controls the signing identity, so it is not hard-coded
+# here. The Linux AppImage updates itself through the desktop update service (see electron/main.cjs).
+# Remaining work for other platforms: macOS notarization, Windows signing, and self-update. These require an
+# Apple ID and the corresponding certificates; see the mac section below and the publish notes at the end.
+# Signing alone, without notarization, is sufficient for native UNUserNotificationCenter alerts.
 #
 # Important: the sidecar (`velaterm --serve`) serves the renderer (frontend UI) over local HTTP, so the
 # renderer is **not bundled into the Electron package**. Consequently, `files` includes only the shell code;
@@ -45,6 +46,12 @@ extraResources:
 
 asar: true
 
+# AppImage toolset with the static type-2 runtime: the AppImage mounts through the kernel's FUSE without the
+# system libfuse2, which current Ubuntu and Fedora desktops no longer install by default. The legacy default
+# ("0.0.0") needs libfuse2 and fails to start without it.
+toolsets:
+  appimage: "1.0.3"
+
 mac:
   category: public.app-category.developer-tools
   icon: src-tauri/icons/icon.icns
@@ -65,14 +72,19 @@ win:
   target:
     - nsis
 
+# Linux ships this edition as its only desktop app. scripts/release.sh overrides the product name, executable
+# name and artifact name so the AppImage keeps the name, file name and data directory of the Tauri AppImage
+# it replaces. Its backend is the `sidecar` build of velaterm (no WebKitGTK). electron-builder's AppRun adds
+# --no-sandbox by itself where unprivileged user namespaces are unavailable (for example Ubuntu 24.04).
 linux:
-  icon: src-tauri/icons/128x128.png
-  category: Utility
+  icon: src-tauri/icons/icon.png
+  category: Development
+  synopsis: Terminal and AI agent session manager
   target:
     - AppImage
 
-# Automatic updates (placeholder): electron-updater requires a publish provider (such as GitHub or S3) and
-# signed packages. This remains follow-up work. Uncomment and complete this example when enabling it:
+# macOS/Windows automatic updates (placeholder): electron-updater requires a publish provider (such as GitHub
+# or S3) and signed packages. This remains follow-up work. Uncomment and complete this example when enabling it:
 # publish:
 #   provider: github
 #   owner: <your-org>

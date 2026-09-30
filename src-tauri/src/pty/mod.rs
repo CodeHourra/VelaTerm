@@ -10,12 +10,14 @@ pub mod session;
 /// - working: actively processing.
 /// - asking: paused for permission or user input.
 /// - waiting: stopped with no pending confirmation, ready for review.
+/// - background: the turn has ended, but work it started (background tasks, `vrun` runs) is still running.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentState {
     Working,
     Asking,
     Waiting,
+    Background,
 }
 
 /// Backend session-status signals delivered through `pty://status/{id}`.

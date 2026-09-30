@@ -714,7 +714,7 @@ const FINISHED_TASK_CAP: usize = 20;
 /// this grace so nothing leaks.
 const TASK_SETTLE_GRACE: Duration = Duration::from_secs(2);
 
-/// How long a session held on working for its background work waits, once that work is over, for the
+/// How long a session showing background for its background work waits, once that work is over, for the
 /// turn in which Claude answers it.
 ///
 /// Claude begins that turn's request within moments of the last task notification, so a wait this long
@@ -1406,12 +1406,18 @@ impl ChatManager {
         let mode = if kind == SessionKind::Claude {
             protocol::launch_permission_mode(permission_mode, extra_args)
         } else { initial_mode(kind, permission_mode) };
+        // A forked session still points at its source conversation until its own id is captured. Resuming
+        // that id in place would make both sessions append to one conversation.
+        let fork = resume.is_some() && {
+            let conn = app.db().conn.lock().unwrap();
+            crate::db::repo::get_fork_pending(&conn, session_id)?
+        };
         let mut cmd = crate::host::command(bin);
         // OpenCode is reached over HTTP: the port it listens on and the password that guards it.
         let mut opencode_launch: Option<(u16, String)> = None;
         match kind {
             SessionKind::Claude => {
-                cmd.args(protocol::launch_args(resume, model, effort, &mode));
+                cmd.args(protocol::launch_args(resume, fork, model, effort, &mode));
                 cmd.args(extra_args);
             }
             SessionKind::Codex => {
@@ -1442,7 +1448,7 @@ impl ChatManager {
                     && !extra_args.iter().any(|arg| {
                         arg.contains("yolo") || arg.contains("auto-approve") || arg.contains("approval-mode")
                     });
-                cmd.args(pi_protocol::launch_args(variant, resume, model, bypass));
+                cmd.args(pi_protocol::launch_args(variant, resume, fork, model, bypass));
                 cmd.args(extra_args);
             }
             _ => return Err(format!("The chat engine does not support {} sessions", kind.as_str())),
@@ -2835,7 +2841,7 @@ fn background_pending(turn: &TurnQueue) -> bool {
     !turn.background_tasks.is_empty() || turn.settling.values().any(|deadline| *deadline > now)
 }
 
-/// Return a session held on working for its background work to waiting, once that work is over and no
+/// Return a session showing background for its background work to waiting, once that work is over and no
 /// turn has come to answer it.
 ///
 /// Nothing is decided while a turn runs or a task is still live: the turn's own end reports the state,
@@ -3563,6 +3569,9 @@ fn handle_line(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, line: &s
         if opens_agent_turn(&value) {
             adopt_agent_turn(app, session_id, proc);
         }
+        if let Some(mode) = protocol::reported_permission_mode(&value) {
+            adopt_reported_mode(app, session_id, proc, mode);
+        }
         let mut extras = proc.extras.lock().unwrap();
         extras.generation.claude(&value, now_ms());
         // Claude marks a turn refused by a quota, or by a short-term rate limit, with this error. Which of
@@ -3741,6 +3750,16 @@ fn handle_line(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, line: &s
                 if window.is_some() {
                     extras.context_window = window;
                 }
+                // Only a window reported under the model's own name is kept for other sessions.
+                if let Some(model) = extras.usage_model.as_deref() {
+                    if let Some(own) = model_usage
+                        .get(model)
+                        .and_then(|entry| entry.get("contextWindow"))
+                        .and_then(Value::as_u64)
+                    {
+                        crate::agent::claude_models::remember_context_window(model, own);
+                    }
+                }
             }
             emit_extras(app, session_id, proc);
             // The categorised breakdown is what the meter and the Info panel show; asking after every
@@ -3914,13 +3933,23 @@ fn open_codex_thread(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
     let resume = proc.agent_session_id.lock().unwrap().clone();
     let model = proc.model.lock().unwrap().clone();
     let mode = proc.mode.lock().unwrap().clone();
-    let open_kind = if resume.is_some() { "thread_resume" } else { "thread_start" };
+    // The first open of a forked session forks its source thread instead of resuming it in place.
+    let fork = resume.is_some() && {
+        let conn = app.db().conn.lock().unwrap();
+        crate::db::repo::get_fork_pending(&conn, session_id).unwrap_or(false)
+    };
+    let open_kind = match resume {
+        Some(_) if fork => "thread_fork_open",
+        Some(_) => "thread_resume",
+        None => "thread_start",
+    };
     let id = proc.request_id(open_kind);
     let service_tier = proc.service_tier.lock().unwrap().clone();
     let personality = proc.personality.lock().unwrap().clone();
     if let Err(message) = proc.write_codex_mode_request(&id, &mode, &codex_protocol::open_thread(
         &id,
         resume.as_deref(),
+        fork,
         proc.cwd.as_deref(),
         model.as_deref(),
         &mode,
@@ -3971,7 +4000,9 @@ fn handle_codex_response(
         // that Codex cannot resume, and without this every later open of that session would die the same
         // way. There was nothing said in that thread, so a fresh one loses nothing. The stored id is
         // replaced when the new thread's start response is remembered.
-        if kind == Some("thread_resume") && message.to_lowercase().contains("no rollout") {
+        if matches!(kind, Some("thread_resume" | "thread_fork_open"))
+            && message.to_lowercase().contains("no rollout")
+        {
             let abandoned = proc.agent_session_id.lock().unwrap().take();
             crate::diagnostic_warn!(
                 "chat: Codex could not resume thread {}; starting a new one",
@@ -3986,8 +4017,10 @@ fn handle_codex_response(
             emit(app, session_id, json!({"type":"commands","commands":[]}));
         }
         emit(app, session_id, json!({"type":"error","message":message,"request":kind}));
-        if matches!(kind, Some("initialize" | "thread_start" | "thread_resume")) {
-            if matches!(kind, Some("thread_start" | "thread_resume")) && auth::is_auth_error(&json!(message)) {
+        if matches!(kind, Some("initialize" | "thread_start" | "thread_resume" | "thread_fork_open")) {
+            if matches!(kind, Some("thread_start" | "thread_resume" | "thread_fork_open"))
+                && auth::is_auth_error(&json!(message))
+            {
                 // Keep the initialized peer available for login, but stop automatic prompt delivery.
                 let mut turn = proc.turn.lock().unwrap();
                 turn.running = false;
@@ -4082,7 +4115,7 @@ fn handle_codex_response(
                 }
             }
         }
-        Some("thread_start" | "thread_resume") => {
+        Some("thread_start" | "thread_resume" | "thread_fork_open") => {
             let thread = result.get("thread").unwrap_or(&result);
             let thread_id = thread
                 .get("id")
@@ -5105,10 +5138,10 @@ fn handle_turn_end(
         emit(app, session_id, json!({"type":"turnInterrupted"}));
     }
     let Some(item) = next else {
-        // Background work this turn left running keeps the session busy. Claude answers it in a turn of
-        // its own when it finishes, and that turn's end is the one that means the work is done.
+        // The turn is over, but background work it left running is not. Claude answers that work in a turn
+        // of its own when it finishes, and that turn's end is the one that means the work is done.
         if background {
-            emit_state(app, session_id, AgentState::Working);
+            emit_state(app, session_id, AgentState::Background);
             settle_background_state(app, session_id, proc);
         } else {
             emit_state(app, session_id, AgentState::Waiting);
@@ -5691,6 +5724,24 @@ fn handle_control_request(
     emit_state(app, session_id, AgentState::Asking);
 }
 
+/// Follow a mode change the agent reported on its own, so the chip never shows a mode the process has left.
+///
+/// Claude can leave the mode it was launched or set to without being asked, for instance by entering plan
+/// mode. Without this the chip keeps saying Bypass while the agent is back to asking, and every prompt it
+/// raises looks like a failure of Bypass itself.
+fn adopt_reported_mode(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, mode: &str) {
+    let changed = {
+        let mut current = proc.mode.lock().unwrap();
+        let changed = *current != mode;
+        if changed { *current = mode.to_string(); }
+        changed
+    };
+    proc.permission_confirmed.store(true, Ordering::Relaxed);
+    if changed {
+        emit(app, session_id, json!({"type":"settingsChanged","mode":mode}));
+    }
+}
+
 /// An answer to something we asked. Only the startup handshake carries data we keep.
 fn handle_control_response(
     app: &AppCtx,
@@ -5848,7 +5899,8 @@ fn emit_queue(app: &AppCtx, session_id: &str, proc: &ChatProcess) {
 /// service records into it for terminal sessions, and a chat session has no hooks, so this is its only
 /// way in.
 fn emit_state(app: &AppCtx, session_id: &str, state: AgentState) {
-    // The session's `vrun` work keeps it busy past the end of a turn, exactly as for a terminal session.
+    // The session's `vrun` work keeps it on background past the end of a turn, exactly as for a terminal
+    // session.
     let state = crate::agent::runs::hold(session_id, state);
     crate::agent::status_watch::record(session_id, state);
     app.emit(
@@ -5915,7 +5967,7 @@ mod tests {
             (Some("auto"), "auto"), (Some("default"), "default")] {
             let mode = initial_mode(SessionKind::Claude, stored);
             assert_eq!(mode, shown, "stored {stored:?}");
-            let args = protocol::launch_args(None, None, None, &mode).join(" ");
+            let args = protocol::launch_args(None, false, None, None, &mode).join(" ");
             assert!(args.contains(&format!("--permission-mode {shown}")), "{args}");
         }
     }
@@ -6557,6 +6609,62 @@ mod tests {
             proc.codex_subagent_ids.lock().unwrap().get("grandchild-thread"),
             Some(&vec!["task-parent".to_string(), "task-nested".to_string()])
         );
+    }
+
+    /// A forked session's first launch copies its source conversation instead of appending to it; once the
+    /// fork has its own id, later launches resume that id in place.
+    #[cfg(unix)]
+    #[test]
+    fn a_pending_fork_launches_claude_with_fork_session() {
+        use std::os::unix::fs::PermissionsExt;
+        let app = ctx("fork-launch");
+        match &app {
+          AppCtx::Headless(host) => {
+            // The fixture never calls hooks; this endpoint does not open a listener.
+            host.set_hooks(crate::agent::server::HookServer { port: 19192, token: "unused-fixture-token".into() });
+          }
+          #[cfg(feature = "gui")]
+          _ => unreachable!(),
+        }
+        let dir = std::env::temp_dir().join(format!("vlx-fork-launch-{}-{}", std::process::id(), now_ms()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let argv = dir.join("argv");
+        let bin = dir.join("claude-fixture");
+        // The engine also runs the binary for side probes; only the launch that carries --resume counts.
+        std::fs::write(&bin, format!("#!/bin/sh\necho \"$*\" >> '{}'\ncat > /dev/null\n", argv.display())).unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let fork = {
+            let conn = app.db().conn.lock().unwrap();
+            conn.execute("INSERT INTO projects(id,name,root_path,created_at) VALUES ('p','test',?1,0)", [dir.to_str().unwrap()]).unwrap();
+            conn.execute("INSERT INTO sessions(id,project_id,name,kind,engine,agent_session_id,created_at) VALUES ('src','p','source','claude','chat','source-conversation',0)", []).unwrap();
+            crate::db::repo::fork_session(&conn, "src").unwrap().id
+        };
+        let launched = |expect_id: &str| {
+            let _ = std::fs::remove_file(&argv);
+            app.chat().start(&app, &fork, SessionKind::Claude, dir.to_str(), bin.to_str().unwrap(),
+                Some(expect_id), None, None, Some("default"), None, &[], false).unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            let args = loop {
+                let text = std::fs::read_to_string(&argv).unwrap_or_default();
+                if let Some(line) = text.lines().find(|line| line.contains("--resume")) {
+                    break line.to_string();
+                }
+                assert!(std::time::Instant::now() < deadline, "the fixture never started");
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            };
+            app.chat().stop(&app, &fork).unwrap();
+            args
+        };
+
+        let first = launched("source-conversation");
+        assert!(first.contains("--resume source-conversation --fork-session"), "{first}");
+
+        let conn = || app.db().conn.lock().unwrap();
+        crate::db::repo::set_agent_session_id(&conn(), &fork, "fork-conversation", SessionKind::Claude).unwrap();
+        let later = launched("fork-conversation");
+        assert!(later.contains("--resume fork-conversation"), "{later}");
+        assert!(!later.contains("--fork-session"), "{later}");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     // ── The queue ──
@@ -9234,29 +9342,32 @@ mod tests {
     const SHELL_DONE: &str = r#"{"type":"system","subtype":"task_notification","task_id":"shell","status":"completed"}"#;
     const TURN_DONE: &str = r#"{"type":"result","subtype":"success","duration_ms":5}"#;
 
-    /// A turn that leaves a background task running keeps the session working, with nothing to read yet.
-    /// Claude answers the finished task in a turn of its own, and only that turn's end means waiting.
+    /// A turn that leaves a background task running ends on background: its reply is there to read, but
+    /// the work is not over. Claude answers the finished task in a turn of its own, which reports working,
+    /// and only that turn's end means waiting.
     #[test]
-    fn background_work_holds_working_until_the_turn_that_answers_it() {
+    fn background_work_holds_background_until_the_turn_that_answers_it() {
         let _state_guard = crate::session_state::test_lock();
         let (app, sid, proc) = background_fixture("bg-hold");
         let record = || crate::session_state::snapshot().get(&sid).cloned().unwrap_or_default();
 
         handle_line(&app, &sid, &proc, LIVE_SHELL);
         handle_line(&app, &sid, &proc, TURN_DONE);
-        assert_eq!(record().agent_state.as_deref(), Some("working"));
-        assert!(!record().unread);
+        assert_eq!(record().agent_state.as_deref(), Some("background"));
+        assert!(record().unread, "the turn's reply is the result to read");
         std::thread::sleep(WAKE_GRACE * 3);
-        assert_eq!(record().agent_state.as_deref(), Some("working"), "the task is still live");
+        assert_eq!(record().agent_state.as_deref(), Some("background"), "the task is still live");
 
         // The task ends and Claude begins its answer. A slow first response keeps the hold.
         handle_line(&app, &sid, &proc, NO_TASKS);
         handle_line(&app, &sid, &proc, SHELL_DONE);
         handle_line(&app, &sid, &proc, r#"{"type":"system","subtype":"init","session_id":"agent-1","model":"claude-opus-5"}"#);
         std::thread::sleep(WAKE_GRACE * 3);
-        assert_eq!(record().agent_state.as_deref(), Some("working"), "the answering turn is on its way");
+        assert_eq!(record().agent_state.as_deref(), Some("background"), "the answering turn is on its way");
 
         handle_line(&app, &sid, &proc, r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"m"}},"parent_tool_use_id":null}"#);
+        assert_eq!(record().agent_state.as_deref(), Some("working"));
+        assert!(!record().unread, "working again clears the earlier reply's marker");
         handle_line(&app, &sid, &proc, TURN_DONE);
         assert_eq!(record().agent_state.as_deref(), Some("waiting"));
         assert!(record().unread, "the answer is the result to read");
@@ -9271,7 +9382,7 @@ mod tests {
 
         handle_line(&app, &sid, &proc, LIVE_SHELL);
         handle_line(&app, &sid, &proc, TURN_DONE);
-        assert_eq!(shown().as_deref(), Some("working"));
+        assert_eq!(shown().as_deref(), Some("background"));
 
         handle_line(&app, &sid, &proc, NO_TASKS);
         handle_line(&app, &sid, &proc, SHELL_DONE);

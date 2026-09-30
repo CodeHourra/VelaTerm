@@ -142,7 +142,9 @@
     "remote.not_ready": "Shared content not ready",
     "remote.offline_hint": "This device is offline. Open VelaTerm on it and keep it connected to the internet.",
     "remote.unavailable_hint": "No shared content is currently available. Check the sharing settings in VelaTerm on this device.",
-    "remote.load_failed": "Unable to load sharing settings. Please try again."
+    "remote.load_failed": "Unable to load sharing settings. Please try again.",
+    "remote.full_pending": "To use terminals and files, run this command on the remote device to approve the device you are using:",
+    "remote.full_version": "Terminals and files are available when both devices run the same VelaTerm version. The remote device runs {version}."
   },
   "zh-CN": {
     "Account": "账号",
@@ -287,7 +289,9 @@
     "remote.not_ready": "共享未就绪",
     "remote.offline_hint": "设备已离线。请在该设备上打开 VelaTerm，并保持网络连接。",
     "remote.unavailable_hint": "此设备当前没有可访问的共享内容。请在该设备上的 VelaTerm 中检查共享设置。",
-    "remote.load_failed": "无法加载共享设置，请重试。"
+    "remote.load_failed": "无法加载共享设置，请重试。",
+    "remote.full_pending": "如需使用终端和文件，请在远程设备上运行以下命令，批准你正在使用的设备：",
+    "remote.full_version": "两台设备的 VelaTerm 版本一致时，才能使用终端和文件。远程设备的版本为 {version}。"
   },
   "zh-TW": {
     "Account": "帳號",
@@ -432,7 +436,9 @@
     "remote.not_ready": "共用內容尚未就緒",
     "remote.offline_hint": "裝置已離線。請在該裝置上開啟 VelaTerm，並保持網路連線。",
     "remote.unavailable_hint": "此裝置目前沒有可存取的共用內容。請在該裝置上的 VelaTerm 中檢查共用設定。",
-    "remote.load_failed": "無法載入共享設定，請重試。"
+    "remote.load_failed": "無法載入共享設定，請重試。",
+    "remote.full_pending": "如需使用終端機和檔案，請在遠端裝置上執行以下指令，核准你正在使用的裝置：",
+    "remote.full_version": "兩台裝置的 VelaTerm 版本一致時，才能使用終端機和檔案。遠端裝置的版本為 {version}。"
   },
   "ja": {
     "Account": "アカウント",
@@ -577,7 +583,9 @@
     "remote.not_ready": "共有の準備ができていません",
     "remote.offline_hint": "このデバイスはオフラインです。デバイスで VelaTerm を開き、インターネットに接続してください。",
     "remote.unavailable_hint": "現在アクセスできる共有内容はありません。このデバイスの VelaTerm で共有設定を確認してください。",
-    "remote.load_failed": "共有設定を読み込めません。もう一度お試しください。"
+    "remote.load_failed": "共有設定を読み込めません。もう一度お試しください。",
+    "remote.full_pending": "ターミナルとファイルを使うには、リモートデバイスで次のコマンドを実行し、現在使用しているデバイスを承認してください：",
+    "remote.full_version": "ターミナルとファイルは、両方のデバイスで同じバージョンの VelaTerm を使用している場合に利用できます。リモートデバイスのバージョンは {version} です。"
   },
   "ko": {
     "Account": "계정",
@@ -722,7 +730,9 @@
     "remote.not_ready": "공유 준비 안 됨",
     "remote.offline_hint": "이 기기는 오프라인입니다. 해당 기기에서 VelaTerm을 열고 인터넷에 연결하세요.",
     "remote.unavailable_hint": "현재 접근할 수 있는 공유 콘텐츠가 없습니다. 해당 기기의 VelaTerm에서 공유 설정을 확인하세요.",
-    "remote.load_failed": "공유 설정을 불러올 수 없습니다. 다시 시도해 주세요."
+    "remote.load_failed": "공유 설정을 불러올 수 없습니다. 다시 시도해 주세요.",
+    "remote.full_pending": "터미널과 파일을 사용하려면 원격 기기에서 다음 명령을 실행하여 지금 사용 중인 기기를 승인하세요:",
+    "remote.full_version": "터미널과 파일은 두 기기의 VelaTerm 버전이 같을 때 사용할 수 있습니다. 원격 기기의 버전은 {version}입니다."
   },
   "fr": {
     "Account": "Compte",
@@ -867,7 +877,9 @@
     "remote.not_ready": "Contenu partagé indisponible",
     "remote.offline_hint": "Cet appareil est hors ligne. Ouvrez VelaTerm sur cet appareil et maintenez la connexion à Internet.",
     "remote.unavailable_hint": "Aucun contenu partagé n’est actuellement accessible. Vérifiez les paramètres de partage dans VelaTerm sur cet appareil.",
-    "remote.load_failed": "Impossible de charger les paramètres de partage. Veuillez réessayer."
+    "remote.load_failed": "Impossible de charger les paramètres de partage. Veuillez réessayer.",
+    "remote.full_pending": "Pour utiliser les terminaux et les fichiers, exécutez la commande suivante sur l’appareil distant afin d’approuver l’appareil que vous utilisez :",
+    "remote.full_version": "Les terminaux et les fichiers sont disponibles lorsque les deux appareils utilisent la même version de VelaTerm. L’appareil distant utilise la version {version}."
   },
   "de": {
     "Account": "Konto",
@@ -1012,7 +1024,9 @@
     "remote.not_ready": "Freigegebene Inhalte noch nicht verfügbar",
     "remote.offline_hint": "Dieses Gerät ist offline. Öffnen Sie VelaTerm auf dem Gerät und halten Sie die Internetverbindung aufrecht.",
     "remote.unavailable_hint": "Derzeit sind keine freigegebenen Inhalte zugänglich. Prüfen Sie die Freigabeeinstellungen in VelaTerm auf diesem Gerät.",
-    "remote.load_failed": "Die Freigabeeinstellungen konnten nicht geladen werden. Bitte erneut versuchen."
+    "remote.load_failed": "Die Freigabeeinstellungen konnten nicht geladen werden. Bitte erneut versuchen.",
+    "remote.full_pending": "Um Terminals und Dateien zu verwenden, führen Sie auf dem entfernten Gerät den folgenden Befehl aus und genehmigen damit das Gerät, das Sie gerade verwenden:",
+    "remote.full_version": "Terminals und Dateien sind verfügbar, wenn auf beiden Geräten dieselbe VelaTerm-Version läuft. Auf dem entfernten Gerät läuft Version {version}."
   },
   "es": {
     "Account": "Cuenta",
@@ -1157,7 +1171,9 @@
     "remote.not_ready": "Contenido compartido no disponible",
     "remote.offline_hint": "Este dispositivo está sin conexión. Abre VelaTerm en él y mantén la conexión a Internet.",
     "remote.unavailable_hint": "Actualmente no hay contenido compartido accesible. Revisa la configuración de uso compartido de VelaTerm en este dispositivo.",
-    "remote.load_failed": "No se ha podido cargar la configuración de uso compartido. Inténtalo de nuevo."
+    "remote.load_failed": "No se ha podido cargar la configuración de uso compartido. Inténtalo de nuevo.",
+    "remote.full_pending": "Para usar terminales y archivos, ejecuta el siguiente comando en el dispositivo remoto para aprobar el dispositivo que estás usando:",
+    "remote.full_version": "Los terminales y los archivos están disponibles cuando ambos dispositivos usan la misma versión de VelaTerm. El dispositivo remoto usa la versión {version}."
   },
   "pt-BR": {
     "Account": "Conta",
@@ -1302,7 +1318,9 @@
     "remote.not_ready": "Conteúdo compartilhado indisponível",
     "remote.offline_hint": "Este dispositivo está offline. Abra o VelaTerm nele e mantenha a conexão com a internet.",
     "remote.unavailable_hint": "Nenhum conteúdo compartilhado está acessível no momento. Verifique as configurações de compartilhamento do VelaTerm neste dispositivo.",
-    "remote.load_failed": "Não foi possível carregar as configurações de compartilhamento. Tente novamente."
+    "remote.load_failed": "Não foi possível carregar as configurações de compartilhamento. Tente novamente.",
+    "remote.full_pending": "Para usar terminais e arquivos, execute o comando a seguir no dispositivo remoto para aprovar o dispositivo que você está usando:",
+    "remote.full_version": "Terminais e arquivos ficam disponíveis quando os dois dispositivos usam a mesma versão do VelaTerm. O dispositivo remoto usa a versão {version}."
   },
   "ru": {
     "Account": "Аккаунт",
@@ -1447,7 +1465,9 @@
     "remote.not_ready": "Общие материалы пока недоступны",
     "remote.offline_hint": "Это устройство не в сети. Откройте на нём VelaTerm и подключитесь к интернету.",
     "remote.unavailable_hint": "Сейчас нет доступных общих материалов. Проверьте настройки общего доступа в VelaTerm на этом устройстве.",
-    "remote.load_failed": "Не удалось загрузить настройки общего доступа. Повторите попытку."
+    "remote.load_failed": "Не удалось загрузить настройки общего доступа. Повторите попытку.",
+    "remote.full_pending": "Для доступа к терминалам и файлам выполните на удалённом устройстве следующую команду — она подтвердит устройство, которым вы пользуетесь:",
+    "remote.full_version": "Терминалы и файлы доступны, когда на обоих устройствах установлена одна и та же версия VelaTerm. На удалённом устройстве установлена версия {version}."
   },
   "vi": {
     "Account": "Tài khoản",
@@ -1592,6 +1612,8 @@
     "remote.not_ready": "Nội dung chia sẻ chưa sẵn sàng",
     "remote.offline_hint": "Thiết bị này đang ngoại tuyến. Hãy mở VelaTerm trên thiết bị và duy trì kết nối Internet.",
     "remote.unavailable_hint": "Hiện không có nội dung chia sẻ nào có thể truy cập. Hãy kiểm tra cài đặt chia sẻ trong VelaTerm trên thiết bị này.",
-    "remote.load_failed": "Không thể tải cài đặt chia sẻ. Vui lòng thử lại."
+    "remote.load_failed": "Không thể tải cài đặt chia sẻ. Vui lòng thử lại.",
+    "remote.full_pending": "Để dùng terminal và tệp, hãy chạy lệnh sau trên thiết bị từ xa để phê duyệt thiết bị bạn đang dùng:",
+    "remote.full_version": "Terminal và tệp chỉ khả dụng khi cả hai thiết bị dùng cùng phiên bản VelaTerm. Thiết bị từ xa đang dùng phiên bản {version}."
   }
 }

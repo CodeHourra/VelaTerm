@@ -4,6 +4,9 @@
 .remote-device small { display:block; margin-top:6px; color: var(--text-dim); }
 .remote-device button { border:1px solid var(--border); border-radius:var(--r-md,8px); padding:8px 10px; background:var(--bg-2); color:var(--text); cursor:pointer; }
 .remote-device button:hover { border-color:var(--accent); }
+.remote-full-notice { margin:0; padding:10px 12px; border:1px solid var(--border); border-radius:var(--r-md,8px); background:var(--bg-1); color:var(--text); overflow-wrap:anywhere; }
+.remote-full-notice p { margin:0 0 8px; }
+.remote-full-notice code { display:block; user-select:all; font-family:var(--font-mono, monospace); font-size:12px; color:var(--text); }
 .remote-window { height: 100dvh; display: flex; flex-direction: column; background: var(--bg-0, #101518); color: var(--text, #ddd); }
 .remote-window > header { flex: none; display: flex; align-items: center; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--border, #444); }
 .remote-window > header small { margin-left: auto; }

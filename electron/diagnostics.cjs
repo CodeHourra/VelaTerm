@@ -2,7 +2,7 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
-const EVENTS = new Set(["launcher_failed", "command_ready", "sidecar_exit", "sidecar_restart", "sidecar_restart_failed", "browser_close_failed", "command_install_failed", "startup_failed"]);
+const EVENTS = new Set(["launcher_failed", "command_ready", "sidecar_exit", "sidecar_restart", "sidecar_restart_failed", "browser_close_failed", "command_install_failed", "startup_failed", "update_installed", "update_failed"]);
 function createDiagnostics(directory) {
   const file = path.join(directory, `electron-${process.pid}-${randomUUID()}.log`);
   let pending = Promise.resolve();

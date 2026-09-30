@@ -55,7 +55,8 @@ pub struct SessionState {
     pub unread: bool,
     /// Which agent is running here: `claude`, `codex`, `opencode`, and so on. None for a plain terminal.
     pub agent: Option<String>,
-    /// What that agent is doing: `working`, `asking`, or `waiting`. Meaningless without an agent.
+    /// What that agent is doing: `working`, `asking`, `waiting`, or `background`. Meaningless without an
+    /// agent.
     pub agent_state: Option<String>,
     /// Where the activity state comes from, declared at launch: `chat` for a conversation-view session
     /// driven over the agent's own protocol, `hooks` or `legacy` for a Codex terminal session. Other
@@ -290,16 +291,17 @@ pub fn set_stopped(ctx: &AppCtx, session_id: &str) -> bool {
     })
 }
 
-/// Agent states that mean "a human should look at this".
-const NOTIFY_STATES: [&str; 2] = ["asking", "waiting"];
+/// Agent states that mean "a human should look at this". `background` counts: its turn has a reply to
+/// read even though the work that turn started is still running.
+const NOTIFY_STATES: [&str; 3] = ["asking", "waiting", "background"];
 
 /// Inspect a `pty://status/{id}` payload on its way out and raise the unread marker when it warrants one.
 ///
 /// `previous` is the state this session last broadcast, read before the status cache is overwritten.
 /// The conditions match what every client used to apply for itself:
 /// - a **state** signal that is not `silent` (a silent one is a correction or a snapshot replayed on
-///   attach, not a new result), whose state is asking or waiting, and which is an actual transition
-///   rather than a repeat of what is already displayed;
+///   attach, not a new result), whose state is asking, waiting, or background, and which is an actual
+///   transition rather than a repeat of what is already displayed;
 /// - a **notify** signal (OSC 9 / OSC 777) on a session with no authoritative hook source, which is the
 ///   same fallback rule the frontend applied to avoid duplicating a hook-driven notification.
 ///
@@ -596,6 +598,20 @@ mod tests {
         let _lock = test_lock();
         let app = ctx("finished");
         observe_status(&app, "s1", &state("waiting", false), Some(&state("working", false)));
+        assert!(unread_of("s1"));
+    }
+
+    /// A turn that ends with its background work still running has a reply to read all the same, and
+    /// that work finishing later is a result of its own.
+    #[test]
+    fn a_turn_ending_on_background_raises_the_marker() {
+        let _lock = test_lock();
+        let app = ctx("background");
+        observe_status(&app, "s1", &state("background", false), Some(&state("working", false)));
+        assert!(unread_of("s1"));
+        assert_eq!(snapshot()["s1"].agent_state.as_deref(), Some("background"));
+        set_unread(&app, "s1", false);
+        observe_status(&app, "s1", &state("waiting", false), Some(&state("background", false)));
         assert!(unread_of("s1"));
     }
 

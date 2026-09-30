@@ -18,7 +18,7 @@ import {
   syntaxHighlighting,
 } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
-import { Compartment, EditorState, Prec, StateEffect, StateField } from "@codemirror/state";
+import { Compartment, EditorState, Prec, RangeSetBuilder, StateEffect, StateField } from "@codemirror/state";
 import { Decoration, type DecorationSet, keymap } from "@codemirror/view";
 import { SearchCursor } from "@codemirror/search";
 import { vlxHighlight } from "./docHighlight";
@@ -44,7 +44,51 @@ export interface SourceHandle {
   scrollToLine: (line: number) => void;
   /** Unified find/replace controls shared with WYSIWYG mode. */
   search: DocSearchControl;
+  /** Reading position: the caret line when on screen, otherwise the top line, as a fractional line. */
+  readingPosition: () => SourcePosition | null;
+  /** Scroll so the fractional line sits `offset` pixels below the top, optionally moving the caret. */
+  revealPosition: (position: SourcePosition) => void;
+  /** Toggle focus mode (dim everything but the current paragraph) and typewriter mode. */
+  setWritingModes: (modes: { focus: boolean; typewriter: boolean }) => void;
 }
+
+export interface SourcePosition {
+  /** Zero-based line; the fraction locates a point inside a soft-wrapped line. */
+  line: number;
+  offset: number;
+  caret: boolean;
+}
+
+// ── Writing modes ──
+const currentLineMark = Decoration.line({ class: "vlx-current-line" });
+/** Lines of the paragraph holding the caret, bounded by blank lines. */
+function currentParagraph(state: EditorState): DecorationSet {
+  const doc = state.doc;
+  const line = doc.lineAt(state.selection.main.head);
+  let first = line.number;
+  let last = line.number;
+  if (line.text.trim()) {
+    while (first > 1 && doc.line(first - 1).text.trim()) first--;
+    while (last < doc.lines && doc.line(last + 1).text.trim()) last++;
+  }
+  const builder = new RangeSetBuilder<Decoration>();
+  for (let n = first; n <= last; n++) builder.add(doc.line(n).from, doc.line(n).from, currentLineMark);
+  return builder.finish();
+}
+const focusParagraph = StateField.define<DecorationSet>({
+  create: currentParagraph,
+  update: (deco, tr) => (tr.docChanged || tr.selection ? currentParagraph(tr.state) : deco),
+  provide: (f) => EditorView.decorations.from(f),
+});
+/** Center the caret after typing and keyboard movement. Pointer selections and programmatic updates
+ *  such as companion sync keep their scroll position. */
+const typewriterScroll = EditorState.transactionExtender.of((tr) => {
+  const typed = ["input", "delete", "undo", "redo", "move"].some((event) => tr.isUserEvent(event));
+  const keyboardSelect = tr.isUserEvent("select") && !tr.isUserEvent("select.pointer");
+  return typed || keyboardSelect
+    ? { effects: EditorView.scrollIntoView(tr.newSelection.main.head, { y: "center" }) }
+    : null;
+});
 
 // ── Custom search highlights held in a StateField and updated through setMatches ──
 const vlxMatchMark = Decoration.mark({ class: "vlx-cm-match" });
@@ -167,6 +211,8 @@ export const SourceEditor = forwardRef<
     matches: { from: number; to: number }[];
     current: number;
   }>({ query: "", caseSensitive: false, matches: [], current: -1 });
+  const focusCompartment = useRef(new Compartment()).current;
+  const typewriterCompartment = useRef(new Compartment()).current;
 
   useEffect(() => {
     const root = rootRef.current;
@@ -232,6 +278,8 @@ export const SourceEditor = forwardRef<
         // indents the line/selection with Tab and outdents with Shift+Tab.
         keymap.of([indentWithTab]),
         matchField,
+        focusCompartment.of([]),
+        typewriterCompartment.of([]),
         langCompartment.of(
           kind === "markdown" ? markdown({ codeLanguages: languages }) : [],
         ),
@@ -368,6 +416,38 @@ export const SourceEditor = forwardRef<
       view.dispatch({
         selection: { anchor: pos },
         effects: EditorView.scrollIntoView(pos, { y: "start", yMargin: 12 }),
+      });
+    },
+    readingPosition: () => {
+      const view = viewRef.current;
+      if (!view) return null;
+      const box = view.scrollDOM.getBoundingClientRect();
+      const head = view.state.selection.main.head;
+      const coords = view.coordsAtPos(head);
+      const caret = !!coords && coords.top >= box.top && coords.bottom <= box.bottom;
+      const y = caret ? coords.top : box.top + 1;
+      const block = caret ? view.lineBlockAt(head) : view.lineBlockAtHeight(y - view.documentTop);
+      const line = view.state.doc.lineAt(block.from);
+      const within = block.height > 0 ? Math.min(0.999, Math.max(0, (y - view.documentTop - block.top) / block.height)) : 0;
+      return { line: line.number - 1 + within, offset: y - box.top, caret };
+    },
+    revealPosition: ({ line, offset, caret }) => {
+      const view = viewRef.current;
+      if (!view) return;
+      const doc = view.state.doc;
+      const target = doc.line(Math.max(1, Math.min(doc.lines, Math.floor(line) + 1)));
+      const pos = target.from + Math.round((line - Math.floor(line)) * target.length);
+      view.dispatch({
+        selection: caret ? { anchor: pos } : undefined,
+        effects: EditorView.scrollIntoView(pos, { y: "start", yMargin: Math.max(0, offset) }),
+      });
+    },
+    setWritingModes: ({ focus, typewriter }) => {
+      viewRef.current?.dispatch({
+        effects: [
+          focusCompartment.reconfigure(focus ? focusParagraph : []),
+          typewriterCompartment.reconfigure(typewriter ? typewriterScroll : []),
+        ],
       });
     },
     search: {

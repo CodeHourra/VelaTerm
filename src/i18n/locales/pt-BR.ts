@@ -325,6 +325,7 @@ const ptBR: typeof en = {
   "status.working": "Processando", // Working
   "status.asking": "Requer confirmação", // Needs confirmation
   "status.waiting": "Visto", // Viewed
+  "status.background": "Tarefas em segundo plano em execução", // Background tasks running
   "status.unavailable": "Status indisponível",
   "indicator.unread": "Não lido · a revisar", // Unread · awaiting review
 
@@ -549,6 +550,7 @@ const ptBR: typeof en = {
   "git.deleteFile": "Excluir",
   "git.viewAll": "Ver tudo",
   "git.detached": "(destacado)",
+  "git.repository": "Repositório",
   "git.aheadBehind": "Commits à frente e atrás do branch upstream",
   "git.commitPlaceholder": "Mensagem do commit",
   "git.amend": "Corrigir o último commit",
@@ -812,6 +814,7 @@ const ptBR: typeof en = {
   "tree.newChildSession": "Nova sessão filha", // New Child Session
   "tree.openSelected": "Abrir sessões selecionadas", // Open Selected Sessions
   "tree.archiveSelected": "Arquivar sessões selecionadas", // Archive Selected Sessions
+  "tree.archiveSelectedItems": (n) => `Arquivar ${n} itens selecionados`, // Archive {n} Selected Items
   "tree.moveSelected": "Mover selecionados para…", // Move Selected to…
   "tree.deleteSelected": (n) => `Excluir ${n} itens selecionados`, // Delete {n} Selected Items
   "tree.removeProject": "Remover projeto", // Remove Project
@@ -846,7 +849,9 @@ const ptBR: typeof en = {
   "tree.persistDoc": "Salvar no disco…", // Save to Disk…
   "tree.closeScratch": "Fechar rascunho", // Close Scratch
   "tree.importProject": "Importar projeto", // Import Project
+  "tree.openInSplit": "Abrir em painel dividido", // Open in Split
   "tree.createProject": "Criar projeto",
+  "tree.dropFoldersHint": "Solte pastas aqui para adicioná-las como projetos",
   // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
   "tree.newCollection": "Nova coleção",
   "tree.deleteCollection": "Excluir coleção",
@@ -925,6 +930,7 @@ const ptBR: typeof en = {
   "mark.urgent": "Urgente", // Urgent
   "mark.important": "Importante", // Important
   "mark.bug": "Bug", // Bug
+  "tree.filterBackground": "Tarefas ativas", // Tasks running
   "mark.done": "Concluído", // Done
   "mark.wip": "Em andamento", // In progress
   "mark.pinned": "Fixado", // Pinned
@@ -1151,6 +1157,7 @@ const ptBR: typeof en = {
   "quit.title": "Sair do VelaTerm?", // Quit VelaTerm?
   "quit.body":
     "Todas as sessões de terminal e de agente em execução serão encerradas.", // Any running terminal and agent sessions will be stopped.
+  "quit.remoteWindows": "As janelas remotas abertas também serão fechadas.", // Open remote windows will also be closed.
   "quit.saveWorkspace": "Salvar espaço de trabalho", // Save workspace
   "quit.saveWorkspaceHint":
     "Abrir as mesmas abas e divisões na próxima vez. Os terminais são restaurados, mas não reiniciados.", // Reopen the same tabs and splits next time. Terminals are restored but not restarted.
@@ -1269,6 +1276,14 @@ const ptBR: typeof en = {
   "doc.imgActual": "1:1", // 1:1
   "doc.exportPdf": "Exportar PDF", // Export PDF
   "doc.diagramError": "Erro de diagrama", // Diagram error
+  "doc.frontMatter": "Metadados YAML", // Front matter
+  "doc.focusMode": "Modo foco", // Focus Mode
+  "doc.typewriterMode": "Modo máquina de escrever", // Typewriter Mode
+  "doc.statsLabel": "Estatísticas do documento", // Document statistics
+  "doc.statWords": (n: number, count: string) => (n === 1 ? "1 palavra" : `${count} palavras`), // N words
+  "doc.statCharacters": (n: number, count: string) => (n === 1 ? "1 caractere" : `${count} caracteres`), // N characters
+  "doc.statLines": (n: number, count: string) => (n === 1 ? "1 linha" : `${count} linhas`), // N lines
+  "doc.statMinutes": (_n: number, count: string) => `${count} min de leitura`, // N min read
 
   // ── Right information panel ──
   "panel.noSession": "Nenhuma sessão selecionada", // No session selected

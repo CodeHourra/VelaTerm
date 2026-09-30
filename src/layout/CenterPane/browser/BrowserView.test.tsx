@@ -38,7 +38,9 @@ vi.mock("../../../ipc/browser", () => ({
     return Promise.resolve(() => {});
   }),
 }));
-vi.mock("../../../ipc/transport", () => ({ openPath: vi.fn() }));
+vi.mock("../../../platform", () => ({
+  platform: { opener: { openPath: vi.fn(), revealPath: vi.fn(), openExternal: vi.fn() } },
+}));
 vi.mock("../../../store/termStore", () => ({
   useTermStore: {
     getState: () => h.store,

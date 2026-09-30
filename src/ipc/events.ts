@@ -9,7 +9,7 @@ import {
 import type { MirrorSnapshot, RemoteClient } from "./mirror";
 import type { SessionStateBatch } from "./sessionState";
 import type { KillReason, UsageSnapshot } from "./commands";
-import type { AgentKind, SessionKind } from "../types";
+import type { AgentKind, AgentState, SessionKind } from "../types";
 
 // PTY output bypasses the event channel and travels directly through spawnPty's binary Channel / WS binary frames; see transport.ts.
 
@@ -69,7 +69,7 @@ export type StatusSignal =
   // silent=true corrects state without a system notification (Claude idle_prompt or an old snapshot replayed on attach).
   | {
       kind: "state";
-      state: "working" | "asking" | "waiting";
+      state: AgentState;
       silent?: boolean;
       /** Authoritative full-lifecycle source; once received, screen/busy fallbacks may not override it. */
       authoritative?: boolean;

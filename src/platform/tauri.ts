@@ -38,8 +38,10 @@ import type {
   OpenerCapability,
   Platform,
   QuitCapability,
+  QuitRequest,
   TransportCapability,
   UnlistenFn,
+  UpdaterCapability,
   VelaCommandCapability,
   WindowCapability,
 } from "./types";
@@ -76,6 +78,19 @@ const dialog: DialogCapability = {
   },
   pickDirectory: transportPickDirectory,
   pickFile: transportPickFile,
+  droppedFolders(transfer) {
+    if (!env.isTauri) return Promise.resolve([]);
+    // WebView2 hands posted File objects to the host together with their paths. The host listens only for
+    // this marker, and macOS/Linux read the paths from their own drag channel instead.
+    const webview = (window as unknown as {
+      chrome?: { webview?: { postMessageWithAdditionalObjects?: (message: unknown, objects: File[]) => void } };
+    }).chrome?.webview;
+    const files = Array.from(transfer.files);
+    if (files.length && webview?.postMessageWithAdditionalObjects) {
+      webview.postMessageWithAdditionalObjects({ vlxDroppedFiles: true }, files);
+    }
+    return transportInvoke<string[]>("take_dropped_paths");
+  },
 };
 
 const opener: OpenerCapability = {
@@ -181,7 +196,9 @@ const quit: QuitCapability = {
     // Only the main Tauri window owns the application lifetime. Remote windows and browsers exit with their tab.
     if (!env.isTauri) return null;
     const { listen } = await import("@tauri-apps/api/event");
-    return listen("app://quit-requested", () => cb());
+    return listen<Partial<QuitRequest> | null>("app://quit-requested", (event) =>
+      cb({ remoteWindows: event.payload?.remoteWindows ?? 0 }),
+    );
   },
   async ack() {
     if (!env.isTauri) return;
@@ -256,6 +273,23 @@ const browser: BrowserCapability = {
     transportListen<BrowserPopupPayload>(`browser://popup/${tabId}`, (payload) => cb(payload)),
 };
 
+/** Updater plugin on the desktop; browsers and remote windows do not self-update. */
+const updater: UpdaterCapability = {
+  supported: env.isTauri,
+  async check(headers) {
+    const { check } = await import("@tauri-apps/plugin-updater");
+    return check(headers ? { headers } : undefined);
+  },
+  async relaunch() {
+    const { relaunch } = await import("@tauri-apps/plugin-process");
+    await relaunch();
+  },
+  async message(text, opts) {
+    const { message } = await import("@tauri-apps/plugin-dialog");
+    await message(text, opts);
+  },
+};
+
 /** Tauri platform implementation, including browser remote access fallbacks. */
 export const tauriPlatform: Platform = {
   fonts,
@@ -270,4 +304,5 @@ export const tauriPlatform: Platform = {
   velaCommand,
   notify,
   browser,
+  updater,
 };

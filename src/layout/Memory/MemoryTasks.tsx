@@ -97,13 +97,13 @@ export function MemoryJobs({ id }: { id?: string }) {
     {!data ? <LoadState error={error} reload={() => setRevision((v) => v + 1)} /> : <>
       {!data.jobs.length && <p>{t(id ? "memory.notFound" : "memory.emptyJobs")}</p>}
       {data.jobs.map((job) => <article className="memory-job" key={job.id}>
-        <div className="memory-row"><MemoryLink route={`job/${job.id}`}><strong>{job.sessionName}</strong></MemoryLink><span className="memory-spacer" /><span className={`memory-status ${job.status}`}><StateLabel value={job.status} /></span></div>
+        <div className="memory-row"><MemoryLink route={job.entryLinks.length === 1 ? `entry/${job.entryLinks[0].id}` : `job/${job.id}`}><strong>{job.sessionName}</strong></MemoryLink><span className="memory-spacer" /><span className={`memory-status ${job.status}`}><StateLabel value={job.status} /></span></div>
         <p className="memory-muted">{job.agentLabel || job.agent}{` · ${job.model || t("chat.modelDefault")}`} · {t("chat.effortTooltip")}: {job.effort ? memoryEffortLabel(job.effort) : t("spawn.modelDefault")} · {memoryTime(job.createdAt)}</p>
         {job.status === "running" && <><p role="status"><StateLabel value={job.stage} /> · {job.progress} / {job.total || "…"}</p><progress max={job.total || 1} value={job.progress} /></>}
         {job.status === "queued" && <p className="memory-muted" role="status">{t("memory.waitingHint")}</p>}
         {job.error && <p className="memory-error">{memoryError(job.error)}</p>}
         {job.status === "completed" && !job.entries.length && <p>{t("memory.noKnowledge")}</p>}
-        <div className="memory-job-entries">{job.entries.map((entryId, index) => <MemoryLink key={entryId} className="btn" route={`entry/${entryId}`}>{t("memory.entries")} {index + 1} ↗</MemoryLink>)}</div>
+        <div className="memory-job-entries">{job.entryLinks.map((entry) => <MemoryLink key={entry.id} className="btn" title={entry.title} route={`entry/${entry.id}`}>{entry.title} ↗</MemoryLink>)}</div>
         <footer className="memory-row"><MemoryLink route={`source/${job.sourceId}`}>{t("memory.source")}</MemoryLink><span className="memory-spacer" />
           {["queued", "running"].includes(job.status) && <button className="btn" disabled={busy === job.id} onClick={() => void command(job, true)}>{t("common.cancel")}</button>}
           {["failed", "cancelled"].includes(job.status) && <button className="btn" disabled={busy === job.id} onClick={() => void command(job, false)}>{t("common.retry")}</button>}

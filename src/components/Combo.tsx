@@ -189,7 +189,8 @@ export default function Combo<T extends string>({
         role="listbox"
         aria-label={ariaLabel}
         // A wrapping <label> would otherwise forward a row click on to the input as a second activation.
-        onClick={(e) => e.stopPropagation()}
+        // Label activation is a default action, so only preventDefault cancels it.
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
         style={{
           ...SELECT_PANEL,
           left: align === "left" ? 0 : undefined,

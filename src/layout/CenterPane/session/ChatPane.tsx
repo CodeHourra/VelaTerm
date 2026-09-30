@@ -18,6 +18,7 @@ import { measureElement, observeElementOffset, useVirtualizer } from "@tanstack/
 import Icons from "../../../components/Icons";
 import { ComposerOptionsButton, useComposerOptions } from "./ComposerOptions";
 import { ComposerToolbar } from "./ComposerToolbar";
+import { setComposerHeight, startComposerResize, useComposerHeight } from "./composerHeight";
 import type { ComposerChip } from "./composerLayout";
 import { ModelCatalogStatus } from "./ModelCatalogStatus";
 import { StatusIndicator } from "../../../components/StatusIndicator";
@@ -257,6 +258,7 @@ export function ChatPane({
   const composerOptions = useComposerOptions(mobile);
   const paneStyle = useTermStore((s) => s.paneStyle);
   const composerInlineChips = useTermStore((s) => s.composerInlineChips);
+  const composerHeight = useComposerHeight();
   const status = useTermStore((s) => effectiveStatus(s.runtimes[session.id]));
   const searchOpen = useTermStore((s) => s.searchOpen);
   const closeSearch = useTermStore((s) => s.closeSearch);
@@ -2419,12 +2421,20 @@ export function ChatPane({
               </div>
             )}
             <div className="sv-box">
+              {/* The top edge resizes the text box; a double-click returns it to the default height. */}
+              {!mobile && <div
+                className="sv-box-resize"
+                title={t("splitter.dragToResize")}
+                onMouseDown={(e) => startComposerResize(e, inputRef.current)}
+                onDoubleClick={() => setComposerHeight(null)}
+              />}
               <textarea
                 ref={inputRef}
                 onPaste={onPaste}
                 disabled={clientCommandRunning}
                 value={draft}
                 rows={1}
+                style={!mobile && composerHeight !== null ? { height: composerHeight, maxHeight: "70vh" } : undefined}
                 placeholder={
                   busy
                     ? t("chat.placeholderBusy")

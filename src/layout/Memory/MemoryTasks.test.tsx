@@ -25,7 +25,7 @@ vi.mock("../../store/termStore", () => ({
 }));
 const job = (id: string, status: string): MemoryJob => ({
   id, status, sessionName: `Session ${id}`, sourceId: `source-${id}`, agent: "codex", agentLabel: "Codex", model: "", effort: "",
-  stage: "extract", progress: 0, total: 1, error: "", entries: [], createdAt: 0, updatedAt: 0,
+  stage: "extract", progress: 0, total: 1, error: "", entries: [], entryLinks: [], createdAt: 0, updatedAt: 0,
 });
 beforeEach(() => {
   setLang("en"); window.history.replaceState(null, "", "/?memory=jobs");
@@ -62,6 +62,18 @@ it("shows parallel sessions and lets the user cancel a replacement waiting for i
   await waitFor(() => expect(api.cancel).toHaveBeenCalledWith("latest"));
   await screen.findByText("Cancelled");
   expect(screen.getAllByText("In progress")).toHaveLength(2);
+});
+
+it("links a finished job to the entries it produced by title", async () => {
+  const single = { ...job("one", "completed"), entries: ["e1"], entryLinks: [{ id: "e1", title: "First entry" }] };
+  const multiple = { ...job("two", "completed"), entries: ["e2", "e3"], entryLinks: [{ id: "e2", title: "Second" }, { id: "e3", title: "Third" }] };
+  api.jobs.mockResolvedValue({ jobs: [single, multiple], total: 2, pageSize: 40 });
+  render(<MemoryJobs />);
+  // With a single entry the job title opens that entry directly.
+  expect((await screen.findByRole("link", { name: "Session one" })).getAttribute("href")).toContain("memory=entry%2Fe1");
+  expect(screen.getByRole("link", { name: "Session two" }).getAttribute("href")).toContain("memory=job%2Ftwo");
+  expect(screen.getByRole("link", { name: "First entry ↗" }).getAttribute("href")).toContain("memory=entry%2Fe1");
+  expect(screen.getByRole("link", { name: "Third ↗" }).getAttribute("href")).toContain("memory=entry%2Fe3");
 });
 
 it("offers every organizer agent and starts the job with the one that was picked", async () => {

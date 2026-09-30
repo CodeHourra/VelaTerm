@@ -1,3 +1,35 @@
+## v0.2.6 — 2026-09-30
+
+- 🐧 Die Linux-Version basiert jetzt auf Electron. Das AppImage behält seinen Dateinamen und Ihre Daten, benötigt kein WebKitGTK und kein libfuse2 mehr, und bestehende Installationen lassen sich über die integrierte Aktualisierung darauf umstellen.
+
+- 🛰️ Rechner, die per SSH nicht erreichbar sind, etwa WSL auf einem anderen Computer oder ein Docker-Container, lassen sich nach der Installation von `vela-server` mit einem einzigen Befehl mit Ihrem Konto verknüpfen und erscheinen dann in der Remote-Liste für KI-Unterhaltungen. Sobald der Besitzer auf dem Host vollen Zugriff gewährt, kann die Desktop-App auch das Terminal, die Dateien und das Git-Panel dieses Hosts nutzen.
+
+- 📂 Ordner, die aus dem Finder, dem Datei-Explorer oder einem Linux-Dateimanager in die Seitenleiste gezogen werden, werden als Projekte hinzugefügt.
+
+- 📝 Der Markdown-Editor bietet jetzt Tastenkürzel wie in Typora für Überschriften, Listen, Codeblöcke und Tabellen, automatisches Schließen von Klammern und Anführungszeichen, Cmd/Strg+Klick zum Öffnen von Links, einen Fokus- und einen Schreibmaschinenmodus sowie eine Wort- und Zeichenzählung in der Statusleiste. YAML-Front-Matter erscheint in einem eigenen Feld über dem Dokument und bleibt unverändert, solange Sie es nicht bearbeiten.
+
+- 🗃️ Ist ein Ordner selbst kein Git-Repository, enthält aber mehrere, bietet das Git-Panel eine Repository-Auswahl und arbeitet mit dem ausgewählten Repository.
+
+- ⏳ In der Unterhaltungsansicht zeigt eine Sitzung, deren Antwort abgeschlossen ist, während noch Hintergrundaufgaben laufen, den neuen Status „Aufgaben laufen“ mit einem cyanfarbenen Punkt, statt weiterhin „Aktiv“ anzuzeigen. Sitzungen, die lange Aufgaben mit `vrun` ausführen, zeigen denselben Status.
+
+- 🍴 In der Unterhaltungsansicht beginnt eine abgezweigte Sitzung beim ersten Start eine eigene Unterhaltung, und die Ursprungssitzung erhält ihre Nachrichten nicht mehr.
+
+- 🛡️ In der Unterhaltungsansicht folgt die Modusbeschriftung einer Claude-Sitzung dem Berechtigungsmodus, den Claude tatsächlich verwendet, etwa nach dem Wechsel in den Plan-Modus, und Berechtigungskarten zeigen den Grund, den Claude für die Nachfrage angibt.
+
+- 📏 Die Höhe des Eingabefelds in der Unterhaltungsansicht lässt sich durch Ziehen am oberen Rand anpassen; ein Doppelklick auf den Rand stellt die Standardhöhe wieder her. Die Höhe gilt für alle Bereiche und bleibt nach einem Neustart erhalten.
+
+- 🗂️ Sind in der Seitenleiste mehrere Ordner ausgewählt, lassen sie sich über das Kontextmenü zusammen mit ihren Sitzungen archivieren.
+
+- 📚 Sammlungen stehen in der Seitenleiste immer über den Projekten.
+
+- 🧠 Hat ein Verarbeitungsprotokoll der Wissensbasis nur einen Eintrag erzeugt, öffnet sein Titel diesen Eintrag direkt; die Eintragsschaltflächen zeigen die Titel der Einträge statt Nummern.
+
+- 📊 Das Info-Panel zeigt für neuere Claude-Modelle wie Opus 5.5 das korrekte Kontextlimit statt 200k.
+
+- 🎨 Kleinere Änderungen: Die drei Optionen zum geteilten Öffnen im Kontextmenü einer Sitzung sind im Untermenü „Im geteilten Bereich öffnen“ zusammengefasst, die Beenden-Bestätigung weist darauf hin, dass geöffnete Remote-Fenster ebenfalls geschlossen werden, und Auswahllisten in Formularen schließen sich sofort nach der Auswahl.
+
+---
+
 ## v0.2.5 — 2026-09-28
 
 - 🐧 In der Windows-Desktop-App lassen sich separate Arbeitsbereiche in WSL1 und WSL2 öffnen, die die Agenten, Dateien und den Sitzungsverlauf der ausgewählten Linux-Distribution verwenden.

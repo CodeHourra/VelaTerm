@@ -1202,6 +1202,7 @@
 }
 
 .sv-box {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1213,6 +1214,17 @@
 }
 .sv-box:focus-within {
   border-color: var(--accent-line);
+}
+/* Grab strip on the box's top edge for dragging the text box taller or shorter. It stays clear of the
+   rounded corners and draws nothing: the cursor is the affordance, the box border is the edge. */
+.sv-box-resize {
+  position: absolute;
+  top: -4px;
+  left: 12px;
+  right: 12px;
+  height: 8px;
+  cursor: row-resize;
+  z-index: 1;
 }
 .sv-composer textarea {
   min-height: 34px;
@@ -1897,6 +1909,12 @@ select.sv-pill {
 }
 .sv-permission-title {
   font-weight: 600;
+}
+.sv-permission-reason {
+  margin-bottom: 6px;
+  color: var(--text-dim);
+  font-size: calc(var(--ui-fs) - 1px);
+  overflow-wrap: anywhere;
 }
 .sv-permission-actions {
   display: flex;

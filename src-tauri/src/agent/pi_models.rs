@@ -47,7 +47,7 @@ fn list_raw(kind: SessionKind, bin: &str, cwd: Option<&str>, extra_args: &[Strin
     let variant = PiVariant::of(kind).ok_or("This session is not a Pi or OMP conversation")?;
     let mut cmd = crate::host::command(bin);
     crate::agent::executable::prepare_command(&mut cmd, bin);
-    cmd.args(wire::launch_args(variant, None, None, false));
+    cmd.args(wire::launch_args(variant, None, false, None, false));
     cmd.args(extra_args);
     if let Some(cwd) = cwd {
         cmd.current_dir(cwd);

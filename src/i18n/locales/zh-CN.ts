@@ -325,6 +325,7 @@ const zhCN: typeof en = {
   "status.working": "处理中",
   "status.asking": "待确认",
   "status.waiting": "已查看",
+  "status.background": "后台任务运行中",
   "status.unavailable": "状态不可用",
   "indicator.unread": "未读 · 待查看",
 
@@ -544,6 +545,7 @@ const zhCN: typeof en = {
   "git.deleteFile": "删除",
   "git.viewAll": "查看全部",
   "git.detached": "（游离 HEAD）",
+  "git.repository": "仓库",
   "git.aheadBehind": "相对上游分支领先和落后的提交数",
   "git.commitPlaceholder": "提交说明",
   "git.amend": "修改上一次提交",
@@ -794,6 +796,7 @@ const zhCN: typeof en = {
   "tree.newChildSession": "新建子会话",
   "tree.openSelected": "打开选中会话",
   "tree.archiveSelected": "归档选中的会话",
+  "tree.archiveSelectedItems": (n) => `归档选中的 ${n} 项`,
   "tree.moveSelected": "移动所选到…", // Move Selected to…
   "tree.deleteSelected": (n) => `删除选中的 ${n} 项`,
   "tree.removeProject": "移除项目",
@@ -828,7 +831,9 @@ const zhCN: typeof en = {
   "tree.persistDoc": "保存到磁盘…",
   "tree.closeScratch": "关闭草稿",
   "tree.importProject": "导入项目",
+  "tree.openInSplit": "在分屏中打开",
   "tree.createProject": "创建项目",
+  "tree.dropFoldersHint": "将文件夹拖放到此处，即可添加为项目",
   // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
   "tree.newCollection": "新建集合",
   "tree.deleteCollection": "删除集合",
@@ -907,6 +912,7 @@ const zhCN: typeof en = {
   "mark.urgent": "紧急",
   "mark.important": "重要",
   "mark.bug": "缺陷",
+  "tree.filterBackground": "任务运行中",
   "mark.done": "已完成",
   "mark.wip": "进行中",
   "mark.pinned": "置顶关注",
@@ -1115,6 +1121,7 @@ const zhCN: typeof en = {
   // Application-exit confirmation and dormant restored sessions.
   "quit.title": "退出 VelaTerm？", // Quit VelaTerm?
   "quit.body": "正在运行的终端会话与智能体会话都会被停止。", // Any running terminal and agent sessions will be stopped.
+  "quit.remoteWindows": "已打开的远端窗口也会一并关闭。", // Open remote windows will also be closed.
   "quit.saveWorkspace": "保存工作空间", // Save workspace
   "quit.saveWorkspaceHint":
     "下次打开时恢复相同的标签页和分屏。终端会恢复出来，但不会自动重启。", // Reopen the same tabs and splits next time. Terminals are restored but not restarted.
@@ -1224,6 +1231,14 @@ const zhCN: typeof en = {
   "doc.imgActual": "1:1",
   "doc.exportPdf": "导出 PDF",
   "doc.diagramError": "图表语法错误",
+  "doc.frontMatter": "YAML 前言",
+  "doc.focusMode": "专注模式",
+  "doc.typewriterMode": "打字机模式",
+  "doc.statsLabel": "文档统计",
+  "doc.statWords": (_n: number, count: string) => `${count} 字`,
+  "doc.statCharacters": (_n: number, count: string) => `${count} 个字符`,
+  "doc.statLines": (_n: number, count: string) => `${count} 行`,
+  "doc.statMinutes": (_n: number, count: string) => `阅读约 ${count} 分钟`,
 
   // ── Right information panel ──
   "panel.noSession": "未选择会话",

@@ -42,8 +42,8 @@ pub struct AgentContextInfo {
     pub model: Option<String>,
     /// Current context tokens: latest input + cache creation + cache read, representing all context sent.
     pub context_tokens: Option<u64>,
-    /// Context limit. A `[1m]` settings suffix explicitly selects 1M; otherwise infer from the transcript model ID,
-    /// falling back conservatively to 200k.
+    /// Context limit. A `[1m]` settings suffix explicitly selects 1M; otherwise look up the transcript model ID in
+    /// the model catalogue, falling back conservatively to 200k and widening to 1M once usage exceeds the limit.
     pub context_limit: u64,
     /// Current tool inferred for Codex from the latest call without output. Claude uses live hook state instead.
     pub current_tool: Option<String>,
@@ -85,7 +85,7 @@ pub fn context_info(kind: SessionKind, agent_session_id: &str) -> Result<AgentCo
         .ok_or("Claude transcript file not found")?;
     let tail = read_tail(&path, CONTEXT_TAIL_BYTES)?;
     let (model, context_tokens) = last_claude_usage(&tail);
-    // Respect explicit `[1m]` first, then infer from the real model ID, then fall back to 200k.
+    // Respect explicit `[1m]` first, then look up the real model ID, then fall back to 200k.
     let settings = claude_settings();
     let force_1m = settings
         .as_ref()
@@ -97,8 +97,10 @@ pub fn context_info(kind: SessionKind, agent_session_id: &str) -> Result<AgentCo
     } else {
         model
             .as_deref()
-            .map_or(CONTEXT_LIMIT_DEFAULT, context_limit_for_model)
+            .and_then(super::claude_models::context_window)
+            .unwrap_or(CONTEXT_LIMIT_DEFAULT)
     };
+    let context_limit = widen_to_usage(context_limit, context_tokens);
     Ok(AgentContextInfo {
         model,
         context_tokens,
@@ -373,22 +375,13 @@ fn last_codex_context_info(text: &str) -> AgentContextInfo {
     }
 }
 
-/// Infers context tokens from a real model ID using official max_input_tokens. `contains` handles dated suffixes.
-/// Unknown models conservatively use 200k rather than overstating capacity; extend the table for new models.
-fn context_limit_for_model(model: &str) -> u64 {
-    // Known 1M models; Haiku 4.5, older unspecified models, and others use the 200k fallback.
-    const ONE_M_MODELS: &[&str] = &[
-        "opus-4-8",
-        "opus-4-7",
-        "opus-4-6",
-        "sonnet-4-6",
-        "fable-5",
-        "mythos-5",
-    ];
-    if ONE_M_MODELS.iter().any(|needle| model.contains(needle)) {
-        CONTEXT_LIMIT_1M
+/// A model never holds more context than its window, so usage above the looked-up limit means the lookup is
+/// stale for this model. Show the 1M window instead of a meter past 100%.
+fn widen_to_usage(limit: u64, tokens: Option<u64>) -> u64 {
+    if tokens.is_some_and(|t| t > limit) {
+        limit.max(CONTEXT_LIMIT_1M)
     } else {
-        CONTEXT_LIMIT_DEFAULT
+        limit
     }
 }
 
@@ -1621,41 +1614,13 @@ printf '%s\n' '{"id":1,"result":{"outcome":"alreadyRedeemed"}}'
         assert!(empty.context_tokens.is_none());
     }
 
-    /// Maps real model IDs, including dated suffixes, to 1M windows and uses 200k for unknown models.
+    /// Usage beyond the looked-up limit widens it to 1M; usage within it leaves the limit alone.
     #[test]
-    fn context_limit_for_model_maps_window() {
-        for m in [
-            "claude-opus-4-8",
-            "claude-opus-4-7",
-            "claude-opus-4-6",
-            "claude-sonnet-4-6",
-            "claude-fable-5",
-            "claude-mythos-5",
-        ] {
-            assert_eq!(
-                context_limit_for_model(m),
-                CONTEXT_LIMIT_1M,
-                "should be classified as 1M: {m}"
-            );
-        }
-        // Dated suffixes still match.
-        assert_eq!(
-            context_limit_for_model("claude-opus-4-8-20260101"),
-            CONTEXT_LIMIT_1M
-        );
-        // 200k and unknown models use the fallback.
-        for m in [
-            "claude-haiku-4-5",
-            "claude-haiku-4-5-20251001",
-            "claude-opus-4-1",
-            "weird-model",
-        ] {
-            assert_eq!(
-                context_limit_for_model(m),
-                CONTEXT_LIMIT_DEFAULT,
-                "should be classified as 200k: {m}"
-            );
-        }
+    fn widen_to_usage_never_reports_more_than_the_window() {
+        assert_eq!(widen_to_usage(CONTEXT_LIMIT_DEFAULT, None), CONTEXT_LIMIT_DEFAULT);
+        assert_eq!(widen_to_usage(CONTEXT_LIMIT_DEFAULT, Some(150_000)), CONTEXT_LIMIT_DEFAULT);
+        assert_eq!(widen_to_usage(CONTEXT_LIMIT_DEFAULT, Some(726_600)), CONTEXT_LIMIT_1M);
+        assert_eq!(widen_to_usage(CONTEXT_LIMIT_1M, Some(726_600)), CONTEXT_LIMIT_1M);
     }
 
     /// Current-turn stats begin after the final real user message; tool results are not boundaries. Sum output tokens,

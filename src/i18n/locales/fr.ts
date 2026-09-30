@@ -325,6 +325,7 @@ const fr: typeof en = {
   "status.working": "En traitement", // Working
   "status.asking": "Confirmation requise", // Needs confirmation
   "status.waiting": "Consulté", // Viewed
+  "status.background": "Tâches en arrière-plan en cours", // Background tasks running
   "status.unavailable": "État indisponible",
   "indicator.unread": "Non lu · à consulter", // Unread · awaiting review
 
@@ -549,6 +550,7 @@ const fr: typeof en = {
   "git.deleteFile": "Supprimer",
   "git.viewAll": "Tout afficher",
   "git.detached": "(détaché)",
+  "git.repository": "Dépôt",
   "git.aheadBehind": "Commits en avance et en retard sur la branche amont",
   "git.commitPlaceholder": "Message de commit",
   "git.amend": "Modifier le dernier commit",
@@ -814,6 +816,7 @@ const fr: typeof en = {
   "tree.newChildSession": "Nouvelle session enfant", // New Child Session
   "tree.openSelected": "Ouvrir les sessions sélectionnées", // Open Selected Sessions
   "tree.archiveSelected": "Archiver les sessions sélectionnées", // Archive Selected Sessions
+  "tree.archiveSelectedItems": (n) => `Archiver les ${n} éléments sélectionnés`, // Archive {n} Selected Items
   "tree.moveSelected": "Déplacer la sélection vers…", // Move Selected to…
   "tree.deleteSelected": (n) => `Supprimer les ${n} éléments sélectionnés`, // Delete {n} Selected Items
   "tree.removeProject": "Retirer le projet", // Remove Project
@@ -848,7 +851,9 @@ const fr: typeof en = {
   "tree.persistDoc": "Enregistrer sur le disque…", // Save to Disk…
   "tree.closeScratch": "Fermer le brouillon", // Close Scratch
   "tree.importProject": "Importer un projet", // Import Project
+  "tree.openInSplit": "Ouvrir dans un volet", // Open in Split
   "tree.createProject": "Créer un projet",
+  "tree.dropFoldersHint": "Déposez des dossiers ici pour les ajouter en tant que projets",
   // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
   "tree.newCollection": "Nouvelle collection",
   "tree.deleteCollection": "Supprimer la collection",
@@ -927,6 +932,7 @@ const fr: typeof en = {
   "mark.menu": "Repère", // Mark
   "mark.urgent": "Urgent", // Urgent
   "mark.important": "Important", // Important
+  "tree.filterBackground": "Tâches actives", // Tasks running
   "mark.bug": "Bogue", // Bug
   "mark.done": "Terminé", // Done
   "mark.wip": "En cours", // In progress
@@ -1154,6 +1160,7 @@ const fr: typeof en = {
   "quit.title": "Quitter VelaTerm ?", // Quit VelaTerm?
   "quit.body":
     "Toutes les sessions de terminal et d'agent en cours seront arrêtées.", // Any running terminal and agent sessions will be stopped.
+  "quit.remoteWindows": "Les fenêtres distantes ouvertes seront également fermées.", // Open remote windows will also be closed.
   "quit.saveWorkspace": "Enregistrer l'espace de travail", // Save workspace
   "quit.saveWorkspaceHint":
     "Rouvrir les mêmes onglets et divisions la prochaine fois. Les terminaux sont restaurés, mais pas redémarrés.", // Reopen the same tabs and splits next time. Terminals are restored but not restarted.
@@ -1274,6 +1281,14 @@ const fr: typeof en = {
   "doc.imgActual": "1:1", // 1:1
   "doc.exportPdf": "Exporter en PDF", // Export PDF
   "doc.diagramError": "Erreur de diagramme", // Diagram error
+  "doc.frontMatter": "En-tête YAML", // Front matter
+  "doc.focusMode": "Mode concentration", // Focus Mode
+  "doc.typewriterMode": "Mode machine à écrire", // Typewriter Mode
+  "doc.statsLabel": "Statistiques du document", // Document statistics
+  "doc.statWords": (n: number, count: string) => (n <= 1 ? `${count} mot` : `${count} mots`), // N words
+  "doc.statCharacters": (n: number, count: string) => (n <= 1 ? `${count} caractère` : `${count} caractères`), // N characters
+  "doc.statLines": (n: number, count: string) => (n <= 1 ? `${count} ligne` : `${count} lignes`), // N lines
+  "doc.statMinutes": (_n: number, count: string) => `${count} min de lecture`, // N min read
 
   // ── Right information panel ──
   "panel.noSession": "Aucune session sélectionnée", // No session selected

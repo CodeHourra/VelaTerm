@@ -32,6 +32,8 @@ const KEYFILE: &str = "vlx-e2ee-key.b64";
 pub const MSG_READY: &str = "{\"type\":\"e2ee_ready\"}";
 /// Encrypted handshake frame indicating successful authentication.
 pub const MSG_AUTHENTICATED: &str = "{\"type\":\"e2ee_authenticated\"}";
+/// Encrypted handshake frame telling a share visitor that its connection was upgraded to full access.
+pub const MSG_AUTHENTICATED_FULL: &str = "{\"type\":\"e2ee_authenticated\",\"access\":\"full\"}";
 
 /// Encrypted error frame for authentication failures.
 pub fn err_msg(code: &str) -> String {
@@ -139,11 +141,16 @@ impl Cipher {
     }
 }
 
-/// Plaintext client hello carrying the client's public key.
+/// Plaintext client hello carrying the client's public key. A desktop client asking for full access over a
+/// public share also carries its device key and the proof described in `full_access`.
 #[derive(Deserialize)]
 struct Hello {
     #[serde(rename = "publicKeyB64")]
     public_key_b64: String,
+    #[serde(default, rename = "devicePublicKey")]
+    device_public_key: Option<String>,
+    #[serde(default, rename = "deviceProof")]
+    device_proof: Option<String>,
 }
 
 /// Extract the base64 client public key from an `e2ee_hello` text frame.
@@ -151,6 +158,12 @@ pub fn parse_hello(raw: &str) -> Option<String> {
     serde_json::from_str::<Hello>(raw)
         .ok()
         .map(|h| h.public_key_b64)
+}
+
+/// Extract the optional `(device public key, device proof)` pair from an `e2ee_hello` text frame.
+pub fn parse_hello_device(raw: &str) -> Option<(String, String)> {
+    let hello = serde_json::from_str::<Hello>(raw).ok()?;
+    Some((hello.device_public_key?, hello.device_proof?))
 }
 
 /// Decrypted client authentication: pairing token, optional second-factor password, and device metadata.

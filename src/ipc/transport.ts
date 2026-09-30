@@ -12,6 +12,7 @@ import { listen as tauriListen, type UnlistenFn } from "@tauri-apps/api/event";
 import { t } from "../i18n";
 import { recordRequestError } from "./reqLog";
 import { safeCommand, safeError, diagnosticOperation } from "./diagnosticSafety";
+import { apiUrl } from "./shareBase";
 import { wsClient, bytesToB64 } from "./wsClient";
 import type { SessionKind } from "../types";
 
@@ -21,6 +22,11 @@ export const isTauri =
   typeof window !== "undefined" &&
   "__TAURI_INTERNALS__" in window &&
   !(window as any).__VLX_FORCE_BROWSER__;
+
+/** Whether this is the Electron shell's own window, marked by its preload. It is a desktop host like Tauri but
+ *  reaches its local backend over WebSocket. platform/env.ts derives `env.isElectron` from this. */
+export const isElectronShell =
+  typeof window !== "undefined" && !!(window as any).__VLX_ELECTRON__;
 
 /** Whether the current platform is macOS, used only for UI labels. Shortcut logic uses metaKey || ctrlKey. */
 export const isMac =
@@ -118,6 +124,8 @@ const DIRECT_DESKTOP_CMDS = new Set([
   "probe_remote_fingerprint",
   "url_trust_fingerprint",
   "open_devtools",
+  // Dropped-file paths come from the local window's own drag channel, which only the desktop process can read.
+  "take_dropped_paths",
   // Native chrome tinting touches the window/appearance on every platform, so it must stay a native command.
   "set_native_theme",
   "ssh_probe_host",
@@ -284,9 +292,10 @@ export function spawnPty(
 
 /**
  * Streams a terminal recording in chunks through `onBytes` and resolves at EOF. Desktop uses the same binary
- * Channel as PTY output. Browser playback is currently unsupported and rejects immediately.
+ * Channel as PTY output. Other clients fetch the file through a short-lived download ticket, which the backend
+ * issues only to the machine's own windows (the Electron shell); remote browsers are refused.
  */
-export function readRecordingStream(
+export async function readRecordingStream(
   sessionId: string,
   onBytes: (bytes: Uint8Array) => void,
 ): Promise<void> {
@@ -295,7 +304,26 @@ export function readRecordingStream(
     channel.onmessage = (msg) => onBytes(new Uint8Array(msg));
     return tauriInvoke("read_recording", { sessionId, onChunk: channel });
   }
-  return Promise.reject(new Error(t("transport.noReplayInBrowser")));
+  // Only the Electron shell's own window may replay; remote browsers keep the old refusal without a request.
+  if (!isElectronShell) {
+    throw new Error(t("transport.noReplayInBrowser"));
+  }
+  let ticket: string | null;
+  try {
+    ticket = await invoke<string | null>("recording_download_ticket", { sessionId });
+  } catch {
+    throw new Error(t("transport.noReplayInBrowser"));
+  }
+  // No recording file: an empty replay, matching the desktop command.
+  if (!ticket) return;
+  const res = await fetch(apiUrl(ticket));
+  if (!res.ok || !res.body) throw new Error(`Failed to read recording: HTTP ${res.status}`);
+  const reader = res.body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return;
+    if (value?.length) onBytes(value);
+  }
 }
 
 /**
@@ -305,6 +333,8 @@ export function readRecordingStream(
 export function ptyTeardown(sessionId: string): Promise<void> {
   if (isTauri) return tauriInvoke("pty_kill", { sessionId });
   wsClient.teardownPty(sessionId);
+  // The Electron shell is the local desktop, so it keeps the desktop's unmount-means-kill semantics.
+  if (isElectronShell) return invoke("pty_kill", { sessionId });
   return Promise.resolve();
 }
 

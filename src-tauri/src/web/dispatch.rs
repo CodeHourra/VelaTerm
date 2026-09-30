@@ -610,6 +610,8 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
         // ── Info panel, files, and Git ──
         "get_git_status" => to_value(git::status(&req_str(args, "path")?)),
         "git_changed_files" => to_value(git::changed_files(&req_str(args, "cwd")?)?),
+        // Git panel on a folder that is not a repository: offer the repositories found below it.
+        "git_discover_repos" => to_value(git::discover_repos(&req_str(args, "path")?)),
         "git_file_diff" => {
             // file_diff reads the worktree side with a raw fs::read of repo_top(cwd).join(path):
             // an absolute `path` replaces the base entirely and repo_top falls back to `cwd` outside
@@ -932,6 +934,7 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
         // enumerates every dispatch arm extracting a path-like argument and fails on any arm that is
         // neither gated nor listed as a justified exception. Deliberately NOT gated:
         // - `list_dir` / `stat_file`: metadata only (names, sizes, mtimes) — no content, no mutation.
+        // - `git_discover_repos`: metadata only — the paths of repositories below a directory.
         // - `get_git_status` / `git_changed_files` / `git_recent_commits` / `git_branch_list` /
         //   `git_merge_*` / `create_worktree` / `list_worktrees` / `commit_worktree` /
         //   `delete_branch`: repo-scoped through git itself — they return derived metadata
@@ -1043,6 +1046,25 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
             // Refuse up front rather than minting a ticket that will 404, so the failure names the real cause.
             files::stat_file(&path)?;
             to_value(crate::web::download::issue(&path))
+        }
+        // Recording playback for WebSocket clients: desktop Tauri streams the file over a binary Channel,
+        // which a socket cannot carry, so the client fetches it through a download ticket instead. Local
+        // origins only, matching the desktop, where only the machine's own windows replay recordings.
+        "recording_download_ticket" => {
+            if origin != CallOrigin::Local {
+                return Err("Recording playback is only available on this computer.".into());
+            }
+            let session_id = req_str(args, "sessionId")?;
+            if session_id.is_empty()
+                || !session_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            {
+                return Err("Invalid session ID.".into());
+            }
+            let path = app.data_dir()?.join("recordings").join(format!("{session_id}.log"));
+            if !path.is_file() {
+                return Ok(Value::Null);
+            }
+            to_value(crate::web::download::issue(&path.to_string_lossy()))
         }
         "stat_file" => to_value(files::stat_file(&req_str(args, "path")?)?),
         "read_file_base64" => {
@@ -2208,6 +2230,7 @@ mod tests {
         "stat_file",       // metadata only
         "get_git_status",  // derived repo status, no file content
         "git_changed_files",
+        "git_discover_repos", // directory names and paths only, no file content
         "git_recent_commits",
         "git_branch_list",
         "git_merge_preview", // diff_stat summary, no raw file bytes

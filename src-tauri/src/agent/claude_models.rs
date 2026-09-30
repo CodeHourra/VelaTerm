@@ -343,6 +343,56 @@ fn reported(bin: &str) -> Option<Vec<ClaudeModel>> {
     REPORTED.lock().unwrap().as_ref()?.get(bin).cloned()
 }
 
+/// Context windows a running Claude process reported at the end of a turn, keyed by model id.
+///
+/// The CLI is the only source that accounts for the `[1m]` request and the account's entitlement, but it
+/// reports the window only to a live process and never writes it to the transcript. Keeping it here lets
+/// a terminal session or a resting conversation on the same model show the same limit.
+static REPORTED_WINDOWS: Mutex<Option<HashMap<String, u64>>> = Mutex::new(None);
+
+/// Record the window the CLI reported for `model`.
+pub fn remember_context_window(model: &str, window: u64) {
+    if model.is_empty() || window == 0 {
+        return;
+    }
+    let mut guard = REPORTED_WINDOWS.lock().unwrap();
+    guard
+        .get_or_insert_with(HashMap::new)
+        .insert(model.to_string(), window);
+}
+
+/// Context window for a model id as a transcript records it, or None when no source knows the model.
+///
+/// A window the CLI reported wins, then the catalogue Claude Code itself uses, then the bundled table.
+/// Nothing blocks on the network, so the Info panel can call this on every refresh.
+pub fn context_window(model: &str) -> Option<u64> {
+    let reported = REPORTED_WINDOWS.lock().unwrap().as_ref().and_then(|windows| {
+        windows
+            .iter()
+            .find(|(id, _)| same_model(id, model))
+            .map(|(_, window)| *window)
+    });
+    reported
+        .or_else(|| super::official_claude_catalog::context_window(model, same_model))
+        .or_else(|| {
+            MANIFEST
+                .iter()
+                .find(|e| same_model(e.id, model))
+                .map(|e| e.context_window)
+        })
+}
+
+/// Whether two model ids name the same model, allowing either one to carry a dated snapshot suffix such
+/// as `claude-haiku-4-5-20251001`.
+fn same_model(a: &str, b: &str) -> bool {
+    let dated = |long: &str, short: &str| {
+        long.strip_prefix(short)
+            .and_then(|rest| rest.strip_prefix('-'))
+            .is_some_and(|date| date.len() == 8 && date.bytes().all(|b| b.is_ascii_digit()))
+    };
+    a == b || dated(a, b) || dated(b, a)
+}
+
 /// The path the installed Claude Code is launched from, or the bare name when no install is found.
 fn installed_bin() -> String {
     crate::agent::install::locate_installed_bin("claude").unwrap_or_else(|| "claude".to_string())
@@ -522,6 +572,17 @@ fn config_dir() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn context_window_prefers_the_cli_and_matches_dated_snapshots() {
+        assert_eq!(context_window("claude-opus-5-5"), Some(1_000_000));
+        assert_eq!(context_window("claude-haiku-4-5-20251001"), Some(200_000));
+        assert_eq!(context_window("claude-opus-5-5-preview"), None);
+        assert_eq!(context_window("weird-model"), None);
+        remember_context_window("test-reported-model", 400_000);
+        assert_eq!(context_window("test-reported-model"), Some(400_000));
+        assert_eq!(context_window("test-reported-model-20260101"), Some(400_000));
+    }
 
     #[test]
     fn live_shortlist_preserves_complete_catalogue_and_updates_capabilities() {

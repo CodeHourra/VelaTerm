@@ -117,7 +117,7 @@ pub fn lookup(kind: SessionKind, bin: &str, cwd: Option<&str>, args: &[String]) 
         SessionKind::Claude => {
             // The probe sends no turn and runs no tool, so its permission mode is moot; `default` is stated
             // only because a launch never leaves it to the CLI's settings.
-            command.args(protocol::launch_args(None, None, None, "default")).args(args);
+            command.args(protocol::launch_args(None, false, None, None, "default")).args(args);
         }
         _ => return Ok(Vec::new()),
     }

@@ -198,7 +198,9 @@ button { font-family: inherit; color: inherit; background: none; border: none; c
 
 /* ============================ COLUMNS =============================== */
 .col { display: flex; flex-direction: column; min-height: 0; background: var(--bg-1); }
-.col-left { width: 258px; flex: none; border-right: 1px solid var(--border); }
+.col-left { position: relative; width: 258px; flex: none; border-right: 1px solid var(--border); }
+/* Covers the sidebar while folders from the file manager hover over it; pointer events pass through so the drag keeps tracking. */
+.sidebar-folder-drop { position: absolute; inset: 6px; z-index: 20; display: flex; align-items: center; justify-content: center; padding: 16px; border: 1px dashed var(--accent); border-radius: 8px; background: var(--accent-soft); color: var(--text); font-size: 12px; text-align: center; pointer-events: none; }
 .col-mid { flex: 1; min-width: 0; background: var(--bg-0); }
 .col-right { width: 300px; flex: none; border-left: 1px solid var(--border); }
 .col-right.collapsed { width: 0; overflow: hidden; border-left: none; }
@@ -306,6 +308,7 @@ svg { display: block; }
 .st-working { background: var(--green); box-shadow: 0 0 0 2px var(--accent-soft); }
 .st-attention { background: var(--yellow); }
 .st-waiting { background: var(--mag); }
+.st-background { background: var(--cyan); }
 .st-idle { background: var(--text-faint); }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
 /* Unread notification cleared on open: left rail plus a ripple around the status dot. Yellow belongs
@@ -320,6 +323,7 @@ svg { display: block; }
 .inline-add { display: flex; align-items: center; gap: 6px; padding: 0 8px; height: var(--row-h); }
 .inline-add input { flex: 1; background: var(--bg-0); border: 1px solid var(--accent-line); border-radius: var(--r-sm); height: 22px; padding: 0 7px; color: var(--text); font-family: inherit; outline: none; font-size: var(--ui-fs); }
 .rename-input { flex: 1; min-width: 0; background: var(--bg-0); border: 1px solid var(--accent-line); border-radius: var(--r-sm); height: 20px; padding: 0 5px; color: var(--text); font-family: inherit; outline: none; font-size: var(--ui-fs); }
+.rename-input.invalid { border-color: var(--status-error); }
 
 /* compact nav variant: hide group icons, tighten */
 [data-nav="compact"] .row.group .ic { display: none; }
@@ -530,6 +534,7 @@ svg { display: block; }
 /* The tab is one scrolling column of collapsible groups. Rows are quiet until hovered: the actions
    (stage, unstage, discard) only appear then, so a long change list reads as a list of files rather
    than a wall of buttons. */
+.git-repo { padding: 8px 10px 0; }
 .git-head { display: flex; align-items: center; gap: 7px; padding: 9px 14px; border-bottom: 1px solid var(--border); font-size: 11.5px; }
 .git-head .ic { color: var(--text-dim); display: grid; place-items: center; }
 .git-head .br { flex: 1; min-width: 0; color: var(--accent); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

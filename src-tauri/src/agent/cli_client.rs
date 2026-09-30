@@ -568,7 +568,7 @@ pub fn run_orch(_args: &[String]) -> ! {
 }
 
 const STAT_USAGE: &str = "usage: vstat [<orch-id>] [--wait] [--follow] [--timeout N] [--json]\n\
-    reports which sessions are working, asking, or waiting.\n\
+    reports which sessions are working, asking, waiting, or running background work.\n\
     <orch-id>    limit to a legacy orchestration, or `latest` for its newest run;\n\
                  omit for every session\n\
     --wait       block until something changes, instead of answering at once\n\
@@ -857,7 +857,8 @@ fn build_stat_body(sid: &str, args: &StatArgs, since: Option<u64>) -> String {
     serde_json::Value::Object(obj).to_string()
 }
 
-/// Whether every reported session has stopped: nothing working, nothing waiting on a person.
+/// Whether every reported session has stopped: nothing working, nothing waiting on a person, no
+/// background work still running.
 ///
 /// A session that never reported a state counts as not idle. Its process may still be starting, and
 /// calling the run finished while one agent never even began would be the worst kind of wrong answer.
@@ -2137,6 +2138,7 @@ mod tests {
         assert!(!all_idle(&mk(&[Some("waiting"), Some("working")])));
         // Asking is not finished: someone is blocked on a person.
         assert!(!all_idle(&mk(&[Some("waiting"), Some("asking")])));
+        assert!(!all_idle(&mk(&[Some("waiting"), Some("background")])));
         // A session that never reported may still be starting up; calling the run done would be the
         // worst possible wrong answer.
         assert!(!all_idle(&mk(&[Some("waiting"), None])));

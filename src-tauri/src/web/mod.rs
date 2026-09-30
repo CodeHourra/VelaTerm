@@ -14,7 +14,8 @@ mod auth;
 pub(crate) mod dispatch;
 // dispatch mints download tickets, so this is reachable from the crate rather than private to web transport.
 pub(crate) mod download;
-mod e2ee;
+pub(crate) mod e2ee;
+pub(crate) mod full_access;
 #[cfg(test)]
 mod remote_audit_fixture;
 // The desktop's always-on loopback link for SSH mirror connections (see local_link.rs).
@@ -28,6 +29,9 @@ pub(crate) mod share_server;
 // Outbound WebSocket tunnel dialing the relay and forwarding the share server's HTTP and WebSocket traffic.
 pub(crate) mod share_tunnel;
 pub(crate) mod public_relay;
+// Desktop loopback proxy that opens an account Remote host with full access (see remote_proxy.rs).
+#[cfg(feature = "gui")]
+pub(crate) mod remote_proxy;
 mod sniff;
 mod static_assets;
 mod tls;
@@ -582,7 +586,11 @@ async fn audit_http(mut request: axum::extract::Request, next: axum::middleware:
 /// pairing link instead of showing password login; plaintext loopback/LAN modes retain password login.
 /// The share tunnel instance additionally reports the server public key and share flag, because visitors have no
 /// pairing fragment: their E2EE handshake is authorized by the tunnel-injected grant instead.
-async fn mode_info(State(ctx): State<Ctx>) -> impl IntoResponse {
+///
+/// A desktop visitor asking for full access sends its device key in `x-vlx-device-key`; the reply then says
+/// whether this device will be upgraded and which host version answers, so the visitor can pick its client.
+/// The answer is advisory: the WebSocket handshake enforces full access on its own.
+async fn mode_info(State(ctx): State<Ctx>, headers: axum::http::HeaderMap) -> impl IntoResponse {
     let mut info = serde_json::json!({
         "requirePairing": ctx.mode == ServeMode::LanTls,
     });
@@ -590,6 +598,29 @@ async fn mode_info(State(ctx): State<Ctx>) -> impl IntoResponse {
         info["requirePairing"] = serde_json::json!(true);
         info["share"] = serde_json::json!(true);
         info["e2eeKey"] = serde_json::json!(ctx.e2ee_keys.public_key_b64());
+        let header = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
+        if let Some(key) = header("x-vlx-device-key") {
+            let scope = header("x-vlx-share").and_then(|grant| {
+                public_relay::share_scope_for(&ctx.app, grant, header("x-vlx-account").unwrap_or(""))
+            });
+            if let Some(scope) = scope {
+                let app = ctx.app.clone();
+                let key = key.to_string();
+                let name = header("x-vlx-device-name").map(str::to_string);
+                // The probe may record a pending device on disk; keep file IO off the async workers.
+                let probe = tokio::task::spawn_blocking(move || {
+                    full_access::probe(&app, &scope, Some(&key), name.as_deref())
+                })
+                .await
+                .unwrap_or_else(|_| serde_json::json!({"access":"chat"}));
+                if let Some(fields) = probe.as_object() {
+                    for (k, v) in fields {
+                        info[k] = v.clone();
+                    }
+                }
+                info["version"] = serde_json::json!(env!("CARGO_PKG_VERSION"));
+            }
+        }
     }
     axum::Json(info)
 }

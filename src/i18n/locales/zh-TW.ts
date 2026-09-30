@@ -325,6 +325,7 @@ const zhTW: typeof en = {
   "status.working": "處理中", // Working
   "status.asking": "待確認", // Needs confirmation
   "status.waiting": "已查看", // Viewed
+  "status.background": "背景工作執行中", // Background tasks running
   "status.unavailable": "狀態無法取得",
   "indicator.unread": "未讀 · 待查看", // Unread · awaiting review
 
@@ -545,6 +546,7 @@ const zhTW: typeof en = {
   "git.deleteFile": "刪除",
   "git.viewAll": "檢視全部",
   "git.detached": "（分離 HEAD）",
+  "git.repository": "儲存庫",
   "git.aheadBehind": "相對上游分支領先和落後的提交數",
   "git.commitPlaceholder": "提交說明",
   "git.amend": "修改上一次提交",
@@ -795,6 +797,7 @@ const zhTW: typeof en = {
   "tree.newChildSession": "新增子會話", // New Child Session
   "tree.openSelected": "開啟選取的會話", // Open Selected Sessions
   "tree.archiveSelected": "封存選取的會話", // Archive Selected Sessions
+  "tree.archiveSelectedItems": (n) => `封存選取的 ${n} 項`, // Archive {n} Selected Items
   "tree.moveSelected": "移動所選到…", // Move Selected to…
   "tree.deleteSelected": (n) => `刪除選取的 ${n} 項`, // Delete {n} Selected Items
   "tree.removeProject": "移除專案", // Remove Project
@@ -829,7 +832,9 @@ const zhTW: typeof en = {
   "tree.persistDoc": "儲存到磁碟…", // Save to Disk…
   "tree.closeScratch": "關閉草稿", // Close Scratch
   "tree.importProject": "匯入專案", // Import Project
+  "tree.openInSplit": "在分割窗格開啟", // Open in Split
   "tree.createProject": "建立專案",
+  "tree.dropFoldersHint": "將資料夾拖放到此處，即可新增為專案",
   // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
   "tree.newCollection": "新增集合",
   "tree.deleteCollection": "刪除集合",
@@ -908,6 +913,7 @@ const zhTW: typeof en = {
   "mark.urgent": "緊急", // Urgent
   "mark.important": "重要", // Important
   "mark.bug": "缺陷", // Bug
+  "tree.filterBackground": "背景工作執行中", // Tasks running
   "mark.done": "已完成", // Done
   "mark.wip": "進行中", // In progress
   "mark.pinned": "置頂關注", // Pinned
@@ -1116,6 +1122,7 @@ const zhTW: typeof en = {
   // Application-exit confirmation and dormant restored sessions.
   "quit.title": "結束 VelaTerm？", // Quit VelaTerm?
   "quit.body": "正在執行的終端機會話與智慧體會話都會被停止。", // Any running terminal and agent sessions will be stopped.
+  "quit.remoteWindows": "已開啟的遠端視窗也會一併關閉。", // Open remote windows will also be closed.
   "quit.saveWorkspace": "儲存工作區", // Save workspace
   "quit.saveWorkspaceHint":
     "下次開啟時還原相同的分頁和分割。終端機會還原出來，但不會自動重新啟動。", // Reopen the same tabs and splits next time. Terminals are restored but not restarted.
@@ -1225,6 +1232,14 @@ const zhTW: typeof en = {
   "doc.imgActual": "1:1", // 1:1
   "doc.exportPdf": "匯出 PDF", // Export PDF
   "doc.diagramError": "圖表語法錯誤", // Diagram error
+  "doc.frontMatter": "YAML 前言", // Front matter
+  "doc.focusMode": "專注模式", // Focus Mode
+  "doc.typewriterMode": "打字機模式", // Typewriter Mode
+  "doc.statsLabel": "文件統計", // Document statistics
+  "doc.statWords": (_n: number, count: string) => `${count} 字`, // N words
+  "doc.statCharacters": (_n: number, count: string) => `${count} 個字元`, // N characters
+  "doc.statLines": (_n: number, count: string) => `${count} 行`, // N lines
+  "doc.statMinutes": (_n: number, count: string) => `閱讀約 ${count} 分鐘`, // N min read
 
   // ── Right information panel ──
   "panel.noSession": "未選擇會話", // No session selected

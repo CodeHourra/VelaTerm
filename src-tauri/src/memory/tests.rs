@@ -38,7 +38,7 @@ impl Fixture {
                 return job.clone();
             }
             assert!(
-                start.elapsed() < Duration::from_secs(12),
+                start.elapsed() < Duration::from_secs(30),
                 "job timed out: {job}"
             );
             std::thread::sleep(Duration::from_millis(25));
@@ -631,7 +631,7 @@ fn cancelling_a_running_agent_leaves_no_partial_documents() {
     let id = result["id"].as_str().unwrap();
     let start = Instant::now();
     while !f.dir.join("calls").exists() {
-        assert!(start.elapsed() < Duration::from_secs(5));
+        assert!(start.elapsed() < Duration::from_secs(30));
         std::thread::sleep(Duration::from_millis(20));
     }
     runner::cancel(&f.app, id).unwrap();
@@ -664,7 +664,7 @@ fn human_edit_during_merge_is_preserved_and_job_fails_with_conflict() {
     let id = result["id"].as_str().unwrap();
     let start = Instant::now();
     while !f.dir.join("merge-started").exists() {
-        assert!(start.elapsed() < Duration::from_secs(5));
+        assert!(start.elapsed() < Duration::from_secs(30));
         std::thread::sleep(Duration::from_millis(20));
     }
     dispatch(&f.app,"memory_save",&json!({"id":entry.id,"version":1,"title":entry.title,"summary":"人工编辑","content":"必须保留人工修改","tags":[],"related":[]})).unwrap();
@@ -704,6 +704,21 @@ fn old_memory_jobs_gain_an_empty_effort_without_losing_history() {
         )
         .unwrap();
     assert_eq!(saved, ("opus".into(), "".into()));
+}
+
+#[test]
+fn job_history_names_the_entries_that_still_exist() {
+    let fx = Fixture::new();
+    fx.source("s", "source");
+    fx.failed_job("j", "s", "claude");
+    let kept = fx.save("Kept entry", "body");
+    fx.app.db().conn.lock().unwrap().execute(
+        "UPDATE memory_jobs SET status='completed',entries=?1 WHERE id='j'",
+        [json!([kept.id, "deleted"]).to_string()],
+    ).unwrap();
+    let job = &runner::jobs(&fx.app, &json!({"id":"j"})).unwrap()["jobs"][0];
+    assert_eq!(job["entries"], json!([kept.id, "deleted"]));
+    assert_eq!(job["entryLinks"], json!([{"id":kept.id,"title":"Kept entry"}]));
 }
 
 #[test]

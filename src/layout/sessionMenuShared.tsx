@@ -92,6 +92,8 @@ export function statusLabel(status: string): string {
       return t("status.asking");
     case "waiting":
       return t("status.waiting");
+    case "background":
+      return t("status.background");
     default:
       return status;
   }

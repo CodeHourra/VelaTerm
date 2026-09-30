@@ -1,3 +1,35 @@
+## v0.2.6 — 2026-09-30
+
+- 🐧 La version Linux repose désormais sur Electron. L’AppImage conserve son nom de fichier et vos données, ne nécessite plus WebKitGTK ni libfuse2, et les installations existantes y passent via le système de mise à jour intégré.
+
+- 🛰️ Les machines inaccessibles en SSH, comme WSL sur un autre ordinateur ou un conteneur Docker, peuvent être associées à votre compte après l’installation de `vela-server` en une seule commande ; elles apparaissent alors dans la liste Remote pour les conversations avec l’IA. Une fois que le propriétaire a accordé l’accès complet sur l’hôte, l’application de bureau peut aussi utiliser son terminal, ses fichiers et son panneau Git.
+
+- 📂 Les dossiers glissés dans la barre latérale depuis le Finder, l’Explorateur de fichiers ou un gestionnaire de fichiers Linux sont ajoutés comme projets.
+
+- 📝 L’éditeur Markdown propose les raccourcis de Typora pour les titres, les listes, les blocs de code et les tableaux, la fermeture automatique des parenthèses et des guillemets, l’ouverture des liens par Cmd/Ctrl+clic, les modes concentration et machine à écrire, ainsi que le nombre de mots et de caractères dans la barre d’état. Le front matter YAML s’affiche dans un champ distinct au-dessus du document et reste inchangé tant que vous ne le modifiez pas.
+
+- 🗃️ Lorsqu’un dossier n’est pas lui-même un dépôt Git mais en contient plusieurs, le panneau Git propose un sélecteur de dépôt et agit sur le dépôt choisi.
+
+- ⏳ Dans la vue conversation, une session dont la réponse est terminée mais dont des tâches d’arrière-plan sont encore en cours affiche le nouvel état « Tâches actives », avec un point cyan, au lieu de rester sur « En cours ». Les sessions qui exécutent de longues tâches avec `vrun` affichent le même état.
+
+- 🍴 Dans la vue conversation, une session dupliquée démarre sa propre conversation lors de sa première exécution, et la session d’origine ne reçoit plus ses messages.
+
+- 🛡️ Dans la vue conversation, l’étiquette de mode d’une session Claude suit le mode d’autorisation réellement utilisé par Claude, par exemple après son passage en mode Plan, et les cartes d’autorisation indiquent la raison donnée par Claude pour sa demande.
+
+- 📏 La zone de saisie de la vue conversation peut être redimensionnée en faisant glisser son bord supérieur ; un double-clic sur ce bord rétablit la hauteur par défaut. La hauteur s’applique à tous les volets et est conservée après un redémarrage.
+
+- 🗂️ Lorsque plusieurs dossiers sont sélectionnés dans la barre latérale, le menu contextuel permet de les archiver avec leurs sessions.
+
+- 📚 Les collections apparaissent toujours au-dessus des projets dans la barre latérale.
+
+- 🧠 Lorsqu’un enregistrement de traitement de la base de connaissances n’a créé qu’une seule entrée, son titre ouvre directement cette entrée, et les boutons d’entrée affichent les titres des entrées au lieu de numéros.
+
+- 📊 Le panneau Info affiche la bonne limite de contexte pour les modèles Claude récents comme Opus 5.5, au lieu de 200k.
+
+- 🎨 Changements mineurs : les trois options d’ouverture en volet du menu contextuel des sessions sont regroupées dans le sous-menu « Ouvrir dans un volet », la confirmation de fermeture indique que les fenêtres distantes ouvertes seront également fermées, et les listes déroulantes des formulaires se ferment dès qu’une option est choisie.
+
+---
+
 ## v0.2.5 — 2026-09-28
 
 - 🐧 L’application de bureau Windows permet d’ouvrir des espaces de travail distincts dans WSL1 et WSL2, avec les agents, les fichiers et l’historique des sessions de la distribution Linux choisie.

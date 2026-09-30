@@ -25,7 +25,7 @@ import {
   onBrowserPopup,
   onBrowserState,
 } from "../../../ipc/browser";
-import { openPath } from "../../../ipc/transport";
+import { platform } from "../../../platform";
 import { useTermStore, type BrowserTab } from "../../../store/termStore";
 import { useNativeViewSuspended } from "../../../hooks/nativeViewSuspend";
 import { BrowserQuickAccess } from "./BrowserQuickAccess";
@@ -334,7 +334,7 @@ export function BrowserView({ tab, hidden }: { tab: BrowserTab; hidden: boolean 
               }}
             />
             {shownUrl.startsWith("http") && (
-              <ToolBtn title={t("browser.openExternal")} onClick={() => void openPath(tab.url)}>
+              <ToolBtn title={t("browser.openExternal")} onClick={() => void platform.opener.openExternal(tab.url)}>
                 <Icons.external size={14} />
               </ToolBtn>
             )}

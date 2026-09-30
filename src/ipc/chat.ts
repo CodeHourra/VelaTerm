@@ -189,6 +189,8 @@ export interface ChatPermission {
   display_name?: string;
   /** Short human-readable subject, such as the file about to be written. */
   description?: string;
+  /** Why the agent is asking rather than deciding by itself, in its own words (English). */
+  decision_reason?: string;
   input?: unknown;
   /**
    * Standing rules the agent would accept instead of asking again — "accept file edits for the rest of

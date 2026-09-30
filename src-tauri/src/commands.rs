@@ -751,13 +751,57 @@ pub async fn open_remote_window(
 /// by this host through the account tunnel, not a bundled client. A one-time browser session minted with the
 /// local device credential lets the window start without a separate web login; `grant_id` optionally opens
 /// one shared range directly, otherwise the account page lists the ranges.
+///
+/// When `full_grant_id` names the device's workspace grant, the desktop first asks the host whether this
+/// device has full access. If it does and both sides run the same version, the window instead loads this
+/// desktop's bundled app from a loopback proxy that proves the device key to the host (see
+/// `web::remote_proxy`). The result reports which access was opened and, when full access is waiting for the
+/// owner's approval, the fingerprint to approve on the host.
 #[tauri::command]
 pub async fn open_account_remote_window(
     app: AppHandle,
     device_id: String,
     grant_id: Option<String>,
-) -> Result<(), String> {
+    full_grant_id: Option<String>,
+) -> Result<serde_json::Value, String> {
+    use crate::web::{e2ee::ServerKeys, remote_proxy};
     let id = uuid::Uuid::parse_str(&device_id).map_err(|_| "Invalid device ID")?;
+    let mut outcome = serde_json::json!({"access": "chat"});
+    if let Some(full) = full_grant_id.filter(|g| uuid::Uuid::parse_str(g).is_ok()) {
+        let ctx = crate::host::AppCtx::Tauri(app.clone());
+        let device = id.to_string();
+        let attempt = tauri::async_runtime::spawn_blocking(move || -> Result<_, String> {
+            let relay = remote_proxy::RelaySession::open(&ctx, &device, &full)?;
+            let keys = std::sync::Arc::new(ServerKeys::load_or_create(&ctx.data_dir()?)?);
+            let probe = relay.probe(keys.public_key_b64())?;
+            Ok((relay, keys, probe))
+        })
+        .await;
+        // Full access is an upgrade; any failure here falls back to the regular window below.
+        if let Ok(Ok((relay, keys, probe))) = attempt {
+            let host_version = probe["version"].as_str().unwrap_or_default().to_string();
+            let same_version = host_version == env!("CARGO_PKG_VERSION");
+            if probe["access"] == "full" && same_version {
+                if let Some(host_key) = probe["e2eeKey"].as_str() {
+                    let proxy = std::sync::Arc::new(remote_proxy::start(relay, keys, host_key.to_string())?);
+                    let url: url::Url = proxy.entry_url.parse().map_err(|e| format!("Invalid remote URL: {e}"))?;
+                    let window = build_account_remote_window(&app, url)?;
+                    let keep = proxy.clone();
+                    window.on_window_event(move |event| {
+                        if matches!(event, tauri::WindowEvent::Destroyed) {
+                            keep.stop();
+                        }
+                    });
+                    return Ok(serde_json::json!({"access": "full"}));
+                }
+            }
+            outcome["approval"] = probe["approval"].clone();
+            outcome["fingerprint"] = probe["fingerprint"].clone();
+            if probe["access"] == "full" && !same_version {
+                outcome["hostVersion"] = serde_json::json!(host_version);
+            }
+        }
+    }
     let ctx = crate::host::AppCtx::Tauri(app.clone());
     let url = tauri::async_runtime::spawn_blocking(move || {
         crate::web::public_relay::browser_ticket_url(&ctx, &id.to_string(), grant_id.as_deref())
@@ -765,6 +809,21 @@ pub async fn open_account_remote_window(
     .await
     .map_err(|e| format!("Remote window task failed: {e}"))??;
     let parsed: url::Url = url.parse().map_err(|e| format!("Invalid remote URL: {e}"))?;
+    build_account_remote_window(&app, parsed)?;
+    Ok(outcome)
+}
+
+/// Count open windows connected to another machine or workspace (URL, SSH, WSL and account Remote). They live
+/// in this process, so quitting closes them too and the quit confirmation says so.
+pub(crate) fn remote_window_count(app: &AppHandle) -> usize {
+    const PREFIXES: [&str; 4] = ["remote-", "ssh-", "wsl-", "account-remote-"];
+    app.webview_windows()
+        .keys()
+        .filter(|label| PREFIXES.iter().any(|p| label.starts_with(p)))
+        .count()
+}
+
+fn build_account_remote_window(app: &AppHandle, url: url::Url) -> Result<tauri::WebviewWindow, String> {
     let label = format!("account-remote-{}", uuid::Uuid::new_v4().simple());
     // Force the browser transport: the external page has no Tauri IPC capability, and the app talks to the
     // host over the WebSocket tunnel instead. Keep __TAURI_INTERNALS__ for clipboard and notification APIs.
@@ -772,16 +831,15 @@ pub async fn open_account_remote_window(
   window.__VLX_FORCE_BROWSER__=true;
   if(typeof window.OffscreenCanvas!=='undefined')window.OffscreenCanvas=undefined;
 })();"#;
-    with_download_handler(tauri::WebviewWindowBuilder::new(&app, &label, tauri::WebviewUrl::External(parsed)))
+    with_download_handler(tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::External(url)))
         .title("VelaTerm · Remote")
         .inner_size(1280.0, 820.0)
         .min_inner_size(720.0, 480.0)
-        .theme(crate::native_theme(&app))
+        .theme(crate::native_theme(app))
         .initialization_script(init_script)
         .disable_drag_drop_handler()
         .build()
-        .map_err(|e| format!("Cannot open Remote window: {e}"))?;
-    Ok(())
+        .map_err(|e| format!("Cannot open Remote window: {e}"))
 }
 
 /// Parse `(host, port)` from a pairing link; fingerprint trust is keyed by endpoint, not rotating token.

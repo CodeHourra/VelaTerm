@@ -273,6 +273,78 @@ pub fn status(path: &str) -> GitStatus {
     }
 }
 
+/// A repository found below a directory that is not itself inside a repository.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NestedRepo {
+    /// Absolute path of the repository's top-level directory.
+    pub path: String,
+    /// Path relative to the scanned directory, `/`-separated, for display.
+    pub name: String,
+}
+
+/// How many directory levels below the scanned root are searched.
+const NESTED_REPO_MAX_DEPTH: usize = 3;
+/// Stop after this many repositories; a folder holding more is not a workspace a picker can serve.
+const NESTED_REPO_MAX_REPOS: usize = 100;
+/// Upper bound on directories read, so pointing a session at a huge tree (a home directory) stays cheap.
+const NESTED_REPO_MAX_DIRS: usize = 5000;
+/// Build output and dependency folders that never hold a user's own repositories.
+const NESTED_REPO_SKIPPED_DIRS: &[&str] = &[
+    "node_modules", ".next", "dist", "build", ".cache", "vendor", "__pycache__", ".turbo",
+    ".parcel-cache", "target",
+];
+
+/// Find Git repositories below `root`, breadth-first, up to three levels deep.
+///
+/// A repository is recognized by a `.git` entry, directory or file, so linked worktrees and
+/// submodule checkouts count too. The scan only stats the filesystem and never spawns Git per
+/// candidate. It does not descend into a repository it found, does not follow symlinks, and skips
+/// hidden directories below the root plus the build folders listed above.
+pub fn discover_repos(root: &str) -> Vec<NestedRepo> {
+    let root_path = std::path::Path::new(root);
+    let mut found = Vec::new();
+    let mut queue = std::collections::VecDeque::from([(root_path.to_path_buf(), 0usize)]);
+    let mut visited = 0usize;
+    while let Some((dir, depth)) = queue.pop_front() {
+        if visited >= NESTED_REPO_MAX_DIRS || found.len() >= NESTED_REPO_MAX_REPOS {
+            break;
+        }
+        visited += 1;
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        let mut children: Vec<(String, std::path::PathBuf)> = entries
+            .filter_map(Result::ok)
+            // `file_type` does not follow symlinks, so a linked directory is never entered.
+            .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+            .map(|e| (e.file_name().to_string_lossy().to_string(), e.path()))
+            .filter(|(name, _)| {
+                !name.starts_with('.') && !NESTED_REPO_SKIPPED_DIRS.contains(&name.as_str())
+            })
+            .collect();
+        children.sort();
+        for (_, child) in children {
+            if child.join(".git").symlink_metadata().is_ok() {
+                let rel = child.strip_prefix(root_path).unwrap_or(&child);
+                let name = rel
+                    .components()
+                    .map(|c| c.as_os_str().to_string_lossy().to_string())
+                    .collect::<Vec<_>>()
+                    .join("/");
+                found.push(NestedRepo { path: child.to_string_lossy().to_string(), name });
+                if found.len() >= NESTED_REPO_MAX_REPOS {
+                    break;
+                }
+            } else if depth + 1 < NESTED_REPO_MAX_DEPTH {
+                queue.push_back((child, depth + 1));
+            }
+        }
+    }
+    found.sort_by(|a, b| a.name.cmp(&b.name));
+    found
+}
+
 /// Information about a Git worktree created for a session.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -2996,5 +3068,44 @@ mod porcelain_tests {
         assert_eq!(files[2].status, "untracked");
 
         let _ = std::fs::remove_dir_all(&repo);
+    }
+}
+
+#[cfg(test)]
+mod discover_tests {
+    use super::*;
+
+    fn mkrepo(dir: &std::path::Path) {
+        std::fs::create_dir_all(dir.join(".git")).unwrap();
+    }
+
+    #[test]
+    fn finds_nested_repos_and_skips_what_it_should() {
+        let root = std::env::temp_dir().join(format!("vlx-discover-{}", Uuid::new_v4()));
+        mkrepo(&root.join("b"));
+        mkrepo(&root.join("a"));
+        // Two levels down through a plain folder.
+        mkrepo(&root.join("group").join("c"));
+        // A linked worktree or submodule checkout has a `.git` file, not a directory.
+        std::fs::create_dir_all(root.join("wt")).unwrap();
+        std::fs::write(root.join("wt").join(".git"), "gitdir: /elsewhere\n").unwrap();
+        // Not reported: inside a found repo, under a skipped folder, hidden, or too deep.
+        mkrepo(&root.join("a").join("inner"));
+        mkrepo(&root.join("node_modules").join("pkg"));
+        mkrepo(&root.join(".hidden").join("d"));
+        mkrepo(&root.join("x").join("y").join("z").join("deep"));
+
+        let names: Vec<String> = discover_repos(&root.to_string_lossy())
+            .into_iter()
+            .map(|r| r.name)
+            .collect();
+        assert_eq!(names, ["a", "b", "group/c", "wt"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn missing_directory_yields_nothing() {
+        let root = std::env::temp_dir().join(format!("vlx-discover-missing-{}", Uuid::new_v4()));
+        assert!(discover_repos(&root.to_string_lossy()).is_empty());
     }
 }

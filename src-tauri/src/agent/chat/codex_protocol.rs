@@ -148,10 +148,12 @@ pub fn initialize(id: &str) -> Value {
     )
 }
 
-/// Start or resume the native thread after the initialize handshake.
+/// Start or resume the native thread after the initialize handshake. With `fork`, the resumed thread is
+/// forked into a new one instead, leaving the source thread unchanged.
 pub fn open_thread(
     id: &str,
     resume: Option<&str>,
+    fork: bool,
     cwd: Option<&str>,
     model: Option<&str>,
     mode: &str,
@@ -174,17 +176,20 @@ pub fn open_thread(
     if let Some(tier) = service_tier {
         params.insert("serviceTier".into(), json!(tier));
     }
-    if let Some(personality) = personality {
+    let fork = fork && resume.is_some();
+    // thread/fork takes no personality; each turn still carries it.
+    if let Some(personality) = personality.filter(|_| !fork) {
         params.insert("personality".into(), json!(personality));
     }
     let (approval, sandbox) = workflow(mode);
     params.insert("approvalPolicy".into(), json!(approval));
     params.insert("sandbox".into(), json!(sandbox));
-    request(
-        id,
-        if resume.is_some() { "thread/resume" } else { "thread/start" },
-        Value::Object(params),
-    )
+    let method = match resume {
+        Some(_) if fork => "thread/fork",
+        Some(_) => "thread/resume",
+        None => "thread/start",
+    };
+    request(id, method, Value::Object(params))
 }
 
 /// Everything a turn carries besides its text: the model, how hard it thinks, how fast it answers, how it
@@ -730,5 +735,18 @@ mod tests {
         let rollback = thread_rollback("11", "thread-fork", 3);
         assert_eq!(rollback["method"], "thread/rollback");
         assert_eq!(rollback["params"], json!({"threadId":"thread-fork","numTurns":3}));
+    }
+
+    #[test]
+    fn open_thread_forks_a_pending_fork_and_resumes_otherwise() {
+        let fork = open_thread("1", Some("source"), true, None, None, "default", None, Some("pragmatic"));
+        assert_eq!(fork["method"], "thread/fork");
+        assert_eq!(fork["params"]["threadId"], "source");
+        assert!(fork["params"].get("personality").is_none(), "thread/fork has no personality field");
+        let resume = open_thread("2", Some("source"), false, None, None, "default", None, Some("pragmatic"));
+        assert_eq!(resume["method"], "thread/resume");
+        assert_eq!(resume["params"]["personality"], "pragmatic");
+        let fresh = open_thread("3", None, true, None, None, "default", None, None);
+        assert_eq!(fresh["method"], "thread/start");
     }
 }

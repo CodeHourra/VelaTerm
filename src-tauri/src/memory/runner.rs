@@ -92,7 +92,28 @@ pub fn jobs(app: &AppCtx, args: &Value) -> Result<Value, String> {
             |r| r.get(0),
         )
         .map_err(|e| e.to_string())?;
-    Ok(json!({"jobs":rows,"total":total,"pageSize":40}))
+    // Name the entries each job produced so the history links read as titles; entries deleted
+    // since the job finished are left out instead of linking to a missing page.
+    let ids: Vec<&str> = rows.iter().flat_map(|job| job.entries.iter().map(String::as_str)).collect();
+    let titles: std::collections::HashMap<String, String> = conn
+        .prepare("SELECT id,title FROM memory_entries WHERE id IN (SELECT value FROM json_each(?1))")
+        .map_err(|e| e.to_string())?
+        .query_map([json!(ids).to_string()], |r| Ok((r.get(0)?, r.get(1)?)))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    let jobs: Vec<Value> = rows
+        .into_iter()
+        .map(|job| {
+            let links: Vec<Value> = job.entries.iter()
+                .filter_map(|id| titles.get(id).map(|title| json!({"id":id,"title":title})))
+                .collect();
+            let mut value = json!(job);
+            value["entryLinks"] = json!(links);
+            value
+        })
+        .collect();
+    Ok(json!({"jobs":jobs,"total":total,"pageSize":40}))
 }
 
 /// Display name for one organizer agent, taken from the launch catalogue so the dialog, the spawn

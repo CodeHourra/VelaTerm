@@ -10,6 +10,7 @@ const COLOR: Record<DisplayStatus, string> = {
   working: "var(--status-working)",
   asking: "var(--status-asking)",
   waiting: "var(--status-waiting)",
+  background: "var(--status-background)",
   unavailable: "var(--text-faint)",
 };
 

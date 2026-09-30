@@ -7,7 +7,7 @@
 //! For now, three base booleans still come from `transport.ts`, where 21 legacy references remain. This module
 //! derives kind, isElectron, and hasNativeHost on top to form the unified public view.
 
-import { isMac, isRemoteWindow, isTauri } from "../ipc/transport";
+import { isElectronShell, isMac, isRemoteWindow, isTauri } from "../ipc/transport";
 import type { PlatformEnv, PlatformKind } from "./types";
 
 /**
@@ -18,7 +18,7 @@ import type { PlatformEnv, PlatformKind } from "./types";
  */
 export const isElectron: boolean =
   typeof window !== "undefined" &&
-  (!!(window as unknown as { __VLX_ELECTRON__?: boolean }).__VLX_ELECTRON__ ||
+  (isElectronShell ||
     (typeof navigator !== "undefined" && /Electron\//.test(navigator.userAgent || "")));
 
 /** Derive shell kind: Electron first, then Tauri, otherwise remote browser access. */

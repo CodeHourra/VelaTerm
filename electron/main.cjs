@@ -14,9 +14,11 @@
 // The Electron shell stays thin: all business logic remains in the shared Rust backend and frontend. This file
 // handles only process orchestration specific to the Electron edition.
 
-const { app, BrowserWindow, WebContentsView, Menu, dialog, shell, ipcMain, net, session, screen } =
+const { app, BrowserWindow, WebContentsView, Menu, dialog, shell, ipcMain, net, screen } =
   require("electron");
 const { spawn, execFile } = require("node:child_process");
+const { Readable } = require("node:stream");
+const { pipeline } = require("node:stream/promises");
 const crypto = require("node:crypto");
 const net0 = require("node:net");
 const path = require("node:path");
@@ -36,6 +38,10 @@ const state = {
   child: null,
   port: 0,
   password: "",
+  /** Bearer token issued by the sidecar after auto-login; handed only to the main window's own origin. */
+  token: "",
+  /** Last few hundred characters of sidecar stderr, for the startup error dialog only. */
+  stderrTail: "",
   /** Whether an intentional shutdown is in progress; do not restart the sidecar during shutdown. */
   quitting: false,
   /** Whether the user confirmed shutdown; subsequent before-quit/close events proceed immediately. */
@@ -52,6 +58,9 @@ const state = {
   restarts: 0,
   /** @type {BrowserWindow | null} */
   win: null,
+  /** Open account Remote windows; they close with the application, so the quit confirmation mentions them. */
+  /** @type {Set<BrowserWindow>} */
+  remoteWindows: new Set(),
   /** Canonical absolute path from `vela <path>` that the renderer has not consumed yet. */
   pendingOpenProject: null,
 };
@@ -60,7 +69,8 @@ const state = {
 function parseOpenProjectArg(argv, cwd) {
   const i = argv.indexOf("--open-project");
   if (i < 0) return null;
-  if (!argv[i + 1] || i + 2 !== argv.length) {
+  // Take the next argument only: launchers (the AppImage runtime, Chromium) may add switches of their own.
+  if (!argv[i + 1] || argv[i + 1].startsWith("--")) {
     throw new Error("usage: vela <project-path>");
   }
   const resolved = fs.realpathSync(path.resolve(cwd || process.cwd(), argv[i + 1]));
@@ -115,10 +125,29 @@ function velaCommandStatus() {
 }
 
 /** The Electron and Tauri editions share this marker; overwrite only shims created by VelaTerm itself. */
+/** Shim text that launches this installation. Inside an AppImage, execPath lives in a temporary mount that
+ *  disappears on exit, so the AppImage file itself is the stable launcher. */
+function velaShimContent() {
+  const exe = process.env.APPIMAGE || process.execPath;
+  return process.platform === "win32"
+    ? `@REM ${VELA_SHIM_MARKER}\r\n@IF "%~1"=="-h" GOTO help\r\n@IF "%~1"=="--help" GOTO help\r\n@"${exe}" --open-project %*\r\n@EXIT /B %ERRORLEVEL%\r\n:help\r\n@ECHO usage: vela ^<project-path^>\r\n`
+    : `#!/bin/sh\n# ${VELA_SHIM_MARKER}\ncase "\${1:-}" in -h|--help) echo 'usage: vela <project-path>'; exit 0;; esac\nexec '${exe.replaceAll("'", "'\\''")}' --open-project "$@"\n`;
+}
+
 function installVelaCommand() {
   if (!app.isPackaged) throw new Error("Install the packaged VelaTerm app before adding its shell command to PATH.");
+  const content = velaShimContent();
   const before = velaCommandStatus();
-  if (before.installed) return before;
+  if (before.installed) {
+    // Repoint a shim of ours that launches an older location, such as an AppImage that was moved or the
+    // desktop edition this installation replaced.
+    try {
+      if (fs.readFileSync(before.path, "utf8") !== content) fs.writeFileSync(before.path, content, { mode: 0o755 });
+    } catch {
+      diagnostic("command_install_failed");
+    }
+    return before;
+  }
   if (before.conflict) throw new Error(`another 'vela' command already exists at ${before.conflict}`);
   const home = app.getPath("home");
   const dirs = velaCommandDirs();
@@ -135,11 +164,6 @@ function installVelaCommand() {
     try {
       fs.mkdirSync(dir, { recursive: true });
       const dest = path.join(dir, process.platform === "win32" ? "vela.cmd" : "vela");
-      const exe = process.execPath;
-      const content =
-        process.platform === "win32"
-          ? `@REM ${VELA_SHIM_MARKER}\r\n@IF "%~1"=="-h" GOTO help\r\n@IF "%~1"=="--help" GOTO help\r\n@"${exe}" --open-project %*\r\n@EXIT /B %ERRORLEVEL%\r\n:help\r\n@ECHO usage: vela ^<project-path^>\r\n`
-          : `#!/bin/sh\n# ${VELA_SHIM_MARKER}\ncase "\${1:-}" in -h|--help) echo 'usage: vela <project-path>'; exit 0;; esac\nexec '${exe.replaceAll("'", "'\\''")}' --open-project "$@"\n`;
       fs.writeFileSync(dest, content, { mode: 0o755 });
       diagnostic("command_ready");
       return { installed: true, path: dest, conflict: null };
@@ -229,12 +253,18 @@ function spawnSidecar() {
     ["--serve", "--local-http", "--port", String(state.port)],
     {
       // Pass the password through the environment so it does not appear in the process argument list.
-      env: { ...process.env, VELA_SERVE_PASSWORD: state.password },
+      // VLX_EXIT_WITH_PARENT makes the sidecar exit if this process dies without stopping it.
+      env: { ...process.env, VELA_SERVE_PASSWORD: state.password, VLX_EXIT_WITH_PARENT: "1" },
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
   child.stdout.on("data", () => {}); // Drain CLI output; the backend persists its own safe diagnostics.
-  child.stderr.on("data", () => {}); // Never relay arbitrary child-process error text into logs.
+  // Never relay arbitrary child-process error text into logs. Keep only a short tail in memory, shown in the
+  // startup error dialog so a failure such as a missing system library names its cause.
+  state.stderrTail = "";
+  child.stderr.on("data", (chunk) => {
+    state.stderrTail = (state.stderrTail + chunk.toString()).slice(-600);
+  });
   child.on("exit", (code, signal) => {
     diagnostic("sidecar_exit", { exitCode: code });
     state.child = null;
@@ -261,7 +291,9 @@ async function waitForHealth(deadline) {
   return false;
 }
 
-/** Log in from the main process, then inject the session cookie into the default session so the window loads authenticated without frontend changes. */
+/** Log in from the main process and keep the issued bearer token. The server no longer sets cookies; preload
+ *  hands the token to the main window before any page script runs (see `vlx:session:token`), so the window
+ *  loads authenticated without showing the login page. */
 async function autoLogin() {
   const res = await net.fetch(`http://${LOOPBACK}:${state.port}/api/login`, {
     method: "POST",
@@ -269,19 +301,11 @@ async function autoLogin() {
     body: JSON.stringify({ password: state.password }),
   });
   if (!res.ok) throw new Error(`Auto-login failed: HTTP ${res.status}`);
-  // Parse vlx_session from Set-Cookie and write it explicitly to the session jar instead of relying on net.fetch to persist it.
-  const setCookie = res.headers.get("set-cookie") || "";
-  const m = /vlx_session=([^;]+)/.exec(setCookie);
-  if (m) {
-    await session.defaultSession.cookies.set({
-      url: `http://${LOOPBACK}:${state.port}`,
-      name: "vlx_session",
-      value: m[1],
-      httpOnly: true,
-      path: "/",
-      sameSite: "strict",
-    });
+  const body = await res.json().catch(() => null);
+  if (!body || typeof body.token !== "string" || !body.token) {
+    throw new Error("Auto-login failed: no session token in the response");
   }
+  state.token = body.token;
 }
 
 /** Complete sidecar startup: allocate a port, launch the process, await readiness, and auto-login; mark it ready on success. */
@@ -289,11 +313,13 @@ async function startSidecar() {
   state.ready = false;
   state.port = await getFreePort();
   state.password = crypto.randomBytes(24).toString("hex");
+  state.token = "";
   spawnSidecar();
   const ok = await waitForHealth(Date.now() + STARTUP_TIMEOUT_MS);
   if (!ok) {
     killSidecar(); // Do not leave behind a process that failed to start.
-    throw new Error("sidecar startup timed out (port not ready)");
+    const detail = state.stderrTail.trim();
+    throw new Error(`The local service did not start.${detail ? `\n\n${detail}` : ""}`);
   }
   await autoLogin();
   state.ready = true;
@@ -352,7 +378,7 @@ async function requestQuitConfirmation() {
   // The renderer owns the dialog so it can offer the "save workspace" checkbox and localized copy, neither of
   // which showMessageBox supports.
   if (state.win && !state.win.isDestroyed()) {
-    state.win.webContents.send("vlx:quit:requested");
+    state.win.webContents.send("vlx:quit:requested", { remoteWindows: state.remoteWindows.size });
     // A frozen or crashed renderer never acknowledges, which would leave the application unquittable.
     setTimeout(() => {
       if (state.quitConfirmationPending && !state.quitPromptAcked && !state.quitConfirmed) {
@@ -376,7 +402,9 @@ async function nativeQuitConfirmation() {
         type: "question",
         title: "Quit VelaTerm?",
         message: "Quit VelaTerm?",
-        detail: "Any running terminal and agent sessions will be stopped.",
+        detail:
+          "Any running terminal and agent sessions will be stopped." +
+          (state.remoteWindows.size > 0 ? "\nOpen remote windows will also be closed." : ""),
         buttons: ["Cancel", "Quit"],
         defaultId: 0,
         cancelId: 0,
@@ -611,7 +639,7 @@ function createWindow() {
       // Pass it to the preload script through additionalArguments. The frontend always loads bundled output,
       // making build-time import.meta.env.DEV consistently false and unable to distinguish Electron development
       // from release. This runtime signal supplies the distinction.
-      additionalArguments: [`--vlx-dev=${app.isPackaged ? "0" : "1"}`],
+      additionalArguments: [`--vlx-dev=${app.isPackaged ? "0" : "1"}`, `--vlx-updater=${updaterSupported() ? "1" : "0"}`],
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false, // The preload needs require('electron'); contextIsolation still isolates the application renderer.
@@ -638,8 +666,45 @@ function createWindow() {
     if (state.win === win) state.win = null;
   });
 
+  guardAppNavigation(win.webContents, true);
+
   void win.loadURL(`http://${LOOPBACK}:${state.port}/`);
   return win;
+}
+
+/** Open a link from app content in the system browser; other schemes are dropped. */
+function openLinkExternally(url) {
+  try {
+    const { protocol } = new URL(url);
+    if (protocol === "http:" || protocol === "https:" || protocol === "mailto:") void shell.openExternal(url);
+  } catch {
+    /* Not a URL. */
+  }
+}
+
+/**
+ * Keep an application window on its own content. New-window requests (`target=_blank`, `window.open`) go to
+ * the system browser instead of an Electron window that would inherit the app preload. For the main window,
+ * leaving the sidecar origin is blocked too, including a file dropped outside a drop zone, which Chromium
+ * would otherwise open in place of the app.
+ */
+function guardAppNavigation(contents, sidecarOnly) {
+  contents.setWindowOpenHandler(({ url }) => {
+    openLinkExternally(url);
+    return { action: "deny" };
+  });
+  if (!sidecarOnly) return;
+  contents.on("will-navigate", (event, url) => {
+    let sameOrigin = false;
+    try {
+      sameOrigin = new URL(url).origin === `http://${LOOPBACK}:${state.port}`;
+    } catch {
+      /* Unparsable: treat as foreign. */
+    }
+    if (sameOrigin) return;
+    event.preventDefault();
+    openLinkExternally(url);
+  });
 }
 
 /** Application menu, primarily to expose standard renderer shortcuts for copy/paste/select-all, developer tools, and window management. */
@@ -699,12 +764,160 @@ function buildMenu() {
     { role: "viewMenu" },
     { role: "windowMenu" },
   ];
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  // Windows and Linux show the Alt-triggered menu bar drawn by the page, and Chromium handles the standard
+  // editing shortcuts without a native menu, which would otherwise claim Alt and Ctrl+W/R for itself.
+  Menu.setApplicationMenu(isMac ? Menu.buildFromTemplate(template) : null);
+}
+
+// ─────────────────────────── Automatic updates (Linux AppImage) ───────────────────────────
+//
+// Uses the desktop updater service and signing key, so the manifest, the AppImage and its minisign signature
+// are the same ones the desktop edition has always installed. Only an AppImage can update itself: the
+// download replaces the file the app was launched from, then the app restarts from it. Other installations
+// (unpacked builds, macOS, Windows) report updates as unsupported, and the page hides the feature.
+
+const UPDATE_ENDPOINT = "https://velaterm.com/api/updater";
+
+/** Manifest of the release found by the last check; the renderer never supplies the URL or signature. */
+let pendingUpdate = null;
+/** Whether a download is running, so a second click cannot start a competing one. */
+let updateDownloading = false;
+
+function updaterSupported() {
+  return process.platform === "linux" && app.isPackaged && !!process.env.APPIMAGE;
+}
+
+/** Numeric comparison of dotted versions; pre-release suffixes are ignored. */
+function compareVersions(a, b) {
+  const pa = String(a).split("-")[0].split(".").map((n) => Number(n) || 0);
+  const pb = String(b).split("-")[0].split(".").map((n) => Number(n) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
+/** Ask the update service for a newer release. Returns what the page shows, or null when up to date. */
+async function checkForUpdate(headers) {
+  if (!updaterSupported()) throw new Error("Automatic updates are not available for this installation.");
+  const arch = process.arch === "arm64" ? "aarch64" : "x86_64";
+  const current = app.getVersion();
+  const url = `${UPDATE_ENDPOINT}/linux/${arch}?current_version=${encodeURIComponent(current)}`;
+  // Only the anonymous installation header is forwarded.
+  const installId = headers && typeof headers["X-Install-Id"] === "string" ? headers["X-Install-Id"] : "";
+  const res = await net.fetch(url, { headers: installId ? { "X-Install-Id": installId } : {} });
+  if (res.status === 204) {
+    pendingUpdate = null;
+    return null;
+  }
+  if (!res.ok) throw new Error(`Update check failed: HTTP ${res.status}`);
+  const manifest = await res.json();
+  if (
+    typeof manifest.version !== "string" ||
+    typeof manifest.url !== "string" ||
+    typeof manifest.signature !== "string" ||
+    !manifest.url.startsWith("https://")
+  ) {
+    throw new Error("Update check failed: invalid update manifest");
+  }
+  if (compareVersions(manifest.version, current) <= 0) {
+    pendingUpdate = null;
+    return null;
+  }
+  pendingUpdate = manifest;
+  return { version: manifest.version, currentVersion: current, body: manifest.notes ?? "", rawJson: manifest };
+}
+
+/** Check a downloaded file against the release signing key with the bundled backend binary. */
+function verifyUpdate(file, signature) {
+  return new Promise((resolve, reject) => {
+    execFile(locateBinary(), ["--verify-update", file, signature], { timeout: 120000, windowsHide: true }, (error, _stdout, stderr) => {
+      if (error) reject(new Error(`The update signature is not valid. ${String(stderr || "").trim()}`.trim()));
+      else resolve();
+    });
+  });
+}
+
+/** Download the pending release next to the running AppImage, verify it, then swap it in place. */
+async function downloadAndInstallUpdate(sender) {
+  const manifest = pendingUpdate;
+  if (!manifest) throw new Error("No update is pending.");
+  if (updateDownloading) throw new Error("The update is already downloading.");
+  updateDownloading = true;
+  const target = process.env.APPIMAGE;
+  // Same directory, so the final rename stays on one file system and replaces the file atomically.
+  const temp = `${target}.download`;
+  const send = (ev) => {
+    if (!sender.isDestroyed()) sender.send("vlx:updater:progress", ev);
+  };
+  try {
+    const res = await net.fetch(manifest.url);
+    if (!res.ok || !res.body) throw new Error(`Download failed: HTTP ${res.status}`);
+    send({ event: "Started", data: { contentLength: Number(res.headers.get("content-length")) || undefined } });
+    const body = Readable.fromWeb(res.body);
+    // Report progress a few times a second rather than once per network chunk.
+    let unreported = 0;
+    let lastReport = 0;
+    body.on("data", (chunk) => {
+      unreported += chunk.length;
+      if (Date.now() - lastReport < 200) return;
+      lastReport = Date.now();
+      send({ event: "Progress", data: { chunkLength: unreported } });
+      unreported = 0;
+    });
+    await pipeline(body, fs.createWriteStream(temp, { mode: 0o755 }));
+    if (unreported) send({ event: "Progress", data: { chunkLength: unreported } });
+    send({ event: "Finished" });
+    await verifyUpdate(temp, manifest.signature);
+    fs.chmodSync(temp, 0o755);
+    // A running AppImage keeps its mounted image open, so replacing the file does not disturb this process.
+    fs.renameSync(temp, target);
+    diagnostic("update_installed");
+  } catch (e) {
+    fs.rmSync(temp, { force: true });
+    diagnostic("update_failed");
+    if (e && e.code === "EACCES") {
+      throw new Error(`VelaTerm cannot replace ${target} because its folder is not writable.`);
+    }
+    throw e;
+  } finally {
+    updateDownloading = false;
+  }
+}
+
+function registerUpdaterIpc() {
+  ipcMain.handle("vlx:updater:check", (_e, headers) => checkForUpdate(headers));
+  ipcMain.handle("vlx:updater:downloadAndInstall", (event) => downloadAndInstallUpdate(event.sender));
+  ipcMain.handle("vlx:updater:relaunch", () => {
+    // The user asked for the restart, so it skips the quit confirmation.
+    state.quitConfirmed = true;
+    app.relaunch(updaterSupported() ? { execPath: process.env.APPIMAGE, args: [] } : undefined);
+    app.quit();
+  });
+  ipcMain.handle("vlx:dialog:message", async (_e, opts) => {
+    await dialog.showMessageBox(state.win && !state.win.isDestroyed() ? state.win : undefined, {
+      type: opts?.kind === "error" ? "error" : "info",
+      title: String(opts?.title ?? ""),
+      message: String(opts?.message ?? ""),
+    });
+  });
 }
 
 // ─────────────────────────── Native-capability IPC (preload bridge backend) ───────────────────────────
 
 function registerNativeIpc() {
+  // Synchronous so preload can seed the token before the page's scripts run. Only the main window, while it
+  // shows the sidecar's own origin, receives it; the account Remote window shares the preload but must not.
+  ipcMain.on("vlx:session:token", (event) => {
+    let sameOrigin = false;
+    try {
+      sameOrigin = new URL(event.senderFrame?.url ?? "").origin === `http://${LOOPBACK}:${state.port}`;
+    } catch {
+      /* Unparsable URL: treat as a foreign origin. */
+    }
+    event.returnValue = event.sender === state.win?.webContents && sameOrigin ? state.token : "";
+  });
   // Quit-confirmation handshake; see requestQuitConfirmation.
   ipcMain.handle("vlx:quit:ack", () => {
     state.quitPromptAcked = true;
@@ -739,9 +952,16 @@ function registerNativeIpc() {
     try { target = new URL(String(url)); } catch { throw new Error("Invalid Remote URL"); }
     // The URL comes from this app's own authenticated sidecar; only the scheme is constrained here.
     if (target.protocol !== "https:" && target.protocol !== "http:") throw new Error("Invalid Remote URL");
-    const win = new BrowserWindow({width:1280,height:820,minWidth:720,minHeight:480,
-      title:"VelaTerm · Remote", webPreferences:{preload:path.join(__dirname,"preload.cjs"),contextIsolation:true,nodeIntegration:false,sandbox:false}});
-    win.webContents.setWindowOpenHandler(()=>({action:"deny"}));
+    // The page comes from another machine, so it runs as a plain browser: no app preload (and with it no
+    // vlxNative), a sandbox, and a user agent without the Electron token so the frontend does not take it
+    // for this app's own window.
+    const win = new BrowserWindow({width:1280,height:820,minWidth:720,minHeight:480,icon:windowIcon(),
+      title:"VelaTerm · Remote", webPreferences:{contextIsolation:true,nodeIntegration:false,sandbox:true}});
+    state.remoteWindows.add(win);
+    win.on("closed", () => state.remoteWindows.delete(win));
+    win.setMenuBarVisibility(false);
+    win.webContents.setUserAgent(win.webContents.getUserAgent().replace(/\s*Electron\/\S+/, ""));
+    guardAppNavigation(win.webContents, false);
     await win.loadURL(target.href);
   });
   ipcMain.handle("vlx:dialog:saveFile", async (_e, opts) => {
@@ -830,6 +1050,7 @@ if (!app.requestSingleInstanceLock()) {
     }
     registerNativeIpc();
     registerBrowserIpc();
+    registerUpdaterIpc();
     buildMenu();
     try {
       await startSidecar();

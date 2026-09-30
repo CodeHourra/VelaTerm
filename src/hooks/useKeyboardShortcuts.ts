@@ -43,7 +43,8 @@ export function useKeyboardShortcuts() {
     const handler = (e: KeyboardEvent) => {
       // ── Fixed shortcut 1: Cmd+1–9 selects the nth tab ──
       const tabIdx = digitIndex(e);
-      if (hasMod(e) && tabIdx >= 0) {
+      // Cmd/Ctrl+Alt+digit is left to editors, where the document editor maps it to heading levels.
+      if (hasMod(e) && !e.altKey && tabIdx >= 0) {
         const { openTabs, setActiveTab } = useTermStore.getState();
         if (tabIdx < openTabs.length) {
           e.preventDefault();

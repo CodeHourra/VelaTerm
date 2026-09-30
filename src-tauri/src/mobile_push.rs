@@ -122,6 +122,8 @@ pub fn start(app: &AppCtx) -> Result<(), String> {
 
 /// Called only for the same new, non-silent events that raise the authoritative unread marker.
 pub fn observe(app: &AppCtx, session: &str, state: &str, body: Option<&str>) {
+    // A reply whose background work is still running is still a reply; phones know it as waiting.
+    let state = if state == "background" { "waiting" } else { state };
     if !valid_id(session) || !matches!(state, "waiting" | "asking") { return; }
     let Some(workers) = WORKERS.get() else { return; };
     let Ok(path) = app.data_dir() else { return; };

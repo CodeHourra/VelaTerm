@@ -279,7 +279,7 @@ fn serve_loop(server: tiny_http::Server, app: AppCtx, token: String) {
         Some(app.clone()),
         |sid, signal| {
             // A turn that ends while the session's `vrun` work goes on does not make it idle: report
-            // working until that work is over. Everything downstream sees the adjusted state.
+            // background until that work is over. Everything downstream sees the adjusted state.
             let signal = match signal {
                 StatusSignal::State { state, silent, authoritative } => StatusSignal::State {
                     state: crate::agent::runs::hold(&sid, state),

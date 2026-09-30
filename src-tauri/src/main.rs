@@ -6,12 +6,37 @@
     windows_subsystem = "windows"
 )]
 
+/// The Electron shell sets `VLX_EXIT_WITH_PARENT` for its sidecar. When the shell dies without stopping it
+/// (a crash, or the display going away), this backend must not live on holding the database and the
+/// sessions, so it exits once it is reparented. Other `--serve` launches, such as an SSH host server that
+/// deliberately outlives its session, never set the variable. It is removed here so terminal sessions do
+/// not pass it on to a server started inside them.
+#[cfg(unix)]
+fn exit_with_parent() {
+    if std::env::var_os("VLX_EXIT_WITH_PARENT").is_none() {
+        return;
+    }
+    std::env::remove_var("VLX_EXIT_WITH_PARENT");
+    let parent = std::os::unix::process::parent_id();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        if std::os::unix::process::parent_id() != parent {
+            std::process::exit(0);
+        }
+    });
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    #[cfg(feature = "gui")]
+    #[cfg(any(feature = "gui", feature = "sidecar"))]
     if args.get(1).map(String::as_str) == Some("--font-catalog") {
         velaterm_lib::print_font_catalog();
         return;
+    }
+    // Hidden: the Electron shell checks a downloaded update against the release signing key before
+    // installing it. Exit status 0 means verified.
+    if args.get(1).map(String::as_str) == Some("--verify-update") {
+        std::process::exit(velaterm_lib::run_verify_update(&args));
     }
     if args.get(1).map(String::as_str) == Some("--security-verify-draft") {
         velaterm_lib::run_draft_verifier(&args);
@@ -75,7 +100,14 @@ fn main() {
     // Headless server mode starts browser remote access (HTTPS, login, WebSocket, and PTY) from the CLI
     // without creating a window or requiring a display server.
     if args.get(1).map(String::as_str) == Some("--serve") {
+        #[cfg(unix)]
+        exit_with_parent();
         velaterm_lib::run_serve(&args);
+        return;
+    }
+    // vela-server host subcommands (link, run, devices, …); no arguments at all starts first-run linking.
+    #[cfg(not(feature = "gui"))]
+    if velaterm_lib::run_host_cli(&args) {
         return;
     }
     // Everything below is GUI-only. The minimal server either ran --serve above or reaches the
@@ -107,9 +139,7 @@ fn main() {
     // supplied, so print the correct usage and exit with a nonzero status.
     #[cfg(not(feature = "gui"))]
     {
-        velaterm_lib::diagnostic_warn!(
-            "vela-server: headless build (no GUI). usage: vela-server --serve [--port <p>] [--data-dir <dir>]; password via VELA_SERVE_PASSWORD env. also: --version"
-        );
+        eprintln!("vela-server: unrecognized arguments. Run `vela-server help` for usage.");
         std::process::exit(2);
     }
 }

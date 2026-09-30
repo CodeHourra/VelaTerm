@@ -11,6 +11,7 @@
 
 import { useState } from "react";
 import Icons from "../../../components/Icons";
+import Select from "../../../components/Select";
 import { useT } from "../../../i18n";
 import {
   gitDiscard,
@@ -25,6 +26,7 @@ import { CommitHistory } from "./CommitHistory";
 import { GitFileRow, type RowAction } from "./GitFileRow";
 import { GitSection } from "./GitSection";
 import { useGitPanel } from "./useGitPanel";
+import { useRepoTarget } from "./useRepoTarget";
 
 /** Which groups start open. Committed history stays closed so a big repository costs nothing. */
 const DEFAULT_OPEN = { staged: true, changes: true, untracked: true, commits: false };
@@ -33,14 +35,16 @@ type SectionKey = keyof typeof DEFAULT_OPEN;
 
 export function GitTab({ path }: { path: string | null }) {
   const t = useT();
-  const panel = useGitPanel(path);
+  // On a folder holding several repositories, the tab works on the one picked above the branch row.
+  const target = useRepoTarget(path);
+  const panel = useGitPanel(target.repoPath);
   const openChanges = useTermStore((s) => s.openChanges);
   const [open, setOpen] = useState(DEFAULT_OPEN);
   // Path awaiting discard confirmation; only ever one row at a time.
   const [confirmDiscard, setConfirmDiscard] = useState<string | null>(null);
 
   const toggle = (key: SectionKey) => setOpen((o) => ({ ...o, [key]: !o[key] }));
-  const cwd = path ?? "";
+  const cwd = target.repoPath ?? "";
   const { groups, busy, isRepo } = panel;
 
   const paths = (files: ChangedFile[]) => files.map((f) => f.path);
@@ -106,6 +110,20 @@ export function GitTab({ path }: { path: string | null }) {
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+      {target.repos.length > 0 && target.repoPath && (
+        <div className="git-repo">
+          <Select
+            value={target.repoPath}
+            onChange={target.select}
+            options={target.repos.map((r) => ({ value: r.path, label: r.name }))}
+            width="100%"
+            size="sm"
+            leading={t("git.repository")}
+            title={target.repoPath}
+            menuPortal
+          />
+        </div>
+      )}
       <div className="git-head">
         <span className="ic">
           <Icons.branch size={13} />
@@ -133,13 +151,18 @@ export function GitTab({ path }: { path: string | null }) {
           className="insp-refresh"
           title={t("changes.refresh")}
           aria-label={t("changes.refresh")}
-          onClick={panel.refresh}
+          onClick={() => {
+            target.rescan();
+            panel.refresh();
+          }}
         >
           ⟳
         </button>
       </div>
 
-      {!isRepo && !panel.err ? (
+      {path && !target.repoPath ? (
+        <div className="insp-empty git-pad">{t("changes.loading")}</div>
+      ) : !isRepo && !panel.err ? (
         <div className="insp-empty git-pad">{t("changes.notRepo")}</div>
       ) : panel.err ? (
         <div className="insp-empty git-pad git-err">{panel.err}</div>

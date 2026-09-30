@@ -14,6 +14,7 @@ const STATUS_LABEL_KEYS: Record<DisplayStatus, I18nKey> = {
   working: "status.working",
   asking: "status.asking",
   waiting: "status.waiting",
+  background: "status.background",
   unavailable: "status.unavailable",
 };
 
@@ -25,6 +26,7 @@ const STATUS_COLORS: Record<DisplayStatus, string> = {
   working: "var(--status-working)",
   asking: "var(--status-asking)",
   waiting: "var(--status-waiting)",
+  background: "var(--status-background)",
   unavailable: "var(--text-faint)",
 };
 

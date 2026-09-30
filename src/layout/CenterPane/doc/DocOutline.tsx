@@ -5,6 +5,7 @@
 //! and handles clicks.
 
 import { useT } from "../../../i18n";
+import { frontMatterLines, splitFrontMatter } from "./frontMatter";
 
 export interface OutlineHeading {
   /** 1~6。 */
@@ -19,7 +20,8 @@ export function parseOutline(md: string): OutlineHeading[] {
   const out: OutlineHeading[] = [];
   const lines = md.split("\n");
   let fence: string | null = null; // Current fence marker (` or ~); null when outside a fence.
-  for (let i = 0; i < lines.length; i++) {
+  // YAML front matter is not shown in the visual editor, and its `# comments` are not headings.
+  for (let i = frontMatterLines(splitFrontMatter(md).prefix); i < lines.length; i++) {
     const line = lines[i];
     const f = line.match(/^\s{0,3}(`{3,}|~{3,})/);
     if (f) {

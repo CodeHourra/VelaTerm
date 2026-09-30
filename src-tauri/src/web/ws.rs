@@ -120,7 +120,7 @@ async fn handle_socket(
     token_authed: bool,
     auth_fp: String,
     ip: std::net::IpAddr,
-    share: Option<super::share_policy::ShareScope>,
+    mut share: Option<super::share_policy::ShareScope>,
 ) {
     let conn_source = format!("ws-{}", NEXT_CONN_ID.fetch_add(1, Ordering::SeqCst));
     let mut diagnostic=crate::diagnostics::Span::new("ws_connection",serde_json::json!({"clientId":conn_source}));
@@ -136,14 +136,26 @@ async fn handle_socket(
     // Self-reported display name available only from E2EE; the host's badge shows it to name this client.
     let mut device_name: Option<String> = None;
     let mut pending_first: Option<String> = None;
+    // Set when a share connection was upgraded to full access: `(grant ID, account ID, device key)`, re-checked
+    // on every heartbeat so revoking the device or disabling full access ends the session.
+    let mut full_access: Option<(String, String, String)> = None;
     match ws_rx.next().await {
         Some(Ok(Message::Text(first))) => {
             if let Some(client_pub) = e2ee::parse_hello(&first) {
-                match handshake(&ctx, &mut ws_tx, &mut ws_rx, &client_pub, ip, share.as_ref()).await {
-                    Some((c, did, dname)) => {
+                let device = e2ee::parse_hello_device(&first);
+                match handshake(&ctx, &mut ws_tx, &mut ws_rx, &client_pub, ip, share.as_ref(), device.as_ref()).await {
+                    Some((c, did, dname, full)) => {
                         cipher = Some(c);
                         device_id = did;
                         device_name = dname;
+                        if full {
+                            // From here on the connection is served like a paired LAN client: the regular
+                            // remote dispatch, terminals and the full event set, still without management commands.
+                            let authority = share.take().and_then(|scope| scope.push_authority);
+                            let (Some((grant, account)), Some((key, _))) = (authority, device) else { return };
+                            crate::diagnostics::record("INFO", "share_full_access", json!({"status":"granted"}));
+                            full_access = Some((grant, account, key));
+                        }
                     }
                     None => return, // End the connection after handshake/authentication failure or revocation.
                 }
@@ -344,6 +356,11 @@ async fn handle_socket(
                         break;
                     }
                 }
+                if let Some((grant, account, key)) = &full_access {
+                    if !super::full_access::still_authorized(&ctx.app, grant, account, key) {
+                        break;
+                    }
+                }
                 if out_tx.send(Message::Text(json!({"t":"ping"}).to_string())).is_err() {
                     break;
                 }
@@ -388,7 +405,8 @@ async fn handshake(
     client_pub_b64: &str,
     ip: std::net::IpAddr,
     share: Option<&super::share_policy::ShareScope>,
-) -> Option<(Cipher, Option<String>, Option<String>)> {
+    device: Option<&(String, String)>,
+) -> Option<(Cipher, Option<String>, Option<String>, bool)> {
     let cipher = ctx.e2ee_keys.derive(client_pub_b64).ok()?;
     // Send ready in plaintext so the client knows the shared key is available for encrypted authentication.
     ws_tx
@@ -406,10 +424,16 @@ async fn handshake(
     // Share visitors hold no host password and no pairing token: the relay already authorized this grant, and
     // the tunnel client injected the matching scope, so E2EE only proves key agreement. Device registration
     // and the host blocklist do not apply to them.
-    if share.is_some() {
-        let ct = cipher.encrypt_text(e2ee::MSG_AUTHENTICATED)?;
+    // A visitor presenting an approved device key and a proof bound to this session is upgraded to full
+    // access; anything less stays within the share policy.
+    if let Some(scope) = share {
+        let full = device.is_some_and(|(key, proof)| {
+            super::full_access::authorize(&ctx.app, scope, &ctx.e2ee_keys, key, proof, client_pub_b64)
+        });
+        let reply = if full { e2ee::MSG_AUTHENTICATED_FULL } else { e2ee::MSG_AUTHENTICATED };
+        let ct = cipher.encrypt_text(reply)?;
         ws_tx.send(Message::Text(ct)).await.ok()?;
-        return Some((cipher, device_id, device_name));
+        return Some((cipher, device_id, device_name, full));
     }
     // Rate limit before any credential verification; the explicit encrypted reason lets clients distinguish
     // throttling from a wrong password.
@@ -447,7 +471,7 @@ async fn handshake(
         ws_tx.send(Message::Text(ct)).await.ok()?;
         // Return device_id so the main loop can detect revocation during later heartbeats, and the name
         // so the presence registry can show who just attached.
-        Some((cipher, device_id, device_name))
+        Some((cipher, device_id, device_name, false))
     } else {
         attempt.failure();
         // Return an encrypted error, proving key exchange succeeded but identity failed, then close.

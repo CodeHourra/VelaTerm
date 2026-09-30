@@ -50,8 +50,12 @@ export function supportsChatEngine(kind: SessionKind): boolean {
  * - working: processing with ongoing output.
  * - asking: stopped while the UI asks a question or awaits confirmation.
  * - waiting: stopped without a question; the response is ready for review.
+ * - background: the turn has ended, but work it started (background tasks, `vrun` runs) is still running.
  */
-export type AgentState = "working" | "asking" | "waiting";
+export type AgentState = "working" | "asking" | "waiting" | "background";
+
+/** Every agent state, in the order status filters and counts list them. */
+export const AGENT_STATES: readonly AgentState[] = ["working", "asking", "waiting", "background"];
 
 /** Every value a status indicator may display: lifecycle ∪ agent activity states ∪ unavailable hook state. */
 export type DisplayStatus = SessionStatus | AgentState | "unavailable";
@@ -82,6 +86,18 @@ export function projectRoot(p: Project | null | undefined): string | null {
 /** True for a collection: a top-level container with no folder behind it. */
 export function isVirtualProject(p: Project | null | undefined): boolean {
   return !!p && !p.rootPath.trim();
+}
+
+/** Whether another collection already uses `name`, ignoring case and surrounding whitespace. Mirrors the
+ *  backend check so the dialog and inline rename can flag a duplicate before submitting. */
+export function collectionNameTaken(projects: Project[], name: string, excludeId?: string): boolean {
+  const wanted = name.trim().toLowerCase();
+  return projects.some((p) => isVirtualProject(p) && p.id !== excludeId && p.name.trim().toLowerCase() === wanted);
+}
+
+/** Sidebar display order: collections above folder-backed projects, each kind keeping its stored order. */
+export function collectionsFirst(projects: Project[]): Project[] {
+  return [...projects].sort((a, b) => Number(isVirtualProject(b)) - Number(isVirtualProject(a)));
 }
 
 export interface Group {
@@ -295,6 +311,7 @@ export function effectiveStatus(rt: SessionRuntime | undefined): DisplayStatus {
  * - working (green): the agent is active.
  * - asking (yellow): the UI is asking/awaiting confirmation, or an unread notification needs attention.
  * - waiting (magenta): a response has arrived and has already been viewed (not unread).
+ * - background (cyan): the response has been viewed, and work its turn started is still running.
  */
 export function matchesAgentState(
   category: AgentState,
@@ -303,11 +320,12 @@ export function matchesAgentState(
 ): boolean {
   if (category === "asking") return st === "asking" || unread;
   if (category === "waiting") return st === "waiting" && !unread;
+  if (category === "background") return st === "background" && !unread;
   return st === category;
 }
 
 /**
- * Session counts for the three agent states, shared by the sidebar state-filter menu and bottom status bar so
+ * Session counts for each agent state, shared by the sidebar state-filter menu and bottom status bar so
  * both show identical numbers. Unread depends solely on whether the notification marker remains. Opening a
  * session no longer clears it immediately; useNotifications waits two seconds of viewing. During that interval,
  * the active session remains unread/awaiting response instead of jumping instantly to viewed.
@@ -317,11 +335,11 @@ export function countByAgentState(
   runtimes: Record<string, SessionRuntime>,
   notifications: Record<string, unknown>,
 ): Record<AgentState, number> {
-  const c: Record<AgentState, number> = { working: 0, asking: 0, waiting: 0 };
+  const c: Record<AgentState, number> = { working: 0, asking: 0, waiting: 0, background: 0 };
   for (const s of sessions) {
     const st = effectiveStatus(runtimes[s.id]);
     const unread = s.id in notifications;
-    for (const k of ["working", "asking", "waiting"] as const) {
+    for (const k of AGENT_STATES) {
       if (matchesAgentState(k, st, unread)) c[k]++;
     }
   }

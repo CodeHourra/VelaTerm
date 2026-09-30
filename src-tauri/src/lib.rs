@@ -15,7 +15,7 @@ mod commands;
 mod db;
 mod files;
 mod fonts;
-#[cfg(feature = "gui")]
+#[cfg(any(feature = "gui", feature = "sidecar"))]
 pub use fonts::print_font_catalog;
 mod git;
 mod gitea;
@@ -41,12 +41,18 @@ mod split_trace;
 pub mod diagnostics;
 #[cfg(feature = "gui")]
 mod native_menu;
+#[cfg(feature = "gui")]
+mod native_drop;
 // GUI-only watchdog reporting stalls of the platform event loop, which are what a frozen window actually is.
 #[cfg(feature = "gui")]
 mod stall;
-// GUI-only vela-server provisioning: R2 download, minisign verification, and cache.
-#[cfg(feature = "gui")]
+// vela-server provisioning: R2 download, minisign verification, and cache. The GUI provisions remote hosts with
+// it; the headless build only uses the manifest and signature checks for `vela-server update`.
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
 mod server_supply;
+pub use server_supply::run_verify_update;
+// vela-server host subcommands: account linking, full access, service install and self-update.
+mod host_cli;
 // GUI-only client-side SSH orchestration, provisioning, serve, forwarding, and auto-login.
 #[cfg(feature = "gui")]
 mod ssh_remote;
@@ -1055,6 +1061,11 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
 
             // DevTools are opened on demand rather than automatically in development.
 
+            // Capture the paths of folders dropped from the OS file manager onto the main window.
+            if let Some(win) = app.get_webview_window("main") {
+                native_drop::install(&win);
+            }
+
             // Disable WebView2 browser accelerator handling in the main view so Ctrl-based app shortcuts
             // reach frontend keydown. Built-in browser child views retain normal browser accelerators.
             #[cfg(target_os = "windows")]
@@ -1223,7 +1234,9 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
             browser::browser_set_bounds,
             browser::browser_set_visible,
             browser::browser_close,
-            // 6) macOS native notifications invoked directly from notify.ts.
+            // 6) Paths of files dropped from the OS file manager, read from the platform drag channel.
+            native_drop::take_dropped_paths,
+            // 7) macOS native notifications invoked directly from notify.ts.
             native_notify,
             native_notify_auth_status,
             native_notify_request_auth,
@@ -1301,7 +1314,8 @@ fn request_quit_confirmation(app: &tauri::AppHandle) {
     let epoch = st.epoch.fetch_add(1, Ordering::SeqCst) + 1;
     st.acked.store(false, Ordering::SeqCst);
     use tauri::Emitter;
-    if app.emit("app://quit-requested", ()).is_err() {
+    let payload = serde_json::json!({"remoteWindows": commands::remote_window_count(app)});
+    if app.emit("app://quit-requested", payload).is_err() {
         native_quit_confirmation(app);
         return;
     }
@@ -1334,10 +1348,14 @@ fn request_quit_confirmation(app: &tauri::AppHandle) {
 fn native_quit_confirmation(app: &tauri::AppHandle) {
     use std::sync::atomic::Ordering;
     use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    let mut message = String::from("Any running terminal and agent sessions will be stopped.");
+    if commands::remote_window_count(app) > 0 {
+        message.push_str("\nOpen remote windows will also be closed.");
+    }
     let app = app.clone();
     app.clone()
         .dialog()
-        .message("Any running terminal and agent sessions will be stopped.")
+        .message(message)
         .title("Quit VelaTerm?")
         .kind(MessageDialogKind::Info)
         .buttons(MessageDialogButtons::OkCancelCustom(
@@ -1364,12 +1382,18 @@ fn tauri_context() -> tauri::Context<tauri::Wry> {
 /// Resolve the serve identifier for default data path and production checks. GUI uses embedded config;
 /// the minimal server uses the independent `io.vlinx.vlxterm.server` identity, preventing accidental
 /// use of desktop databases and retaining production plaintext protections. SSH normally supplies data-dir.
+/// The Electron sidecar build is the desktop app's backend, so it keeps the desktop release identity and
+/// opens the data directory that the desktop release has always used.
 #[cfg(feature = "gui")]
-fn serve_identifier() -> String {
+pub(crate) fn serve_identifier() -> String {
     tauri_context().config().identifier.clone()
 }
-#[cfg(not(feature = "gui"))]
-fn serve_identifier() -> String {
+#[cfg(all(not(feature = "gui"), feature = "sidecar"))]
+pub(crate) fn serve_identifier() -> String {
+    "io.vlinx.vlxterm.release".to_string()
+}
+#[cfg(all(not(feature = "gui"), not(feature = "sidecar")))]
+pub(crate) fn serve_identifier() -> String {
     "io.vlinx.vlxterm.server".to_string()
 }
 
@@ -1395,6 +1419,9 @@ struct ServeArgs {
     /// SSH connections carry the client's choice here, because the machine running the service is headless
     /// and has no panel to switch it in. None leaves the stored setting in charge.
     mirror: Option<bool>,
+    /// Account relay only (`vela-server` / `vela-server run`): no local web listener at all, the host is reached
+    /// solely through the outbound share tunnel. Not settable from `--serve` flags.
+    relay_only: bool,
 }
 
 /// Recommended headless password environment variable, avoiding exposure in process arguments.
@@ -1464,6 +1491,7 @@ fn parse_serve_args(args: &[String], env_password: Option<String>) -> Result<Ser
         lan_http,
         print_pairing,
         mirror,
+        relay_only: false,
     })
 }
 
@@ -1478,7 +1506,12 @@ fn should_print_pairing(flag: bool, is_tty: bool) -> bool {
 /// Headless data directory: explicit --data-dir wins; otherwise use platform data directory plus
 /// identifier, matching GUI SQLite/recording/certificate layout.
 fn serve_data_dir(args: &ServeArgs, identifier: &str) -> Result<std::path::PathBuf, String> {
-    if let Some(dir) = &args.data_dir {
+    resolve_data_dir(args.data_dir.as_deref(), identifier)
+}
+
+/// Explicit directory wins; otherwise the platform data directory plus identifier.
+pub(crate) fn resolve_data_dir(explicit: Option<&str>, identifier: &str) -> Result<std::path::PathBuf, String> {
+    if let Some(dir) = explicit {
         return Ok(std::path::PathBuf::from(dir));
     }
     dirs::data_dir().map(|d| d.join(identifier)).ok_or(
@@ -1486,16 +1519,39 @@ fn serve_data_dir(args: &ServeArgs, identifier: &str) -> Result<std::path::PathB
     )
 }
 
+/// Serves a linked host through the account relay only, with no local web listener. Used by `vela-server`
+/// after linking and by `vela-server run` under a service manager.
+pub(crate) fn run_relay_serve(data_dir: Option<String>) -> Result<(), String> {
+    serve_main(&ServeArgs {
+        port: 0,
+        password: String::new(),
+        data_dir,
+        local_http: false,
+        lan_http: false,
+        print_pairing: false,
+        mirror: None,
+        relay_only: true,
+    })
+}
+
 /// Pure-CLI headless entry point for `vlx-term --serve`.
 ///
 /// Build no Tauri app/window/display dependency. Construct GUI-equivalent Db/PtyManager/HookServer
 /// state under AppCtx::Headless and reuse the HTTPS/login/WebSocket/PTY service. Ctrl+C/SIGTERM shuts
 /// down axum and active PTYs gracefully.
+/// Runs a `vela-server` host subcommand (`link`, `run`, `devices`, …). Returns false when `args` is not one.
+pub fn run_host_cli(args: &[String]) -> bool {
+    host_cli::run(args)
+}
+
 pub fn run_serve(args: &[String]) {
     // Prefer the new variable and fall back to the legacy name.
     let env_password = std::env::var(SERVE_PASSWORD_ENV)
         .ok()
         .or_else(|| std::env::var(SERVE_PASSWORD_ENV_LEGACY).ok());
+    // Every terminal session inherits this process's environment; the access password must not reach them.
+    std::env::remove_var(SERVE_PASSWORD_ENV);
+    std::env::remove_var(SERVE_PASSWORD_ENV_LEGACY);
     let parsed = match parse_serve_args(args, env_password) {
         Ok(p) => p,
         Err(e) => {
@@ -1551,92 +1607,99 @@ fn serve_main(args: &ServeArgs) -> Result<(), String> {
     agent::runs::start(ctx.clone());
     let _ = mobile_push::start(&ctx);
 
-    // Reuse the GUI web service. local-http is loopback plaintext, lan-http is LAN plaintext, and
-    // neither selects self-signed LAN TLS; loopback wins if both plaintext flags are present.
     let web = WebServer::new();
-    let mode = if args.local_http {
-        crate::web::ServeMode::LoopbackHttp
-    } else if args.lan_http {
-        crate::web::ServeMode::LanHttp
+    if args.relay_only {
+        // Relay-only hosts expose nothing locally; the share tunnel is their only way in, so failing to start
+        // it (for example because the device was unlinked meanwhile) is fatal rather than a logged warning.
+        web::public_relay::start(&ctx)?;
+        diagnostics::record("INFO","database_ready",serde_json::json!({"status":"success"}));
+        println!("vela-server started: reachable from your VelaTerm account (Connect → Remote)");
     } else {
-        crate::web::ServeMode::LanTls
-    };
-    // Production rejects LAN plaintext; mobile production must use HTTPS plus certificate pinning.
-    // Loopback plaintext never leaves the host and remains permitted.
-    if matches!(mode, crate::web::ServeMode::LanHttp)
-        && crate::web::is_production_identifier(&identifier)
-    {
-        return Err(format!(
-            "LAN plaintext (--lan-http, binds 0.0.0.0 in plaintext) is only available in dev builds; this is a release build (identifier={identifier}). \
-             For production use the default TLS mode, or HTTPS with certificate pinning (see architecture §20)."
-        ));
-    }
-    let status = web.start(
-        ctx.clone(),
-        crate::web::StartAuth::Password(args.password.clone()),
-        Some(args.port),
-        mode,
-    )?;
+        // Reuse the GUI web service. local-http is loopback plaintext, lan-http is LAN plaintext, and
+        // neither selects self-signed LAN TLS; loopback wins if both plaintext flags are present.
+        let mode = if args.local_http {
+            crate::web::ServeMode::LoopbackHttp
+        } else if args.lan_http {
+            crate::web::ServeMode::LanHttp
+        } else {
+            crate::web::ServeMode::LanTls
+        };
+        // Production rejects LAN plaintext; mobile production must use HTTPS plus certificate pinning.
+        // Loopback plaintext never leaves the host and remains permitted.
+        if matches!(mode, crate::web::ServeMode::LanHttp)
+            && crate::web::is_production_identifier(&identifier)
+        {
+            return Err(format!(
+                "LAN plaintext (--lan-http, binds 0.0.0.0 in plaintext) is only available in dev builds; this is a release build (identifier={identifier}). \
+                 For production use the default TLS mode, or HTTPS with certificate pinning (see architecture §20)."
+            ));
+        }
+        let status = web.start(
+            ctx.clone(),
+            crate::web::StartAuth::Password(args.password.clone()),
+            Some(args.port),
+            mode,
+        )?;
 
-    println!("vlx-term headless server started");
-    diagnostics::record("INFO","database_ready",serde_json::json!({"status":"success"}));
+        println!("vlx-term headless server started");
+        diagnostics::record("INFO","database_ready",serde_json::json!({"status":"success"}));
 
-    // Print a fully usable preferred URL first. LAN TLS requires the complete #pair fragment with
-    // token/public key; plaintext modes can use their bare URL. The fragment carries the long-lived
-    // pairing token, so it is only printed to an interactive terminal or on explicit --print-pairing —
-    // never into journald/service logs, where it would persist (GitHub issue #24).
-    let primary = if matches!(mode, crate::web::ServeMode::LanTls) {
-        if should_print_pairing(args.print_pairing, std::io::IsTerminal::is_terminal(&std::io::stdout())) {
-            match web.create_pairing(None, false) {
-                Ok(info) => Some(info.url),
-                Err(e) => {
-                    crate::diagnostic_warn!("  failed to create pairing link: {e}");
-                    None
+        // Print a fully usable preferred URL first. LAN TLS requires the complete #pair fragment with
+        // token/public key; plaintext modes can use their bare URL. The fragment carries the long-lived
+        // pairing token, so it is only printed to an interactive terminal or on explicit --print-pairing —
+        // never into journald/service logs, where it would persist (GitHub issue #24).
+        let primary = if matches!(mode, crate::web::ServeMode::LanTls) {
+            if should_print_pairing(args.print_pairing, std::io::IsTerminal::is_terminal(&std::io::stdout())) {
+                match web.create_pairing(None, false) {
+                    Ok(info) => Some(info.url),
+                    Err(e) => {
+                        crate::diagnostic_warn!("  failed to create pairing link: {e}");
+                        None
+                    }
                 }
+            } else {
+                println!(
+                    "  pairing link withheld (stdout is not a terminal): run with --print-pairing to print it, or create a pairing link from the app"
+                );
+                status.urls.first().cloned()
             }
         } else {
-            println!(
-                "  pairing link withheld (stdout is not a terminal): run with --print-pairing to print it, or create a pairing link from the app"
-            );
             status.urls.first().cloned()
+        };
+        if let Some(url) = &primary {
+            println!("  open in browser: {url}");
         }
-    } else {
-        status.urls.first().cloned()
-    };
-    if let Some(url) = &primary {
-        println!("  open in browser: {url}");
-    }
-    // Print other interface URLs without repeating the long pairing fragment; users can append it.
-    if status.urls.len() > 1 {
-        if matches!(mode, crate::web::ServeMode::LanTls)
-            && primary.as_deref().is_some_and(|u| u.contains("#pair="))
-        {
-            println!("  other addresses (swap host, keep the #pair=… part):");
-        } else {
-            println!("  other addresses:");
+        // Print other interface URLs without repeating the long pairing fragment; users can append it.
+        if status.urls.len() > 1 {
+            if matches!(mode, crate::web::ServeMode::LanTls)
+                && primary.as_deref().is_some_and(|u| u.contains("#pair="))
+            {
+                println!("  other addresses (swap host, keep the #pair=… part):");
+            } else {
+                println!("  other addresses:");
+            }
+            for url in status.urls.iter().skip(1) {
+                println!("    {url}");
+            }
         }
-        for url in status.urls.iter().skip(1) {
-            println!("    {url}");
+        // Only LAN TLS has a certificate fingerprint.
+        if let Some(fp) = &status.fingerprint {
+            println!("  certificate fingerprint (SHA-256): {fp}");
         }
+        // Auto-start the secondary LAN remote instance (ctx.remote_web()) when persisted settings enable it,
+        // e.g. remote access turned on from the Electron shell before a sidecar restart. Runs after the
+        // primary CLI-configured server so a port conflict deterministically hits this secondary instance,
+        // where it is logged and nonfatal — the CLI server semantics stay untouched.
+        match command_core::web_server_autostart(&ctx) {
+            Ok(Some(remote)) => println!(
+                "  remote access auto-started on port {}",
+                remote.port.unwrap_or(0)
+            ),
+            Ok(None) => {}
+            Err(e) => crate::diagnostic_warn!("  remote access auto-start failed: {e}"),
+        }
+        let _ = web::public_relay::start(&ctx);
     }
-    // Only LAN TLS has a certificate fingerprint.
-    if let Some(fp) = &status.fingerprint {
-        println!("  certificate fingerprint (SHA-256): {fp}");
-    }
-    // Auto-start the secondary LAN remote instance (ctx.remote_web()) when persisted settings enable it,
-    // e.g. remote access turned on from the Electron shell before a sidecar restart. Runs after the
-    // primary CLI-configured server so a port conflict deterministically hits this secondary instance,
-    // where it is logged and nonfatal — the CLI server semantics stay untouched.
-    match command_core::web_server_autostart(&ctx) {
-        Ok(Some(remote)) => println!(
-            "  remote access auto-started on port {}",
-            remote.port.unwrap_or(0)
-        ),
-        Ok(None) => {}
-        Err(e) => crate::diagnostic_warn!("  remote access auto-start failed: {e}"),
-    }
-
-    let _ = web::public_relay::start(&ctx);
 
     // Same account-usage poller as the desktop entry point: headless serves browser and mobile clients,
     // which read the stored snapshot instead of querying providers themselves.
@@ -1758,6 +1821,7 @@ mod tests {
                 lan_http: false,
                 print_pairing: false,
                 mirror: None,
+                relay_only: false,
             }
         );
     }
@@ -1857,6 +1921,7 @@ mod tests {
             lan_http: false,
             print_pairing: false,
             mirror: None,
+            relay_only: false,
         };
         assert_eq!(
             serve_data_dir(&args, "io.vlinx.vlxterm").unwrap(),

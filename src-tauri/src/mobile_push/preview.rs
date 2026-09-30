@@ -50,7 +50,7 @@ pub(super) fn for_event(app: &AppCtx, id: &str, state: &str, at: i64) -> Result<
         crate::db::repo::get_session(&conn, id)?.ok_or("Session unavailable")?
     };
     let title = plain(&session.name, 80);
-    if !matches!(state, "waiting" | "asking") { return Ok(Preview { title, body: String::new() }); }
+    if !matches!(state, "waiting" | "asking" | "background") { return Ok(Preview { title, body: String::new() }); }
     let body = if session.engine == "chat" {
         app.chat().notification_excerpt(id, state == "asking", at)
     } else { None };

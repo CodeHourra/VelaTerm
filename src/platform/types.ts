@@ -81,6 +81,12 @@ export interface DialogCapability {
   pickDirectory(): Promise<string | null>;
   /** Open the system file picker; return the selected absolute path, or null on cancel or without a native picker. */
   pickFile(opts?: PickFileOptions): Promise<string | null>;
+  /**
+   * Absolute paths of the folders in an external file drop; files are left out. Call synchronously from the
+   * `drop` handler, because the DataTransfer is emptied once the handler returns. Returns an empty list where
+   * local paths are unavailable, as in browsers and remote-connection windows.
+   */
+  droppedFolders(transfer: DataTransfer): Promise<string[]>;
 }
 
 /** External-opening capability using default applications or the file manager. */
@@ -138,6 +144,12 @@ export interface WindowCapability {
   onOpenProjectRequest(cb: () => void): Promise<UnlistenFn>;
 }
 
+/** Details the shell attaches to an exit request. */
+export interface QuitRequest {
+  /** Open windows connected to another machine or workspace; they close together with the application. */
+  remoteWindows: number;
+}
+
 /**
  * Application-exit confirmation capability.
  *
@@ -149,7 +161,7 @@ export interface WindowCapability {
  */
 export interface QuitCapability {
   /** Subscribe to exit requests; returns an unsubscribe function, or null where there is no application exit. */
-  onRequested(cb: () => void): Promise<UnlistenFn | null>;
+  onRequested(cb: (request: QuitRequest) => void): Promise<UnlistenFn | null>;
   /** Report that the dialog is on screen, so the shell does not fall back to its native dialog. */
   ack(): Promise<void>;
   /** Approve the exit. Callers must finish persisting workspace state before calling this. */
@@ -234,6 +246,41 @@ export interface BrowserCapability {
   onPopup(tabId: string, cb: (popup: BrowserPopupPayload) => void): Promise<UnlistenFn>;
 }
 
+/** Download progress, in the event shape of the Tauri updater plugin. */
+export type UpdateDownloadEvent =
+  | { event: "Started"; data: { contentLength?: number } }
+  | { event: "Progress"; data: { chunkLength: number } }
+  | { event: "Finished" };
+
+/** A newer release found by `UpdaterCapability.check`. */
+export interface UpdateHandle {
+  version: string;
+  currentVersion: string;
+  /** Full changelog Markdown from the manifest. */
+  body?: string;
+  /** The raw manifest, carrying extensions such as `notes_i18n`. */
+  rawJson: Record<string, unknown>;
+  /** Download, verify and install the release; the app then needs a restart (Windows exits by itself). */
+  downloadAndInstall(onEvent?: (event: UpdateDownloadEvent) => void): Promise<void>;
+  /** Release the handle when the prompt is dismissed or replaced. */
+  close(): Promise<void>;
+}
+
+/**
+ * Self-update of the installed desktop app. Tauri uses its updater plugin; the Electron shell updates an
+ * AppImage installation from the same update service. Browsers and other Electron installations report
+ * `supported: false`, and the update entry points stay inactive.
+ */
+export interface UpdaterCapability {
+  supported: boolean;
+  /** Ask the update service for a newer release, sending the given request headers; null when up to date. */
+  check(headers?: Record<string, string>): Promise<UpdateHandle | null>;
+  /** Restart into the installed update. */
+  relaunch(): Promise<void>;
+  /** Show a native message box for update results. */
+  message(text: string, opts: { title: string; kind?: "info" | "error" }): Promise<void>;
+}
+
 /** System-notification capability with local native, remote-window relay, and Web Notification paths; see notify.ts. */
 export interface NotifyCapability {
   /** Send a system notification; silently skip without permission or on failure. Callers decide whether it should appear. */
@@ -278,4 +325,6 @@ export interface Platform {
   notify: NotifyCapability;
   /** Built-in browser tabs, exclusive to desktop shells: Tauri add_child / Electron WebContentsView. */
   browser: BrowserCapability;
+  /** Self-update of the installed app. */
+  updater: UpdaterCapability;
 }

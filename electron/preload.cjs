@@ -6,13 +6,22 @@
 //   2. window.vlxNative: a controlled wrapper around native capabilities that delegates to individual IPC
 //      handlers in the main process (see main.cjs).
 
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 // Development detection: the main process injects this through webPreferences.additionalArguments as the
 // inverse of app.isPackaged. Unpackaged `pnpm electron:dev` runs are development builds; electron-builder
 // releases are not. src/platform/env.ts uses this value to derive isDev so the title bar can show its DEV
 // badge in Electron development runs as well.
 const isElectronDev = process.argv.includes("--vlx-dev=1");
+
+// Seed the sidecar session token into this window's sessionStorage, where the frontend's WS client reads it,
+// before any page script runs. The main process answers only for the main window on the sidecar origin.
+try {
+  const token = ipcRenderer.sendSync("vlx:session:token");
+  if (token) window.sessionStorage.setItem("vlx-token", token);
+} catch {
+  /* Without a token the frontend shows its login page. */
+}
 
 contextBridge.exposeInMainWorld("__VLX_ELECTRON__", true);
 contextBridge.exposeInMainWorld("__VLX_ELECTRON_DEV__", isElectronDev);
@@ -26,6 +35,8 @@ contextBridge.exposeInMainWorld("vlxNative", {
   pickDirectory: () => ipcRenderer.invoke("vlx:dialog:pickDirectory"),
   /** Open the system file picker; return null when canceled. */
   pickFile: (opts) => ipcRenderer.invoke("vlx:dialog:pickFile", opts),
+  /** Absolute path of a File from a drop; empty for files that did not come from the local file system. */
+  pathForFile: (file) => webUtils.getPathForFile(file),
   /** Open the account Remote relay URL in a dedicated application window. */
   openAccountRemoteWindow: (url) => ipcRenderer.invoke("vlx:account:remote", url),
   openExternal: (url) => ipcRenderer.invoke("vlx:shell:openExternal", url),
@@ -60,7 +71,7 @@ contextBridge.exposeInMainWorld("vlxNative", {
    */
   quit: {
     onRequested: (cb) => {
-      const handler = () => cb();
+      const handler = (_event, request) => cb(request);
       ipcRenderer.on("vlx:quit:requested", handler);
       return () => ipcRenderer.removeListener("vlx:quit:requested", handler);
     },
@@ -68,6 +79,28 @@ contextBridge.exposeInMainWorld("vlxNative", {
     confirm: () => ipcRenderer.invoke("vlx:quit:confirm"),
     cancel: () => ipcRenderer.invoke("vlx:quit:cancel"),
   },
+
+  /**
+   * Self-update of an AppImage installation. `supported` is fixed at window creation by the main process;
+   * the release URL and signature never pass through the page. `downloadAndInstall` reports progress in the
+   * same event shape as the Tauri updater plugin.
+   */
+  updater: {
+    supported: process.argv.includes("--vlx-updater=1"),
+    check: (headers) => ipcRenderer.invoke("vlx:updater:check", headers),
+    downloadAndInstall: async (onEvent) => {
+      const handler = (_e, ev) => onEvent?.(ev);
+      ipcRenderer.on("vlx:updater:progress", handler);
+      try {
+        await ipcRenderer.invoke("vlx:updater:downloadAndInstall");
+      } finally {
+        ipcRenderer.removeListener("vlx:updater:progress", handler);
+      }
+    },
+    relaunch: () => ipcRenderer.invoke("vlx:updater:relaunch"),
+  },
+  /** Native message box, used where the page has no dialog of its own (update results). */
+  message: (opts) => ipcRenderer.invoke("vlx:dialog:message", opts),
 
   /** Explicitly install/uninstall the `vela` shell command, as in VS Code (shared by macOS settings and the native menu). */
   velaCommand: {

@@ -52,16 +52,19 @@ impl PiVariant {
 // ─────────────────────────── Launch ───────────────────────────
 
 /// Arguments that turn the CLI into a headless protocol peer, plus the optional native session to resume,
-/// the model to start with, and — for OMP — forcing every tool through without prompting.
+/// the model to start with, and — for OMP — forcing every tool through without prompting. With `fork`, the
+/// session is copied into a new one through the native `--fork <id>` instead of being resumed in place.
 pub fn launch_args(
     variant: PiVariant,
     resume: Option<&str>,
+    fork: bool,
     model: Option<&str>,
     bypass_approvals: bool,
 ) -> Vec<String> {
     let mut args: Vec<String> = vec!["--mode".into(), "rpc".into()];
     if let Some(id) = resume.filter(|id| !id.trim().is_empty()) {
         match variant {
+            _ if fork => args.push("--fork".into()),
             PiVariant::Pi => args.push("--session".into()),
             PiVariant::Omp => args.push("--resume".into()),
         }
@@ -473,12 +476,19 @@ mod tests {
     #[test]
     fn launch_args_resume_per_variant() {
         assert_eq!(
-            launch_args(PiVariant::Pi, Some("abc"), Some("m"), false),
+            launch_args(PiVariant::Pi, Some("abc"), false, Some("m"), false),
             vec!["--mode", "rpc", "--session", "abc", "--model", "m"]
         );
         assert_eq!(
-            launch_args(PiVariant::Omp, Some("abc"), None, true),
+            launch_args(PiVariant::Omp, Some("abc"), false, None, true),
             vec!["--mode", "rpc", "--resume", "abc", "--approval-mode=yolo"]
         );
+    }
+
+    #[test]
+    fn launch_args_fork_uses_the_native_fork_flag() {
+        for variant in [PiVariant::Pi, PiVariant::Omp] {
+            assert_eq!(launch_args(variant, Some("abc"), true, None, false), vec!["--mode", "rpc", "--fork", "abc"]);
+        }
     }
 }

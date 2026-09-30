@@ -34,9 +34,13 @@ import type {
   PickFileOptions,
   Platform,
   QuitCapability,
+  QuitRequest,
   SaveFileOptions,
   TransportCapability,
   UnlistenFn,
+  UpdateDownloadEvent,
+  UpdateHandle,
+  UpdaterCapability,
   VelaCommandCapability,
   VelaCommandStatus,
   WindowCapability,
@@ -48,6 +52,7 @@ interface VlxNativeBridge {
   saveFile(opts?: SaveFileOptions): Promise<string | null>;
   pickDirectory(): Promise<string | null>;
   pickFile(opts?: PickFileOptions): Promise<string | null>;
+  pathForFile?(file: File): string;
   openExternal(url: string): Promise<void>;
   openPath(path: string): Promise<void>;
   revealPath(path: string): Promise<void>;
@@ -57,7 +62,7 @@ interface VlxNativeBridge {
   takeOpenProjectRequest(): Promise<string | null>;
   onOpenProjectRequest(cb: () => void): () => void;
   quit?: {
-    onRequested(cb: () => void): () => void;
+    onRequested(cb: (request?: Partial<QuitRequest>) => void): () => void;
     ack(): Promise<void>;
     confirm(): Promise<void>;
     cancel(): Promise<void>;
@@ -68,6 +73,13 @@ interface VlxNativeBridge {
     uninstall(): Promise<VelaCommandStatus>;
   };
   browser?: VlxBrowserBridge;
+  updater?: {
+    supported: boolean;
+    check(headers?: Record<string, string>): Promise<Omit<UpdateHandle, "downloadAndInstall" | "close"> | null>;
+    downloadAndInstall(onEvent?: (event: UpdateDownloadEvent) => void): Promise<void>;
+    relaunch(): Promise<void>;
+  };
+  message?(opts: { title: string; message: string; kind?: "info" | "error" }): Promise<void>;
 }
 
 /** Built-in browser bridge exposed by preload and backed by main-process WebContentsView. */
@@ -118,6 +130,18 @@ const dialog: DialogCapability = {
   },
   async pickFile(opts) {
     return (await bridge()?.pickFile(opts)) ?? null;
+  },
+  async droppedFolders(transfer) {
+    const pathForFile = bridge()?.pathForFile;
+    if (!pathForFile) return [];
+    const paths: string[] = [];
+    for (const item of Array.from(transfer.items)) {
+      if (item.kind !== "file" || !item.webkitGetAsEntry()?.isDirectory) continue;
+      const file = item.getAsFile();
+      const path = file ? pathForFile(file) : "";
+      if (path) paths.push(path);
+    }
+    return paths;
   },
 };
 
@@ -191,7 +215,7 @@ const windowCap: WindowCapability = {
 
 const quit: QuitCapability = {
   async onRequested(cb): Promise<UnlistenFn | null> {
-    return bridge()?.quit?.onRequested(cb) ?? null;
+    return bridge()?.quit?.onRequested((request) => cb({ remoteWindows: request?.remoteWindows ?? 0 })) ?? null;
   },
   async ack() {
     await bridge()?.quit?.ack();
@@ -277,6 +301,31 @@ const browser: BrowserCapability = {
   },
 };
 
+/** AppImage self-update through the main process; other Electron installations report unsupported. */
+const updater: UpdaterCapability = {
+  supported: !!bridge()?.updater?.supported,
+  async check(headers) {
+    const native = bridge()?.updater;
+    if (!native?.supported) return null;
+    const found = await native.check(headers);
+    if (!found) return null;
+    return {
+      ...found,
+      downloadAndInstall: (onEvent) => native.downloadAndInstall(onEvent),
+      // The main process keeps only the latest manifest, so there is nothing to release.
+      close: async () => {},
+    };
+  },
+  async relaunch() {
+    await bridge()?.updater?.relaunch();
+  },
+  async message(text, opts) {
+    const native = bridge();
+    if (native?.message) await native.message({ title: opts.title, message: text, kind: opts.kind });
+    else window.alert(text);
+  },
+};
+
 /** Electron platform implementation. */
 export const electronPlatform: Platform = {
   fonts,
@@ -291,4 +340,5 @@ export const electronPlatform: Platform = {
   velaCommand,
   notify,
   browser,
+  updater,
 };

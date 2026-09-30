@@ -733,7 +733,7 @@
 .doc-markdown-layout .milkdown .ProseMirror h5 { font-size: 1em; }
 .doc-markdown-layout .milkdown .ProseMirror h6 { font-size: 0.95em; color: var(--doc-muted); }
 .doc-markdown-layout .milkdown .ProseMirror > :first-child,
-.doc-markdown-layout .milkdown .ProseMirror > .prosemirror-virtual-cursor:first-child + * { margin-top: 0; }
+.doc-markdown-layout .milkdown .ProseMirror > :is(.prosemirror-virtual-cursor, .ProseMirror-widget):first-child + * { margin-top: 0; }
 .doc-markdown-layout .milkdown .ProseMirror blockquote {
   margin-block: 1em;
   padding: 2px 16px;
@@ -804,4 +804,85 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .doc-markdown-layout .milkdown .milkdown-code-block .tools { transition: none; }
+}
+
+/* ── YAML front matter: kept out of the rich-text document and edited as plain text above it ── */
+.doc-frontmatter {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 32px clamp(24px, 6%, 48px) 0;
+}
+.doc-frontmatter textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 14px;
+  border: 1px solid var(--doc-rule);
+  border-radius: 5px;
+  background: var(--doc-code);
+  color: var(--doc-muted);
+  font: 13px/1.6 var(--font-mono);
+  white-space: pre;
+  overflow-x: auto;
+  overflow-y: hidden;
+  resize: none;
+  outline: none;
+}
+.doc-frontmatter textarea:focus { border-color: var(--doc-link); color: var(--doc-ink); }
+.doc-frontmatter + .docview-wysiwyg .milkdown .ProseMirror { padding-top: 24px; }
+
+/* ── Status bar: writing-mode switches and document statistics ── */
+.docview-status {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 3px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-term);
+  color: var(--text-dim);
+  font-size: 11.5px;
+}
+.docview-status button {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-dim);
+}
+.docview-status button:hover { background: var(--bg-hover); color: var(--text); }
+.docview-status button.on { background: var(--accent-soft); color: var(--text); }
+.docview-stats {
+  display: flex;
+  gap: 12px;
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+@container (max-width: 600px) {
+  .docview-stats span:nth-child(n + 3) { display: none; }
+}
+
+/* ── Focus mode: dim everything except the block holding the caret ── */
+.doc-markdown-layout .milkdown .ProseMirror > *,
+.doc-markdown-code .cm-line,
+.doc-frontmatter { transition: opacity 150ms ease; }
+.doc-focus-mode .milkdown .ProseMirror > :not(.vlx-current-block),
+.doc-focus-mode .doc-markdown-code .cm-line:not(.vlx-current-line),
+.doc-focus-mode .doc-frontmatter:not(:focus-within) { opacity: 0.3; }
+
+/* ── Typewriter mode: room below the last line so it can reach the middle of the pane ── */
+.doc-typewriter .milkdown .ProseMirror { padding-bottom: 50vh; }
+.doc-typewriter .doc-markdown-code .cm-content { padding-bottom: 50vh; }
+
+/* Links show a pointer while the follow modifier (Cmd on macOS, Ctrl elsewhere) is held. */
+.docview .milkdown .ProseMirror.vlx-link-modifier a[href] { cursor: pointer; }
+
+@media (prefers-reduced-motion: reduce) {
+  .doc-markdown-layout .milkdown .ProseMirror > *,
+  .doc-markdown-code .cm-line,
+  .doc-frontmatter { transition: none; }
 }

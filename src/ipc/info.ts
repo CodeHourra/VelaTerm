@@ -1,6 +1,7 @@
 //! Info-panel IPC for Git status, directory listing, file preview, opening directories, and copying paths, routed through transport.
 
-import { copyText as transportCopyText, invoke, openPath, revealPath as transportRevealPath } from "./transport";
+import { platform } from "../platform";
+import { copyText as transportCopyText, invoke } from "./transport";
 import type { GitStatus } from "../types";
 
 export function getGitStatus(path: string): Promise<GitStatus> {
@@ -235,12 +236,12 @@ export function systemStats(): Promise<SystemStats> {
 
 /** Open a directory with the system default application/file manager; silently no-op in browsers. */
 export function openDir(path: string): Promise<void> {
-  return openPath(path);
+  return platform.opener.openPath(path);
 }
 
 /** Reveal and select the path in Finder/file manager on desktop; silently no-op in browsers. */
 export function revealPath(path: string): Promise<void> {
-  return transportRevealPath(path);
+  return platform.opener.revealPath(path);
 }
 
 /** Copy text to the clipboard, automatically falling back to execCommand over plaintext HTTP. */

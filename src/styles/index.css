@@ -22,7 +22,8 @@
   --text-secondary: var(--text-mid);
   --text-muted: var(--text-dim);
   /* Unified status colors, matching the left sidebar dots, menus, and bottom bar:
-     running = blue / working = green / asking = yellow / waiting (replied) = magenta.
+     running = blue / working = green / asking = yellow / waiting (replied) = magenta /
+     background (replied, background work still running) = cyan.
      working is pinned to --green rather than --accent, so the semantic status colours do not drift
      when the accent skin changes. */
   --status-running: var(--blue);
@@ -31,6 +32,7 @@
   --status-working: var(--green);
   --status-asking: var(--yellow);
   --status-waiting: var(--mag);
+  --status-background: var(--cyan);
 }
 
 /* Allow text selection in terminal areas; keep the rest of the UI unselectable, as is conventional for terminal apps. */

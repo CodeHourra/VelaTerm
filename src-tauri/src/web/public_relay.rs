@@ -119,6 +119,11 @@ pub fn config_token(app: &AppCtx) -> Option<String> {
     load(app).ok().map(|config| config.token)
 }
 
+/// Account service origin of the current link, when this device is linked.
+pub fn account_origin(app: &AppCtx) -> Option<String> {
+    load(app).ok().map(|config| config.origin)
+}
+
 /// Resolves a tunnel-injected grant and account against the host's local share records. Returns the scope
 /// only when the host still has that share and the account is allowed to use it.
 pub fn share_scope_for(app: &AppCtx, share_id: &str, account_id: &str) -> Option<ShareScope> {
@@ -185,29 +190,7 @@ pub fn dispatch(app: &AppCtx, cmd: &str, args: &Value) -> Result<Value, String> 
             }
         }
         "public_account_logout" => {
-            let config = load(app)?;
-            let status = request(
-                &config.origin,
-                "/api/device-link/host/status",
-                Some(&config.token),
-                None,
-            )?;
-            if status["linked"] == true {
-                request(
-                    &config.origin,
-                    "/api/device-link/host/logout",
-                    Some(&config.token),
-                    Some(&json!({})),
-                )?;
-            }
-            let _lock = FILE_LOCK
-                .lock()
-                .map_err(|_| "Sharing configuration unavailable")?;
-            std::fs::remove_file(app.data_dir()?.join(CONFIG))
-                .map_err(|_| "Cannot remove device credential")?;
-            // The tunnel notices the missing configuration and stops; the loopback share server is closed here
-            // so a logged-out device keeps no share surface listening.
-            super::share_server::stop();
+            unlink(app)?;
             Ok(Value::Null)
         }
         "public_account_remote_devices" => {
@@ -238,132 +221,20 @@ pub fn dispatch(app: &AppCtx, cmd: &str, args: &Value) -> Result<Value, String> 
             Ok(Value::Null)
         }
         "public_account_link" => {
-            let origin = "https://velaterm.com".to_string();
-            let keys = ServerKeys::load_or_create(&app.data_dir()?)?;
-            let name = sysinfo::System::host_name().unwrap_or_else(|| "VelaTerm".into());
-            let result = request(
-                &origin,
-                "/api/device-link",
-                None,
-                Some(&json!({"name":name,"publicKey":keys.public_key_b64()})),
-            )?;
-            let get = |key: &str| {
-                result
-                    .get(key)
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-                    .ok_or("Invalid device linking response")
-            };
-            let url = get("url")?;
-            LINKING
-                .get_or_init(Default::default)
-                .lock()
-                .map_err(|_| "Device linking unavailable")?
-                .insert(
-                    app.data_dir()?,
-                    Linking {
-                        origin,
-                        code: get("code")?,
-                        poll_token: get("pollToken")?,
-                    },
-                );
-            Ok(json!({"url":url,"publicKey":keys.public_key_b64()}))
+            let (url, public_key) = begin_link(app, None)?;
+            Ok(json!({"url":url,"publicKey":public_key}))
         }
         "public_account_poll" => {
-            let mut attempts = LINKING
-                .get_or_init(Default::default)
-                .lock()
-                .map_err(|_| "Device linking unavailable")?;
-            let dir = app.data_dir()?;
-            let attempt = attempts.get(&dir).ok_or("Start account linking first")?;
-            let result = request(
-                &attempt.origin,
-                &format!("/api/device-link/{}/poll", attempt.code),
-                Some(&attempt.poll_token),
-                Some(&json!({})),
-            )?;
-            if result.is_null() {
+            if !finish_link(app)? {
                 return Ok(json!({"linked":false}));
             }
-            let config = Config {
-                origin: attempt.origin.clone(),
-                device_id: result["device"]["id"]
-                    .as_str()
-                    .ok_or("Invalid device ID")?
-                    .into(),
-                token: result["token"]
-                    .as_str()
-                    .ok_or("Invalid device credential")?
-                    .into(),
-                shares: HashMap::new(),
-            };
-            let _lock = FILE_LOCK
-                .lock()
-                .map_err(|_| "Sharing configuration unavailable")?;
-            save(app, &config)?;
-            attempts.remove(&dir);
             start(app)?;
             Ok(json!({"linked":true}))
         }
         "public_account_remote_enable" => {
-            let _lock = FILE_LOCK
-                .lock()
-                .map_err(|_| "Sharing configuration unavailable")?;
-            let mut config = load(app)?;
             let scope: ShareScope =
                 serde_json::from_value(args.clone()).map_err(|_| "Invalid sharing scope")?;
-            // Validate the target against host-owned records before asking the relay to create the grant.
-            let tree = crate::command_core::list_tree(app)?;
-            let valid = match scope.scope.as_str() {
-                "machine" => scope.target_id.is_none(),
-                "project" => tree
-                    .projects
-                    .iter()
-                    .any(|p| Some(p.id.as_str()) == scope.target_id.as_deref()),
-                "session" => !scope
-                    .dispatch(app, "shared_sessions", &json!({}))?
-                    .as_array()
-                    .ok_or("Invalid sessions")?
-                    .is_empty(),
-                _ => false,
-            };
-            if !valid {
-                return Err("Invalid remote access target".into());
-            }
-            let owner = request(
-                &config.origin,
-                "/api/device-link/host/status",
-                Some(&config.token),
-                None,
-            )?;
-            let owner_id = owner["account"]["id"]
-                .as_str()
-                .ok_or("Account unavailable")?
-                .to_string();
-            let result = request(
-                &config.origin,
-                "/api/device-link/host/remote",
-                Some(&config.token),
-                Some(&json!({"scope":scope.scope,"targetId":scope.target_id})),
-            )?;
-            let id = result["id"].as_str().ok_or("Invalid share response")?;
-            config.shares.insert(
-                id.into(),
-                LocalShare {
-                    scope,
-                    secret: random(),
-                    password_hash: None,
-                    allowed_accounts: vec![owner_id],
-                },
-            );
-            save(app, &config)?;
-            let name = scope_name(app, &config.shares[id].scope)?;
-            request(
-                &config.origin,
-                "/api/device-link/host/share-ready",
-                Some(&config.token),
-                Some(&json!({"id":id,"name":name})),
-            )?;
+            let id = enable(app, scope)?;
             start(app)?;
             Ok(json!({"id":id}))
         }
@@ -396,6 +267,207 @@ pub fn dispatch(app: &AppCtx, cmd: &str, args: &Value) -> Result<Value, String> 
         }
         _ => Err("Unknown public sharing command".into()),
     }
+}
+
+/// Starts device linking: registers this host's name and E2EE key with the account service and returns the
+/// confirmation page URL and the public key. The pending code stays in memory until [`finish_link`] succeeds.
+pub fn begin_link(app: &AppCtx, name: Option<&str>) -> Result<(String, String), String> {
+    let origin = "https://velaterm.com".to_string();
+    let keys = ServerKeys::load_or_create(&app.data_dir()?)?;
+    let name = name
+        .map(str::to_string)
+        .or_else(sysinfo::System::host_name)
+        .unwrap_or_else(|| "VelaTerm".into());
+    let result = request(
+        &origin,
+        "/api/device-link",
+        None,
+        Some(&json!({"name":name,"publicKey":keys.public_key_b64()})),
+    )?;
+    let get = |key: &str| {
+        result
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or("Invalid device linking response")
+    };
+    let url = get("url")?;
+    LINKING
+        .get_or_init(Default::default)
+        .lock()
+        .map_err(|_| "Device linking unavailable")?
+        .insert(
+            app.data_dir()?,
+            Linking {
+                origin,
+                code: get("code")?,
+                poll_token: get("pollToken")?,
+            },
+        );
+    Ok((url, keys.public_key_b64().to_string()))
+}
+
+/// Polls the pending link once. Returns true after the account confirmed this device and the credential was
+/// saved; the caller decides whether to start sharing in this process.
+pub fn finish_link(app: &AppCtx) -> Result<bool, String> {
+    let mut attempts = LINKING
+        .get_or_init(Default::default)
+        .lock()
+        .map_err(|_| "Device linking unavailable")?;
+    let dir = app.data_dir()?;
+    let attempt = attempts.get(&dir).ok_or("Start account linking first")?;
+    let result = request(
+        &attempt.origin,
+        &format!("/api/device-link/{}/poll", attempt.code),
+        Some(&attempt.poll_token),
+        Some(&json!({})),
+    )?;
+    if result.is_null() {
+        return Ok(false);
+    }
+    let config = Config {
+        origin: attempt.origin.clone(),
+        device_id: result["device"]["id"]
+            .as_str()
+            .ok_or("Invalid device ID")?
+            .into(),
+        token: result["token"]
+            .as_str()
+            .ok_or("Invalid device credential")?
+            .into(),
+        shares: HashMap::new(),
+    };
+    let _lock = FILE_LOCK
+        .lock()
+        .map_err(|_| "Sharing configuration unavailable")?;
+    save(app, &config)?;
+    attempts.remove(&dir);
+    Ok(true)
+}
+
+/// Signs this device out of the account service and deletes the local credential and share records.
+pub fn unlink(app: &AppCtx) -> Result<(), String> {
+    let config = load(app)?;
+    let status = request(
+        &config.origin,
+        "/api/device-link/host/status",
+        Some(&config.token),
+        None,
+    )?;
+    if status["linked"] == true {
+        request(
+            &config.origin,
+            "/api/device-link/host/logout",
+            Some(&config.token),
+            Some(&json!({})),
+        )?;
+    }
+    let _lock = FILE_LOCK
+        .lock()
+        .map_err(|_| "Sharing configuration unavailable")?;
+    std::fs::remove_file(app.data_dir()?.join(CONFIG))
+        .map_err(|_| "Cannot remove device credential")?;
+    // The tunnel notices the missing configuration and stops; the loopback share server is closed here
+    // so a logged-out device keeps no share surface listening.
+    super::share_server::stop();
+    Ok(())
+}
+
+/// Account link state without starting any service: `None` when this device was never linked, otherwise
+/// the account service's answer plus the local device ID.
+pub fn link_status(app: &AppCtx) -> Result<Option<Value>, String> {
+    let Ok(config) = load(app) else { return Ok(None) };
+    let mut status = request(
+        &config.origin,
+        "/api/device-link/host/status",
+        Some(&config.token),
+        None,
+    )?;
+    status["deviceId"] = json!(config.device_id);
+    status["shares"] = json!(config.shares.values().map(|s| &s.scope.scope).collect::<Vec<_>>());
+    Ok(Some(status))
+}
+
+/// Makes sure the whole workspace is shared with the account, so a freshly linked headless host shows up
+/// in the Remote list without any further step. Returns the grant ID.
+pub fn ensure_workspace_share(app: &AppCtx) -> Result<String, String> {
+    let existing = load(app)?
+        .shares
+        .into_iter()
+        .find(|(_, share)| share.scope.scope == "machine")
+        .map(|(id, _)| id);
+    match existing {
+        Some(id) => Ok(id),
+        None => enable(
+            app,
+            ShareScope {
+                scope: "machine".into(),
+                target_id: None,
+                push_authority: None,
+            },
+        ),
+    }
+}
+
+/// Creates a remote access grant for `scope` on the account service and records it locally.
+fn enable(app: &AppCtx, scope: ShareScope) -> Result<String, String> {
+    let _lock = FILE_LOCK
+        .lock()
+        .map_err(|_| "Sharing configuration unavailable")?;
+    let mut config = load(app)?;
+    // Validate the target against host-owned records before asking the relay to create the grant.
+    let tree = crate::command_core::list_tree(app)?;
+    let valid = match scope.scope.as_str() {
+        "machine" => scope.target_id.is_none(),
+        "project" => tree
+            .projects
+            .iter()
+            .any(|p| Some(p.id.as_str()) == scope.target_id.as_deref()),
+        "session" => !scope
+            .dispatch(app, "shared_sessions", &json!({}))?
+            .as_array()
+            .ok_or("Invalid sessions")?
+            .is_empty(),
+        _ => false,
+    };
+    if !valid {
+        return Err("Invalid remote access target".into());
+    }
+    let owner = request(
+        &config.origin,
+        "/api/device-link/host/status",
+        Some(&config.token),
+        None,
+    )?;
+    let owner_id = owner["account"]["id"]
+        .as_str()
+        .ok_or("Account unavailable")?
+        .to_string();
+    let result = request(
+        &config.origin,
+        "/api/device-link/host/remote",
+        Some(&config.token),
+        Some(&json!({"scope":scope.scope,"targetId":scope.target_id})),
+    )?;
+    let id = result["id"].as_str().ok_or("Invalid share response")?;
+    config.shares.insert(
+        id.into(),
+        LocalShare {
+            scope,
+            secret: random(),
+            password_hash: None,
+            allowed_accounts: vec![owner_id],
+        },
+    );
+    save(app, &config)?;
+    let name = scope_name(app, &config.shares[id].scope)?;
+    request(
+        &config.origin,
+        "/api/device-link/host/share-ready",
+        Some(&config.token),
+        Some(&json!({"id":id,"name":name})),
+    )?;
+    Ok(id.to_string())
 }
 
 fn scope_name(app: &AppCtx, scope: &ShareScope) -> Result<String, String> {

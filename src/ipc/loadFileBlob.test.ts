@@ -9,7 +9,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("./transport", () => ({
   invoke: vi.fn(),
   copyText: vi.fn(),
-  openPath: vi.fn(),
+}));
+vi.mock("../platform", () => ({
+  platform: { opener: { openPath: vi.fn(), revealPath: vi.fn(), openExternal: vi.fn() } },
 }));
 
 import { invoke } from "./transport";

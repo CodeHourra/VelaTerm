@@ -32,13 +32,13 @@ vi.mock("../store/termStore", () => {
 import { QuitConfirmModal } from "./QuitConfirmModal";
 
 /** Fire the shell's exit request captured by the component's listener. */
-let fireQuitRequest: () => void;
+let fireQuitRequest: (request?: { remoteWindows: number }) => void;
 
 beforeEach(() => {
   vi.clearAllMocks();
   store.saveWorkspaceOnQuit = false;
-  quit.onRequested.mockImplementation((cb: () => void) => {
-    fireQuitRequest = cb;
+  quit.onRequested.mockImplementation((cb: (request: { remoteWindows: number }) => void) => {
+    fireQuitRequest = (request = { remoteWindows: 0 }) => cb(request);
     return Promise.resolve(() => {});
   });
 });
@@ -52,10 +52,10 @@ async function confirmExit() {
 }
 
 /** Render and drive the shell request so the dialog is on screen. */
-async function open() {
+async function open(remoteWindows = 0) {
   render(<QuitConfirmModal />);
   await waitFor(() => expect(quit.onRequested).toHaveBeenCalled());
-  act(() => fireQuitRequest());
+  act(() => fireQuitRequest({ remoteWindows }));
   await screen.findByText("quit.title");
 }
 
@@ -70,6 +70,14 @@ describe("QuitConfirmModal", () => {
     await open();
     expect(quit.ack).toHaveBeenCalled();
     expect(quit.confirm).not.toHaveBeenCalled();
+  });
+
+  it("mentions remote windows only when some are open", async () => {
+    await open();
+    expect(screen.queryByText("quit.remoteWindows")).toBeNull();
+    cleanup();
+    await open(2);
+    expect(screen.getByText("quit.remoteWindows")).toBeTruthy();
   });
 
   it("cancels without saving or exiting", async () => {
