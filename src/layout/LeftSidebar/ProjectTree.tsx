@@ -30,8 +30,9 @@ import { SESSION_DRAG_MIME, SESSION_MULTI_DRAG_MIME } from "../CenterPane/paneDr
 import { DEFAULT_BINDINGS, formatCombo } from "../../hooks/shortcutRegistry";
 import { useGitBranch } from "../../hooks/useGitBranch";
 import { stripControlChars, useCtrlCharGuard } from "../../hooks/textInputGuards";
-import { toggleProjectFolderCollapsed } from "../../store/projectFolders";
+import { setProjectFolder, toggleProjectFolderCollapsed } from "../../store/projectFolders";
 import { arrangeProjectsInFolders } from "./projectFolderLayout";
+import { hasProjectDrag, PROJECT_DRAG_MIME, resolveProjectDrop } from "./projectFolderDrop";
 
 /** Reference to a node targeted by a context menu or operation. */
 export interface TreeNodeRef {
@@ -43,7 +44,7 @@ export interface TreeNodeRef {
 }
 
 interface DragPayload {
-  kind: "group" | "session";
+  kind: "group" | "session" | "project";
   id: string;
   projectId: string;
   /** For multi-session dragging, carries all selected IDs in the same project when at least two are selected.
@@ -898,6 +899,7 @@ export function ProjectTree(h: TreeHandlers) {
       if (ids.length >= 2) out = { ...payload, ids };
     }
     e.dataTransfer.setData("text/plain", JSON.stringify(out));
+    if (out.kind === "project") e.dataTransfer.setData(PROJECT_DRAG_MIME, out.id);
     // Sessions can also be dropped onto the center pane to split or fill a pane there. Browser nodes open in their
     // own tabs and cannot join a pane tree, so they are left out and a browser-only drag offers no pane preview.
     if (out.kind === "session") {
@@ -945,6 +947,7 @@ export function ProjectTree(h: TreeHandlers) {
     return y < h * 0.5 ? "top" : "bottom";
   };
   const allowDrop = (e: React.DragEvent, id: string, hasCenter: boolean) => {
+    if (hasProjectDrag(e.dataTransfer.types)) return;
     e.preventDefault();
     e.stopPropagation();
     e.dataTransfer.dropEffect = "move";
@@ -952,6 +955,14 @@ export function ProjectTree(h: TreeHandlers) {
     setDragOver((prev) =>
       prev?.id === id && prev.zone === zone ? prev : { id, zone },
     );
+  };
+  // Project drops only change folder membership, so they always highlight the whole row, never an edge.
+  const allowProjectDrop = (e: React.DragEvent, id: string) => {
+    if (!hasProjectDrag(e.dataTransfer.types)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "move";
+    setDragOver((prev) => (prev?.id === id && prev.zone === "center" ? prev : { id, zone: "center" }));
   };
   const sortBetween = (
     siblings: { id: string; sortOrder: number }[],
@@ -973,7 +984,7 @@ export function ProjectTree(h: TreeHandlers) {
     const zone = dragOver?.id === target.id ? dragOver.zone : "center";
     setDragOver(null);
     const p = readPayload(e);
-    if (!p) return;
+    if (!p || p.kind === "project") return;
 
     // Batch drop moves all sessions into this group at center or its parent at an edge through one moveMany call.
     if (p.ids && p.ids.length >= 2) {
@@ -1011,13 +1022,21 @@ export function ProjectTree(h: TreeHandlers) {
       );
     }
   };
-  const dropOnProject = (projectId: string) => (e: React.DragEvent) => {
+  const dropOnProject = (target: Project) => (e: React.DragEvent) => {
+    const projectId = target.id;
     e.preventDefault();
     e.stopPropagation();
     const zone = dragOver?.id === projectId ? dragOver.zone : "center";
     setDragOver(null);
     const p = readPayload(e);
     if (!p) return;
+
+    if (p.kind === "project") {
+      const move = resolveProjectDrop(p, { kind: "project", project: target }, projects, projectFolders);
+      // A rejection means the folder vanished elsewhere; setProjectFolder has already reloaded the tree.
+      if (move) void setProjectFolder(move.projectId, move.folderId).catch(() => {});
+      return;
+    }
 
     // Batch drop moves all sessions to the ungrouped project root.
     if (p.ids && p.ids.length >= 2) {
@@ -1041,6 +1060,15 @@ export function ProjectTree(h: TreeHandlers) {
       if (p.projectId !== projectId) return;
       void moveNode("group", p.id, projectId, null, null, Date.now());
     }
+  };
+  const dropOnFolder = (folder: ProjectFolder) => (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(null);
+    const p = readPayload(e);
+    if (!p) return;
+    const move = resolveProjectDrop(p, { kind: "folder", folderId: folder.id }, projects, projectFolders);
+    if (move) void setProjectFolder(move.projectId, move.folderId).catch(() => {});
   };
   const dropOnSession = (target: Session) => (e: React.DragEvent) => {
     e.preventDefault();
@@ -1209,6 +1237,9 @@ export function ProjectTree(h: TreeHandlers) {
           <div
             className={"row project-folder" + (contextId === f.id ? " context" : "")}
             style={{ paddingLeft: 6, ...dragStyle(f.id) }}
+            onDragOver={(e) => allowProjectDrop(e, f.id)}
+            onDragLeave={() => setDragOver((d) => (d?.id === f.id ? null : d))}
+            onDrop={dropOnFolder(f)}
             onMouseDown={preventModifierSelect}
             onClick={() => toggleFolder(f)}
           >
@@ -1243,9 +1274,13 @@ export function ProjectTree(h: TreeHandlers) {
               (contextId === p.id ? " context" : "")
             }
             style={{ paddingLeft: 6 + row.indent * 13, ...dragStyle(p.id) }}
-            onDragOver={(e) => allowDrop(e, p.id, true)}
+            draggable={!filtering && !renaming && !isShareSurface}
+            onDragStart={onDragStart({ kind: "project", id: p.id, projectId: p.id })}
+            onDragOver={(e) =>
+              hasProjectDrag(e.dataTransfer.types) ? allowProjectDrop(e, p.id) : allowDrop(e, p.id, true)
+            }
             onDragLeave={() => setDragOver((d) => (d?.id === p.id ? null : d))}
-            onDrop={dropOnProject(p.id)}
+            onDrop={dropOnProject(p)}
             onMouseDown={preventModifierSelect}
             onClick={(e) => handleClick({ id: p.id, kind: "project" }, e, false)}
             onContextMenu={ctx(ref)}
