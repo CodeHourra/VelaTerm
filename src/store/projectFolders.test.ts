@@ -102,6 +102,18 @@ describe("folder actions", () => {
     expect(ipc.listTree).toHaveBeenCalled();
   });
 
+  it("reloads the tree and rethrows when a rename or delete fails", async () => {
+    ipc.renameProjectFolder.mockRejectedValue(new Error("Folder not found: f9"));
+    ipc.deleteProjectFolder.mockRejectedValue(new Error("Folder not found: f9"));
+    ipc.createProjectFolder.mockRejectedValue(new Error("boom"));
+    await expect(renameProjectFolder("f9", "X")).rejects.toThrow("Folder not found");
+    expect(ipc.listTree).toHaveBeenCalledTimes(1);
+    await expect(deleteProjectFolder("f9")).rejects.toThrow("Folder not found");
+    expect(ipc.listTree).toHaveBeenCalledTimes(2);
+    await expect(createProjectFolder("X")).rejects.toThrow("boom");
+    expect(ipc.listTree).toHaveBeenCalledTimes(3);
+  });
+
   it("toggles collapse optimistically and persists it", async () => {
     useTermStore.setState({ projectFolders: [folder("f1")] });
     await toggleProjectFolderCollapsed("f1");

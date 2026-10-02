@@ -854,14 +854,14 @@ const fr: typeof en = {
   "tree.openInSplit": "Ouvrir dans un volet", // Open in Split
   "tree.createProject": "Créer un projet",
   "tree.dropFoldersHint": "Déposez des dossiers ici pour les ajouter en tant que projets",
-  // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
+  // New Collection / Collection name / research / Create Collection / No directory / Delete Collection
   "tree.newCollection": "Nouvelle collection",
   "tree.deleteCollection": "Supprimer la collection",
   "collection.title": "Nouvelle collection",
   "collection.name": "Nom de la collection",
   "collection.namePlaceholder": "research",
   "collection.submit": "Créer la collection",
-  "collection.tag": "Aucun dossier",
+  "collection.tag": "Aucun répertoire",
   "collection.deleteTitle": "Supprimer la collection",
   "collection.deleteBody": (name) =>
     `Supprimer la collection « ${name} » ? Tous ses groupes et sessions seront également supprimés. Cette action est irréversible.`,

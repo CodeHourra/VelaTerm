@@ -847,14 +847,14 @@ const ko: typeof en = {
   "tree.openInSplit": "분할 창에서 열기", // Open in Split
   "tree.createProject": "프로젝트 만들기",
   "tree.dropFoldersHint": "폴더를 여기에 놓으면 프로젝트로 추가됩니다",
-  // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
+  // New Collection / Collection name / research / Create Collection / No directory / Delete Collection
   "tree.newCollection": "새 컬렉션",
   "tree.deleteCollection": "컬렉션 삭제",
   "collection.title": "새 컬렉션",
   "collection.name": "컬렉션 이름",
   "collection.namePlaceholder": "research",
   "collection.submit": "컬렉션 만들기",
-  "collection.tag": "폴더 없음",
+  "collection.tag": "디렉터리 없음",
   "collection.deleteTitle": "컬렉션 삭제",
   "collection.deleteBody": (name) =>
     `컬렉션 "${name}"을(를) 삭제할까요? 안의 그룹과 세션도 모두 삭제되며 되돌릴 수 없습니다.`,

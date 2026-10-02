@@ -840,14 +840,14 @@ const vi: typeof en = {
   "tree.createProject": "Tạo dự án",
   "tree.openInSplit": "Mở trong khung chia",
   "tree.dropFoldersHint": "Thả thư mục vào đây để thêm làm dự án",
-  // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
+  // New Collection / Collection name / research / Create Collection / No directory / Delete Collection
   "tree.newCollection": "Bộ sưu tập mới",
   "tree.deleteCollection": "Xóa bộ sưu tập",
   "collection.title": "Bộ sưu tập mới",
   "collection.name": "Tên bộ sưu tập",
   "collection.namePlaceholder": "research",
   "collection.submit": "Tạo bộ sưu tập",
-  "collection.tag": "Không có thư mục",
+  "collection.tag": "Không có thư mục gốc",
   "collection.deleteTitle": "Xóa bộ sưu tập",
   "collection.deleteBody": (name) =>
     `Xóa bộ sưu tập "${name}"? Mọi nhóm và phiên bên trong cũng bị xóa. Không thể hoàn tác.`,

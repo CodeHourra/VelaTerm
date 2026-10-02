@@ -852,14 +852,14 @@ const ptBR: typeof en = {
   "tree.openInSplit": "Abrir em painel dividido", // Open in Split
   "tree.createProject": "Criar projeto",
   "tree.dropFoldersHint": "Solte pastas aqui para adicioná-las como projetos",
-  // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
+  // New Collection / Collection name / research / Create Collection / No directory / Delete Collection
   "tree.newCollection": "Nova coleção",
   "tree.deleteCollection": "Excluir coleção",
   "collection.title": "Nova coleção",
   "collection.name": "Nome da coleção",
   "collection.namePlaceholder": "research",
   "collection.submit": "Criar coleção",
-  "collection.tag": "Sem pasta",
+  "collection.tag": "Sem diretório",
   "collection.deleteTitle": "Excluir coleção",
   "collection.deleteBody": (name) =>
     `Excluir a coleção "${name}"? Todos os seus grupos e sessões também serão excluídos. Isso não pode ser desfeito.`,

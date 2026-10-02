@@ -278,7 +278,7 @@ function SidebarTreePane({
             onNewFolder();
           }}
         >
-          <Icons.folder size={14} />
+          <Icons.folderPlus size={14} />
         </button>
         <button
           className="icon-btn sm sidebar-tree-new-collection"

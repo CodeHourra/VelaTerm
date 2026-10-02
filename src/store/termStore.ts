@@ -1805,7 +1805,7 @@ function primaryViewAliases(
 function snapshotCollapsed(
   state: Pick<
     TermStore,
-    "projects" | "groups" | "sessions" | "ephemeralSessions"
+    "projects" | "groups" | "projectFolders" | "sessions" | "ephemeralSessions"
   >,
   source: SidebarTreeView,
 ): Record<string, boolean> {
@@ -1816,6 +1816,7 @@ function snapshotCollapsed(
   };
   for (const project of state.projects) put(project.id, project.collapsed);
   for (const group of state.groups) put(group.id, group.collapsed);
+  for (const folder of state.projectFolders) put(folder.id, folder.collapsed);
   for (const session of state.sessions) put(session.id, session.collapsed);
   for (const [id, ephemeral] of Object.entries(state.ephemeralSessions)) {
     put(id, ephemeral.collapsed);

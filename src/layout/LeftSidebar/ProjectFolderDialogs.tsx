@@ -35,7 +35,7 @@ export function ProjectFolderDialogs({
         onCancel={onClose}
         onConfirm={() => {
           onClose();
-          void deleteProjectFolder(id);
+          void deleteProjectFolder(id).catch(() => {});
         }}
       />
     );
@@ -60,8 +60,8 @@ export function ProjectFolderDialogs({
         onClose();
         const name = values.name.trim();
         if (!name) return;
-        if (renaming) void renameProjectFolder(renaming.id, name);
-        else void createProjectFolder(name);
+        if (renaming) void renameProjectFolder(renaming.id, name).catch(() => {});
+        else void createProjectFolder(name).catch(() => {});
       }}
     />
   );

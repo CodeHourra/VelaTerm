@@ -851,14 +851,14 @@ const ja: typeof en = {
   "tree.openInSplit": "分割して開く", // Open in Split
   "tree.createProject": "プロジェクトを作成",
   "tree.dropFoldersHint": "フォルダーをここにドロップすると、プロジェクトとして追加されます",
-  // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
+  // New Collection / Collection name / research / Create Collection / No directory / Delete Collection
   "tree.newCollection": "新規コレクション",
   "tree.deleteCollection": "コレクションを削除",
   "collection.title": "新規コレクション",
   "collection.name": "コレクション名",
   "collection.namePlaceholder": "research",
   "collection.submit": "コレクションを作成",
-  "collection.tag": "フォルダーなし",
+  "collection.tag": "ディレクトリなし",
   "collection.deleteTitle": "コレクションを削除",
   "collection.deleteBody": (name) =>
     `コレクション「${name}」を削除しますか？中のグループとセッションもすべて削除され、元に戻せません。`,

@@ -9,20 +9,29 @@ const reloadTree = () => useTermStore.getState().loadTree();
 export async function createProjectFolder(name: string): Promise<void> {
   const trimmed = name.trim();
   if (!trimmed) return;
-  await tree.createProjectFolder(trimmed);
-  await reloadTree();
+  try {
+    await tree.createProjectFolder(trimmed);
+  } finally {
+    await reloadTree();
+  }
 }
 
 export async function renameProjectFolder(id: string, name: string): Promise<void> {
   const trimmed = name.trim();
   if (!trimmed) return;
-  await tree.renameProjectFolder(id, trimmed);
-  await reloadTree();
+  try {
+    await tree.renameProjectFolder(id, trimmed);
+  } finally {
+    await reloadTree();
+  }
 }
 
 export async function deleteProjectFolder(id: string): Promise<void> {
-  await tree.deleteProjectFolder(id);
-  await reloadTree();
+  try {
+    await tree.deleteProjectFolder(id);
+  } finally {
+    await reloadTree();
+  }
 }
 
 /** Reloads even on failure: the usual cause is a folder deleted from another view, which the reload removes. */

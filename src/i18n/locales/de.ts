@@ -851,14 +851,14 @@ const de: typeof en = {
   "tree.openInSplit": "Im geteilten Bereich öffnen", // Open in Split
   "tree.createProject": "Projekt erstellen",
   "tree.dropFoldersHint": "Ordner hier ablegen, um sie als Projekte hinzuzufügen",
-  // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
+  // New Collection / Collection name / research / Create Collection / No directory / Delete Collection
   "tree.newCollection": "Neue Sammlung",
   "tree.deleteCollection": "Sammlung löschen",
   "collection.title": "Neue Sammlung",
   "collection.name": "Name der Sammlung",
   "collection.namePlaceholder": "research",
   "collection.submit": "Sammlung erstellen",
-  "collection.tag": "Kein Ordner",
+  "collection.tag": "Kein Verzeichnis",
   "collection.deleteTitle": "Sammlung löschen",
   "collection.deleteBody": (name) =>
     `Sammlung „${name}“ löschen? Alle enthaltenen Gruppen und Sitzungen werden ebenfalls gelöscht. Das lässt sich nicht rückgängig machen.`,

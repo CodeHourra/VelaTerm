@@ -863,14 +863,14 @@ const ru: typeof en = {
   "tree.openInSplit": "Открыть в панели", // Open in Split
   "tree.createProject": "Создать проект",
   "tree.dropFoldersHint": "Перетащите папки сюда, чтобы добавить их как проекты",
-  // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
+  // New Collection / Collection name / research / Create Collection / No directory / Delete Collection
   "tree.newCollection": "Новая коллекция",
   "tree.deleteCollection": "Удалить коллекцию",
   "collection.title": "Новая коллекция",
   "collection.name": "Название коллекции",
   "collection.namePlaceholder": "research",
   "collection.submit": "Создать коллекцию",
-  "collection.tag": "Без папки",
+  "collection.tag": "Без каталога",
   "collection.deleteTitle": "Удалить коллекцию",
   "collection.deleteBody": (name) =>
     `Удалить коллекцию «${name}»? Все её группы и сессии тоже будут удалены. Это действие нельзя отменить.`,

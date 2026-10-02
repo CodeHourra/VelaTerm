@@ -834,14 +834,14 @@ const zhCN: typeof en = {
   "tree.openInSplit": "在分屏中打开",
   "tree.createProject": "创建项目",
   "tree.dropFoldersHint": "将文件夹拖放到此处，即可添加为项目",
-  // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
+  // New Collection / Collection name / research / Create Collection / No directory / Delete Collection
   "tree.newCollection": "新建集合",
   "tree.deleteCollection": "删除集合",
   "collection.title": "新建集合",
   "collection.name": "集合名称",
   "collection.namePlaceholder": "research",
   "collection.submit": "创建集合",
-  "collection.tag": "无文件夹",
+  "collection.tag": "无目录",
   "collection.deleteTitle": "删除集合",
   "collection.deleteBody": (name) =>
     `删除集合“${name}”？其中的分组和会话也会一并删除，且无法撤销。`,

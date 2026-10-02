@@ -854,14 +854,14 @@ const es: typeof en = {
   "tree.openInSplit": "Abrir en panel dividido", // Open in Split
   "tree.createProject": "Crear proyecto",
   "tree.dropFoldersHint": "Suelta carpetas aquí para añadirlas como proyectos",
-  // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
+  // New Collection / Collection name / research / Create Collection / No directory / Delete Collection
   "tree.newCollection": "Nueva colección",
   "tree.deleteCollection": "Eliminar colección",
   "collection.title": "Nueva colección",
   "collection.name": "Nombre de la colección",
   "collection.namePlaceholder": "research",
   "collection.submit": "Crear colección",
-  "collection.tag": "Sin carpeta",
+  "collection.tag": "Sin directorio",
   "collection.deleteTitle": "Eliminar colección",
   "collection.deleteBody": (name) =>
     `¿Eliminar la colección "${name}"? También se eliminarán sus grupos y sesiones. Esto no se puede deshacer.`,

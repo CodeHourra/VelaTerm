@@ -835,14 +835,14 @@ const zhTW: typeof en = {
   "tree.openInSplit": "在分割窗格開啟", // Open in Split
   "tree.createProject": "建立專案",
   "tree.dropFoldersHint": "將資料夾拖放到此處，即可新增為專案",
-  // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
+  // New Collection / Collection name / research / Create Collection / No directory / Delete Collection
   "tree.newCollection": "新增集合",
   "tree.deleteCollection": "刪除集合",
   "collection.title": "新增集合",
   "collection.name": "集合名稱",
   "collection.namePlaceholder": "research",
   "collection.submit": "建立集合",
-  "collection.tag": "無資料夾",
+  "collection.tag": "無目錄",
   "collection.deleteTitle": "刪除集合",
   "collection.deleteBody": (name) =>
     `刪除集合「${name}」？其中的分組與會話也會一併刪除，且無法復原。`,

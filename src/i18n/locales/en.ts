@@ -857,7 +857,7 @@ const en = {
   "collection.name": "Collection name",
   "collection.namePlaceholder": "research",
   "collection.submit": "Create Collection",
-  "collection.tag": "No folder",
+  "collection.tag": "No directory",
   "collection.deleteTitle": "Delete Collection",
   "collection.deleteBody": (name: string) =>
     `Delete collection "${name}"? All its groups and sessions will also be deleted. This cannot be undone.`,
