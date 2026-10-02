@@ -863,6 +863,16 @@ const de: typeof en = {
   "collection.deleteBody": (name) =>
     `Sammlung „${name}“ löschen? Alle enthaltenen Gruppen und Sitzungen werden ebenfalls gelöscht. Das lässt sich nicht rückgängig machen.`,
   "folder.projectCount": (count) => (count === 1 ? "1 Projekt" : `${count} Projekte`), // {count} projects
+  "folder.new": "Neuer Ordner", // New Folder
+  "folder.createTitle": "Neuer Ordner", // New Folder
+  "folder.renameTitle": "Ordner umbenennen", // Rename Folder
+  "folder.name": "Ordnername", // Folder name
+  "folder.namePlaceholder": "zahlungen", // payments
+  "folder.create": "Ordner erstellen", // Create Folder
+  "folder.delete": "Ordner löschen", // Delete Folder
+  "folder.deleteTitle": "Ordner löschen", // Delete Folder
+  "folder.deleteBody": (name) =>
+    `Ordner „${name}“ löschen? Die enthaltenen Projekte bleiben erhalten und werden aus dem Ordner verschoben.`, // Delete folder "{name}"? The projects inside are kept and moved out of the folder.
   "tree.cloneProject": "Von Git klonen", // Clone from Git
   "createProject.title": "Projekt erstellen",
   "createProject.name": "Projektname",

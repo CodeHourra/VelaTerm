@@ -76,6 +76,7 @@ const handlers = (overrides: Partial<TreeHandlers> = {}): TreeHandlers => ({
   },
   isPrimary: true,
   onContext: vi.fn(),
+  onFolderContext: vi.fn(),
   contextId: null,
   renamingId: null,
   renameVal: "",

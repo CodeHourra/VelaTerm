@@ -866,6 +866,16 @@ const es: typeof en = {
   "collection.deleteBody": (name) =>
     `¿Eliminar la colección "${name}"? También se eliminarán sus grupos y sesiones. Esto no se puede deshacer.`,
   "folder.projectCount": (count) => (count === 1 ? "1 proyecto" : `${count} proyectos`), // {count} projects
+  "folder.new": "Nueva carpeta", // New Folder
+  "folder.createTitle": "Nueva carpeta", // New Folder
+  "folder.renameTitle": "Renombrar carpeta", // Rename Folder
+  "folder.name": "Nombre de la carpeta", // Folder name
+  "folder.namePlaceholder": "pagos", // payments
+  "folder.create": "Crear carpeta", // Create Folder
+  "folder.delete": "Eliminar carpeta", // Delete Folder
+  "folder.deleteTitle": "Eliminar carpeta", // Delete Folder
+  "folder.deleteBody": (name) =>
+    `¿Eliminar la carpeta "${name}"? Los proyectos que contiene se conservan y salen de la carpeta.`, // Delete folder "{name}"? The projects inside are kept and moved out of the folder.
   "tree.cloneProject": "Clonar desde Git", // Clone from Git
   "createProject.title": "Crear proyecto",
   "createProject.name": "Nombre del proyecto",

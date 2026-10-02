@@ -59,6 +59,8 @@ export interface TreeHandlers {
   /** Only the primary projection consumes global reveal requests. */
   isPrimary: boolean;
   onContext: (node: TreeNodeRef, x: number, y: number) => void;
+  /** Right-click on a folder row; folders are not tree nodes, so they get their own menu callback. */
+  onFolderContext: (folder: ProjectFolder, x: number, y: number) => void;
   /** Current context-menu target, highlighted temporarily without changing persistent selection. */
   contextId: string | null;
   renamingId: string | null;
@@ -1242,6 +1244,11 @@ export function ProjectTree(h: TreeHandlers) {
             onDrop={dropOnFolder(f)}
             onMouseDown={preventModifierSelect}
             onClick={() => toggleFolder(f)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (!isShareSurface) h.onFolderContext(f, e.clientX, e.clientY);
+            }}
           >
             <span className="tw">
               <Chevron open={row.expanded} />

@@ -862,6 +862,16 @@ const en = {
   "collection.deleteBody": (name: string) =>
     `Delete collection "${name}"? All its groups and sessions will also be deleted. This cannot be undone.`,
   "folder.projectCount": (count: number) => (count === 1 ? "1 project" : `${count} projects`),
+  "folder.new": "New Folder",
+  "folder.createTitle": "New Folder",
+  "folder.renameTitle": "Rename Folder",
+  "folder.name": "Folder name",
+  "folder.namePlaceholder": "payments",
+  "folder.create": "Create Folder",
+  "folder.delete": "Delete Folder",
+  "folder.deleteTitle": "Delete Folder",
+  "folder.deleteBody": (name: string) =>
+    `Delete folder "${name}"? The projects inside are kept and moved out of the folder.`,
   "tree.cloneProject": "Clone from Git",
   "createProject.title": "Create Project",
   "createProject.name": "Project name",

@@ -852,6 +852,16 @@ const vi: typeof en = {
   "collection.deleteBody": (name) =>
     `Xóa bộ sưu tập "${name}"? Mọi nhóm và phiên bên trong cũng bị xóa. Không thể hoàn tác.`,
   "folder.projectCount": (count: number) => `${count} dự án`,
+  "folder.new": "Thư mục mới",
+  "folder.createTitle": "Thư mục mới",
+  "folder.renameTitle": "Đổi tên thư mục",
+  "folder.name": "Tên thư mục",
+  "folder.namePlaceholder": "payments",
+  "folder.create": "Tạo thư mục",
+  "folder.delete": "Xóa thư mục",
+  "folder.deleteTitle": "Xóa thư mục",
+  "folder.deleteBody": (name: string) =>
+    `Xóa thư mục "${name}"? Các dự án bên trong vẫn được giữ và chuyển ra khỏi thư mục.`,
   "tree.cloneProject": "Sao chép từ Git",
   "createProject.title": "Tạo dự án",
   "createProject.name": "Tên dự án",

@@ -864,6 +864,16 @@ const ptBR: typeof en = {
   "collection.deleteBody": (name) =>
     `Excluir a coleção "${name}"? Todos os seus grupos e sessões também serão excluídos. Isso não pode ser desfeito.`,
   "folder.projectCount": (count) => (count === 1 ? "1 projeto" : `${count} projetos`), // {count} projects
+  "folder.new": "Nova pasta", // New Folder
+  "folder.createTitle": "Nova pasta", // New Folder
+  "folder.renameTitle": "Renomear pasta", // Rename Folder
+  "folder.name": "Nome da pasta", // Folder name
+  "folder.namePlaceholder": "pagamentos", // payments
+  "folder.create": "Criar pasta", // Create Folder
+  "folder.delete": "Excluir pasta", // Delete Folder
+  "folder.deleteTitle": "Excluir pasta", // Delete Folder
+  "folder.deleteBody": (name) =>
+    `Excluir a pasta "${name}"? Os projetos dentro dela são mantidos e saem da pasta.`, // Delete folder "{name}"? The projects inside are kept and moved out of the folder.
   "tree.cloneProject": "Clonar do Git", // Clone from Git
   "createProject.title": "Criar projeto",
   "createProject.name": "Nome do projeto",

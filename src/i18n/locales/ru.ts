@@ -875,6 +875,16 @@ const ru: typeof en = {
   "collection.deleteBody": (name) =>
     `Удалить коллекцию «${name}»? Все её группы и сессии тоже будут удалены. Это действие нельзя отменить.`,
   "folder.projectCount": (count) => `${count} ${plural(count, "проект", "проекта", "проектов")}`, // {count} projects
+  "folder.new": "Новая папка", // New Folder
+  "folder.createTitle": "Новая папка", // New Folder
+  "folder.renameTitle": "Переименовать папку", // Rename Folder
+  "folder.name": "Имя папки", // Folder name
+  "folder.namePlaceholder": "payments", // payments
+  "folder.create": "Создать папку", // Create Folder
+  "folder.delete": "Удалить папку", // Delete Folder
+  "folder.deleteTitle": "Удалить папку", // Delete Folder
+  "folder.deleteBody": (name) =>
+    `Удалить папку «${name}»? Проекты в ней сохранятся и будут перемещены из папки.`, // Delete folder "{name}"? The projects inside are kept and moved out of the folder.
   "tree.cloneProject": "Клонировать из Git", // Clone from Git
   "createProject.title": "Создать проект",
   "createProject.name": "Название проекта",

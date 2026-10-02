@@ -866,6 +866,16 @@ const fr: typeof en = {
   "collection.deleteBody": (name) =>
     `Supprimer la collection « ${name} » ? Tous ses groupes et sessions seront également supprimés. Cette action est irréversible.`,
   "folder.projectCount": (count) => (count <= 1 ? `${count} projet` : `${count} projets`), // {count} projects
+  "folder.new": "Nouveau dossier", // New Folder
+  "folder.createTitle": "Nouveau dossier", // New Folder
+  "folder.renameTitle": "Renommer le dossier", // Rename Folder
+  "folder.name": "Nom du dossier", // Folder name
+  "folder.namePlaceholder": "paiements", // payments
+  "folder.create": "Créer le dossier", // Create Folder
+  "folder.delete": "Supprimer le dossier", // Delete Folder
+  "folder.deleteTitle": "Supprimer le dossier", // Delete Folder
+  "folder.deleteBody": (name) =>
+    `Supprimer le dossier « ${name} » ? Les projets qu'il contient sont conservés et sortis du dossier.`, // Delete folder "{name}"? The projects inside are kept and moved out of the folder.
   "tree.cloneProject": "Cloner depuis Git", // Clone from Git
   "createProject.title": "Créer un projet",
   "createProject.name": "Nom du projet",

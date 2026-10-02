@@ -859,6 +859,16 @@ const ko: typeof en = {
   "collection.deleteBody": (name) =>
     `컬렉션 "${name}"을(를) 삭제할까요? 안의 그룹과 세션도 모두 삭제되며 되돌릴 수 없습니다.`,
   "folder.projectCount": (count) => `프로젝트 ${count}개`, // {count} projects
+  "folder.new": "새 폴더", // New Folder
+  "folder.createTitle": "새 폴더", // New Folder
+  "folder.renameTitle": "폴더 이름 바꾸기", // Rename Folder
+  "folder.name": "폴더 이름", // Folder name
+  "folder.namePlaceholder": "payments", // payments
+  "folder.create": "폴더 만들기", // Create Folder
+  "folder.delete": "폴더 삭제", // Delete Folder
+  "folder.deleteTitle": "폴더 삭제", // Delete Folder
+  "folder.deleteBody": (name) =>
+    `폴더 "${name}"을(를) 삭제할까요? 안의 프로젝트는 유지되며 폴더 밖으로 이동합니다.`, // Delete folder "{name}"? The projects inside are kept and moved out of the folder.
   "tree.cloneProject": "Git에서 클론", // Clone from Git
   "createProject.title": "프로젝트 만들기",
   "createProject.name": "프로젝트 이름",

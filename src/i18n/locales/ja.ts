@@ -863,6 +863,16 @@ const ja: typeof en = {
   "collection.deleteBody": (name) =>
     `コレクション「${name}」を削除しますか？中のグループとセッションもすべて削除され、元に戻せません。`,
   "folder.projectCount": (count) => `${count} 件のプロジェクト`, // {count} projects
+  "folder.new": "新しいフォルダー", // New Folder
+  "folder.createTitle": "新しいフォルダー", // New Folder
+  "folder.renameTitle": "フォルダー名を変更", // Rename Folder
+  "folder.name": "フォルダー名", // Folder name
+  "folder.namePlaceholder": "payments", // payments
+  "folder.create": "フォルダーを作成", // Create Folder
+  "folder.delete": "フォルダーを削除", // Delete Folder
+  "folder.deleteTitle": "フォルダーを削除", // Delete Folder
+  "folder.deleteBody": (name) =>
+    `フォルダー「${name}」を削除しますか？中のプロジェクトは削除されず、フォルダーの外に移動します。`, // Delete folder "{name}"? The projects inside are kept and moved out of the folder.
   "tree.cloneProject": "Git からクローン", // Clone from Git
   "createProject.title": "プロジェクトを作成",
   "createProject.name": "プロジェクト名",

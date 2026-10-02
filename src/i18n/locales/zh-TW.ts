@@ -847,6 +847,15 @@ const zhTW: typeof en = {
   "collection.deleteBody": (name) =>
     `刪除集合「${name}」？其中的分組與會話也會一併刪除，且無法復原。`,
   "folder.projectCount": (count) => `${count} 個專案`, // {count} projects
+  "folder.new": "新增資料夾", // New Folder
+  "folder.createTitle": "新增資料夾", // New Folder
+  "folder.renameTitle": "重新命名資料夾", // Rename Folder
+  "folder.name": "資料夾名稱", // Folder name
+  "folder.namePlaceholder": "payments", // payments
+  "folder.create": "建立資料夾", // Create Folder
+  "folder.delete": "刪除資料夾", // Delete Folder
+  "folder.deleteTitle": "刪除資料夾", // Delete Folder
+  "folder.deleteBody": (name) => `刪除資料夾「${name}」？其中的專案會保留，並移出該資料夾。`, // Delete folder "{name}"? The projects inside are kept and moved out of the folder.
   "tree.cloneProject": "從 Git 複製", // Clone from Git
   "createProject.title": "建立專案",
   "createProject.name": "專案名稱",
