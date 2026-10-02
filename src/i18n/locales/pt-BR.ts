@@ -874,6 +874,8 @@ const ptBR: typeof en = {
   "folder.deleteTitle": "Excluir pasta", // Delete Folder
   "folder.deleteBody": (name) =>
     `Excluir a pasta "${name}"? Os projetos dentro dela são mantidos e saem da pasta.`, // Delete folder "{name}"? The projects inside are kept and moved out of the folder.
+  "folder.moveTo": "Mover para pasta", // Move to Folder
+  "folder.none": "Sem pasta", // No Folder
   "tree.cloneProject": "Clonar do Git", // Clone from Git
   "createProject.title": "Criar projeto",
   "createProject.name": "Nome do projeto",

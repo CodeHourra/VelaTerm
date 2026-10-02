@@ -876,6 +876,8 @@ const es: typeof en = {
   "folder.deleteTitle": "Eliminar carpeta", // Delete Folder
   "folder.deleteBody": (name) =>
     `¿Eliminar la carpeta "${name}"? Los proyectos que contiene se conservan y salen de la carpeta.`, // Delete folder "{name}"? The projects inside are kept and moved out of the folder.
+  "folder.moveTo": "Mover a carpeta", // Move to Folder
+  "folder.none": "Sin carpeta", // No Folder
   "tree.cloneProject": "Clonar desde Git", // Clone from Git
   "createProject.title": "Crear proyecto",
   "createProject.name": "Nombre del proyecto",

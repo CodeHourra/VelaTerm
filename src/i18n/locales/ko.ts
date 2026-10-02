@@ -869,6 +869,8 @@ const ko: typeof en = {
   "folder.deleteTitle": "폴더 삭제", // Delete Folder
   "folder.deleteBody": (name) =>
     `폴더 "${name}"을(를) 삭제할까요? 안의 프로젝트는 유지되며 폴더 밖으로 이동합니다.`, // Delete folder "{name}"? The projects inside are kept and moved out of the folder.
+  "folder.moveTo": "폴더로 이동", // Move to Folder
+  "folder.none": "폴더 없음", // No Folder
   "tree.cloneProject": "Git에서 클론", // Clone from Git
   "createProject.title": "프로젝트 만들기",
   "createProject.name": "프로젝트 이름",

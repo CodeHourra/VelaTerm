@@ -885,6 +885,8 @@ const ru: typeof en = {
   "folder.deleteTitle": "Удалить папку", // Delete Folder
   "folder.deleteBody": (name) =>
     `Удалить папку «${name}»? Проекты в ней сохранятся и будут перемещены из папки.`, // Delete folder "{name}"? The projects inside are kept and moved out of the folder.
+  "folder.moveTo": "Переместить в папку", // Move to Folder
+  "folder.none": "Без папки", // No Folder
   "tree.cloneProject": "Клонировать из Git", // Clone from Git
   "createProject.title": "Создать проект",
   "createProject.name": "Название проекта",

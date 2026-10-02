@@ -44,6 +44,8 @@ import {
   type SidebarViewRect,
 } from "./sidebarTreeLayout";
 import { ProjectFolderDialogs, type FolderDialog } from "./ProjectFolderDialogs";
+import { moveToFolderItem } from "./projectFolderMenu";
+import { setProjectFolder } from "../../store/projectFolders";
 
 /** Status filters: working (pulsing green), attention (pulsing yellow), replied (magenta), and replied with
  * background work still running (cyan). */
@@ -648,10 +650,13 @@ export function LeftSidebar() {
     const rename: MenuItem = { label: t("common.rename"), onClick: () => startRename(node) };
 
     if (node.kind === "project") {
+      const st = useTermStore.getState();
+      const project = st.projects.find((p) => p.id === node.projectId);
       // A collection is stored as a project row but has no folder, so this menu names it a collection.
-      const virtual = isVirtualProject(
-        useTermStore.getState().projects.find((p) => p.id === node.projectId),
-      );
+      const virtual = isVirtualProject(project);
+      const moveToFolder = moveToFolderItem(t, project, st.projectFolders, (folderId) => {
+        void setProjectFolder(node.projectId, folderId).catch(() => {});
+      });
       // Match group layout: Session section (including persistent browser/Resume), then project actions.
       return [
         ...newSessionItems(node.projectId, null, null, { withBrowser: true, withTerminal: true }),
@@ -661,6 +666,7 @@ export function LeftSidebar() {
           onClick: () => openDialog({ type: "newGroup", projectId: node.projectId, parentGroupId: null }),
         },
         buildMarkItem("project", node.id),
+        ...(moveToFolder ? [moveToFolder] : []),
         {
           label: t("common.experimental"),
           submenu: [

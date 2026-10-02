@@ -241,3 +241,23 @@ describe("folder management", () => {
     expect(mocks.deleteProjectFolder).toHaveBeenCalledWith("f-pay");
   });
 });
+
+describe("Move to Folder", () => {
+  it("moves a loose project into the chosen folder", () => {
+    render(<LeftSidebar />);
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Project" }));
+    expect(screen.getByRole("button", { name: "folder.moveTo" })).toBeTruthy();
+    expect((screen.getByRole("button", { name: "folder.none" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Payments" }));
+    expect(mocks.setProjectFolder).toHaveBeenCalledWith("project-1", "f-pay");
+  });
+
+  it("takes a project out of its folder with No Folder", () => {
+    storeState.projects = [{ id: "project-1", name: "payments-web", rootPath: "/tmp/project", folderId: "f-pay" }];
+    render(<LeftSidebar />);
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Project" }));
+    expect((screen.getByRole("button", { name: "Payments" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "folder.none" }));
+    expect(mocks.setProjectFolder).toHaveBeenCalledWith("project-1", null);
+  });
+});

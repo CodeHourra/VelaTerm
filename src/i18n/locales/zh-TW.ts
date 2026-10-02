@@ -856,6 +856,8 @@ const zhTW: typeof en = {
   "folder.delete": "刪除資料夾", // Delete Folder
   "folder.deleteTitle": "刪除資料夾", // Delete Folder
   "folder.deleteBody": (name) => `刪除資料夾「${name}」？其中的專案會保留，並移出該資料夾。`, // Delete folder "{name}"? The projects inside are kept and moved out of the folder.
+  "folder.moveTo": "移至資料夾", // Move to Folder
+  "folder.none": "無資料夾", // No Folder
   "tree.cloneProject": "從 Git 複製", // Clone from Git
   "createProject.title": "建立專案",
   "createProject.name": "專案名稱",

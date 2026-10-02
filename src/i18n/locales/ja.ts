@@ -873,6 +873,8 @@ const ja: typeof en = {
   "folder.deleteTitle": "フォルダーを削除", // Delete Folder
   "folder.deleteBody": (name) =>
     `フォルダー「${name}」を削除しますか？中のプロジェクトは削除されず、フォルダーの外に移動します。`, // Delete folder "{name}"? The projects inside are kept and moved out of the folder.
+  "folder.moveTo": "フォルダーへ移動", // Move to Folder
+  "folder.none": "フォルダーなし", // No Folder
   "tree.cloneProject": "Git からクローン", // Clone from Git
   "createProject.title": "プロジェクトを作成",
   "createProject.name": "プロジェクト名",

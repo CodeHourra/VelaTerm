@@ -855,6 +855,8 @@ const zhCN: typeof en = {
   "folder.delete": "删除文件夹",
   "folder.deleteTitle": "删除文件夹",
   "folder.deleteBody": (name) => `删除文件夹“${name}”？其中的项目会保留，并移出该文件夹。`,
+  "folder.moveTo": "移动到文件夹",
+  "folder.none": "无文件夹",
   "tree.cloneProject": "从 Git 克隆",
   "createProject.title": "创建项目",
   "createProject.name": "项目名称",

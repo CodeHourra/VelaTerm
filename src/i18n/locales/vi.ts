@@ -862,6 +862,8 @@ const vi: typeof en = {
   "folder.deleteTitle": "Xóa thư mục",
   "folder.deleteBody": (name: string) =>
     `Xóa thư mục "${name}"? Các dự án bên trong vẫn được giữ và chuyển ra khỏi thư mục.`,
+  "folder.moveTo": "Chuyển vào thư mục",
+  "folder.none": "Không có thư mục",
   "tree.cloneProject": "Sao chép từ Git",
   "createProject.title": "Tạo dự án",
   "createProject.name": "Tên dự án",

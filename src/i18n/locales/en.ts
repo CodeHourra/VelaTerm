@@ -872,6 +872,8 @@ const en = {
   "folder.deleteTitle": "Delete Folder",
   "folder.deleteBody": (name: string) =>
     `Delete folder "${name}"? The projects inside are kept and moved out of the folder.`,
+  "folder.moveTo": "Move to Folder",
+  "folder.none": "No Folder",
   "tree.cloneProject": "Clone from Git",
   "createProject.title": "Create Project",
   "createProject.name": "Project name",

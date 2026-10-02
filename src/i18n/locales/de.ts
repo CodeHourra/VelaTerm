@@ -873,6 +873,8 @@ const de: typeof en = {
   "folder.deleteTitle": "Ordner löschen", // Delete Folder
   "folder.deleteBody": (name) =>
     `Ordner „${name}“ löschen? Die enthaltenen Projekte bleiben erhalten und werden aus dem Ordner verschoben.`, // Delete folder "{name}"? The projects inside are kept and moved out of the folder.
+  "folder.moveTo": "In Ordner verschieben", // Move to Folder
+  "folder.none": "Kein Ordner", // No Folder
   "tree.cloneProject": "Von Git klonen", // Clone from Git
   "createProject.title": "Projekt erstellen",
   "createProject.name": "Projektname",
