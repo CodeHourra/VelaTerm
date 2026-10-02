@@ -92,6 +92,7 @@ import type {
   Group,
   NodeKind,
   Project,
+  ProjectFolder,
   Session,
   SessionId,
   SessionEngine,
@@ -851,6 +852,8 @@ interface TermStore {
   // Persistent structure loaded from SQLite.
   projects: Project[];
   groups: Group[];
+  /** Sidebar folders grouping projects, in no particular order; see arrangeProjectsInFolders. */
+  projectFolders: ProjectFolder[];
   sessions: Session[];
   /** Archived sessions loaded on demand for the knowledge-base Collections view. */
   archivedSessions: Session[];
@@ -1910,6 +1913,7 @@ const initialPrimarySidebarView =
 export const useTermStore = create<TermStore>((set, get) => ({
   projects: [],
   groups: [],
+  projectFolders: [],
   sessions: [],
   archivedSessions: [],
   treeLoaded: false,
@@ -2107,6 +2111,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
       return {
         projects: t.projects,
         groups: t.groups,
+        projectFolders: t.folders ?? [],
         sessions: t.sessions,
         treeLoaded: true,
         runtimes,
