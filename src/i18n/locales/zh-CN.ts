@@ -845,6 +845,7 @@ const zhCN: typeof en = {
   "collection.deleteTitle": "删除集合",
   "collection.deleteBody": (name) =>
     `删除集合“${name}”？其中的分组和会话也会一并删除，且无法撤销。`,
+  "folder.projectCount": (count) => `${count} 个项目`,
   "tree.cloneProject": "从 Git 克隆",
   "createProject.title": "创建项目",
   "createProject.name": "项目名称",

@@ -862,6 +862,7 @@ const de: typeof en = {
   "collection.deleteTitle": "Sammlung löschen",
   "collection.deleteBody": (name) =>
     `Sammlung „${name}“ löschen? Alle enthaltenen Gruppen und Sitzungen werden ebenfalls gelöscht. Das lässt sich nicht rückgängig machen.`,
+  "folder.projectCount": (count) => (count === 1 ? "1 Projekt" : `${count} Projekte`), // {count} projects
   "tree.cloneProject": "Von Git klonen", // Clone from Git
   "createProject.title": "Projekt erstellen",
   "createProject.name": "Projektname",

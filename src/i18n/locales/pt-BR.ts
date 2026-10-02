@@ -863,6 +863,7 @@ const ptBR: typeof en = {
   "collection.deleteTitle": "Excluir coleção",
   "collection.deleteBody": (name) =>
     `Excluir a coleção "${name}"? Todos os seus grupos e sessões também serão excluídos. Isso não pode ser desfeito.`,
+  "folder.projectCount": (count) => (count === 1 ? "1 projeto" : `${count} projetos`), // {count} projects
   "tree.cloneProject": "Clonar do Git", // Clone from Git
   "createProject.title": "Criar projeto",
   "createProject.name": "Nome do projeto",

@@ -862,6 +862,7 @@ const ja: typeof en = {
   "collection.deleteTitle": "コレクションを削除",
   "collection.deleteBody": (name) =>
     `コレクション「${name}」を削除しますか？中のグループとセッションもすべて削除され、元に戻せません。`,
+  "folder.projectCount": (count) => `${count} 件のプロジェクト`, // {count} projects
   "tree.cloneProject": "Git からクローン", // Clone from Git
   "createProject.title": "プロジェクトを作成",
   "createProject.name": "プロジェクト名",

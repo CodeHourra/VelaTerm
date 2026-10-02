@@ -858,6 +858,7 @@ const ko: typeof en = {
   "collection.deleteTitle": "컬렉션 삭제",
   "collection.deleteBody": (name) =>
     `컬렉션 "${name}"을(를) 삭제할까요? 안의 그룹과 세션도 모두 삭제되며 되돌릴 수 없습니다.`,
+  "folder.projectCount": (count) => `프로젝트 ${count}개`, // {count} projects
   "tree.cloneProject": "Git에서 클론", // Clone from Git
   "createProject.title": "프로젝트 만들기",
   "createProject.name": "프로젝트 이름",

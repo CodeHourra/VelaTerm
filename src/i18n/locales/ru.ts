@@ -874,6 +874,7 @@ const ru: typeof en = {
   "collection.deleteTitle": "Удалить коллекцию",
   "collection.deleteBody": (name) =>
     `Удалить коллекцию «${name}»? Все её группы и сессии тоже будут удалены. Это действие нельзя отменить.`,
+  "folder.projectCount": (count) => `${count} ${plural(count, "проект", "проекта", "проектов")}`, // {count} projects
   "tree.cloneProject": "Клонировать из Git", // Clone from Git
   "createProject.title": "Создать проект",
   "createProject.name": "Название проекта",

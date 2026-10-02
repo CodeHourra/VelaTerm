@@ -861,6 +861,7 @@ const en = {
   "collection.deleteTitle": "Delete Collection",
   "collection.deleteBody": (name: string) =>
     `Delete collection "${name}"? All its groups and sessions will also be deleted. This cannot be undone.`,
+  "folder.projectCount": (count: number) => (count === 1 ? "1 project" : `${count} projects`),
   "tree.cloneProject": "Clone from Git",
   "createProject.title": "Create Project",
   "createProject.name": "Project name",

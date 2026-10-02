@@ -865,6 +865,7 @@ const fr: typeof en = {
   "collection.deleteTitle": "Supprimer la collection",
   "collection.deleteBody": (name) =>
     `Supprimer la collection « ${name} » ? Tous ses groupes et sessions seront également supprimés. Cette action est irréversible.`,
+  "folder.projectCount": (count) => (count <= 1 ? `${count} projet` : `${count} projets`), // {count} projects
   "tree.cloneProject": "Cloner depuis Git", // Clone from Git
   "createProject.title": "Créer un projet",
   "createProject.name": "Nom du projet",

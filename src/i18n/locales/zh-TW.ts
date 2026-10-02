@@ -846,6 +846,7 @@ const zhTW: typeof en = {
   "collection.deleteTitle": "刪除集合",
   "collection.deleteBody": (name) =>
     `刪除集合「${name}」？其中的分組與會話也會一併刪除，且無法復原。`,
+  "folder.projectCount": (count) => `${count} 個專案`, // {count} projects
   "tree.cloneProject": "從 Git 複製", // Clone from Git
   "createProject.title": "建立專案",
   "createProject.name": "專案名稱",

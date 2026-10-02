@@ -865,6 +865,7 @@ const es: typeof en = {
   "collection.deleteTitle": "Eliminar colección",
   "collection.deleteBody": (name) =>
     `¿Eliminar la colección "${name}"? También se eliminarán sus grupos y sesiones. Esto no se puede deshacer.`,
+  "folder.projectCount": (count) => (count === 1 ? "1 proyecto" : `${count} proyectos`), // {count} projects
   "tree.cloneProject": "Clonar desde Git", // Clone from Git
   "createProject.title": "Crear proyecto",
   "createProject.name": "Nombre del proyecto",

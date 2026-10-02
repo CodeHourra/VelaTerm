@@ -851,6 +851,7 @@ const vi: typeof en = {
   "collection.deleteTitle": "Xóa bộ sưu tập",
   "collection.deleteBody": (name) =>
     `Xóa bộ sưu tập "${name}"? Mọi nhóm và phiên bên trong cũng bị xóa. Không thể hoàn tác.`,
+  "folder.projectCount": (count: number) => `${count} dự án`,
   "tree.cloneProject": "Sao chép từ Git",
   "createProject.title": "Tạo dự án",
   "createProject.name": "Tên dự án",
