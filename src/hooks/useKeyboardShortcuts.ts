@@ -24,6 +24,7 @@ import { isShareSurface } from "../ipc/shareBase";
 import { env } from "../platform";
 import { useTermStore } from "../store/termStore";
 import { activeAgentLocation, agentPickerUrl, navigateAgentPicker, newAgentPickerRoute, readAgentPickerRoute } from "../layout/NewAgentSession/navigation";
+import { selectAll as selectAllTerminalContent } from "../terminal/registry";
 import {
   DEFAULT_BINDINGS,
   hasMod,
@@ -175,6 +176,22 @@ export function useKeyboardShortcuts() {
         if (activeSessionId) {
           e.preventDefault();
           openSearch();
+        }
+        return;
+      }
+
+      // Select all terminal content. Runs only when a session tab is focused (document, browser and task
+      // tabs keep the browser's native Select All). Defaults are Cmd+A on macOS and Ctrl+Shift+A elsewhere
+      // so plain Ctrl+A remains free for readline's move-to-beginning-of-line, which every shell and
+      // agent CLI relies on.
+      if (matchCombo(e, sc("selectAllTerminal"))) {
+        const { activeSessionId, activeTabId, docTabs, browserTabs, taskTabs } = useTermStore.getState();
+        const onSessionTab =
+          !!activeSessionId &&
+          !(activeTabId && (docTabs[activeTabId] || browserTabs[activeTabId] || taskTabs[activeTabId]));
+        if (onSessionTab) {
+          e.preventDefault();
+          selectAllTerminalContent(activeSessionId!);
         }
       }
     };

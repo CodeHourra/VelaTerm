@@ -693,6 +693,7 @@ const ja: typeof en = {
   "settings.scSplitDown": "下に分割", // Split down
   "settings.scSearch": "ターミナル内を検索", // Find in terminal
   "settings.scGlobalSearch": "全セッションを検索", // Search all sessions
+  "settings.scSelectAllTerminal": "ターミナル内をすべて選択", // Select all in terminal
   "settings.scSaveDoc": "ドキュメントを保存", // Save document
   "settings.scRecording": "キーを押してください…", // Press keys…
   "settings.scHint":

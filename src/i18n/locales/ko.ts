@@ -693,6 +693,7 @@ const ko: typeof en = {
   "settings.scSplitDown": "아래쪽 분할", // Split down
   "settings.scSearch": "터미널에서 찾기", // Find in terminal
   "settings.scGlobalSearch": "모든 세션 검색", // Search all sessions
+  "settings.scSelectAllTerminal": "터미널에서 모두 선택", // Select all in terminal
   "settings.scSaveDoc": "문서 저장", // Save document
   "settings.scRecording": "키를 누르세요…", // Press keys…
   "settings.scHint": "단축키를 클릭한 다음 새 조합을 누르세요(Cmd/Ctrl 필요).", // hint

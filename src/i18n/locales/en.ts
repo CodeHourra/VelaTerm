@@ -694,6 +694,7 @@ const en = {
   "settings.scSplitDown": "Split down",
   "settings.scSearch": "Find in terminal",
   "settings.scGlobalSearch": "Search all sessions",
+  "settings.scSelectAllTerminal": "Select all in terminal",
   "settings.scSaveDoc": "Save document",
   "settings.scRecording": "Press keys…",
   "settings.scHint":

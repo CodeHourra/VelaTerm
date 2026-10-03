@@ -694,6 +694,7 @@ const de: typeof en = {
   "settings.scSplitDown": "Unten teilen", // Split down
   "settings.scSearch": "Im Terminal suchen", // Find in terminal
   "settings.scGlobalSearch": "Alle Sitzungen durchsuchen", // Search all sessions
+  "settings.scSelectAllTerminal": "Im Terminal alles auswählen", // Select all in terminal
   "settings.scSaveDoc": "Dokument speichern", // Save document
   "settings.scRecording": "Tasten drücken…", // Press keys…
   "settings.scHint":
