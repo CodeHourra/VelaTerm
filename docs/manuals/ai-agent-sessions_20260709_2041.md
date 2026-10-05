@@ -2,13 +2,13 @@
 
 Created: 2026-07-09 20:41
 
-Updated: 2026-09-25 10:21
+Updated: 2026-09-30 21:12
 
 > This chapter covers how VelaTerm hosts AI coding agents as typed sessions: supported agents, live status, automatic conversation resume, importing and forking conversations, permission modes, launch settings, install guidance and the Info panel. The conversation view has its own chapter: [Conversation View](conversation-view_20260925_1012.md).
 
 ## 1. Supported agents
 
-VelaTerm can start these agents: **Claude Code** (shown as "Claude"), **Codex**, **OpenCode**, **Copilot**, **Cursor**, **Antigravity**, **Cline**, **Pi**, **OMP**, **Crush**, **Kimi Code (K3)**, **Kiro**, **Grok Build (Grok 4.5)** and **Zoo Code**. Each agent's own CLI must be installed and signed in.
+VelaTerm can start these agents: **Claude Code** (shown as "Claude"), **Codex**, **OpenCode**, **Copilot**, **Cursor**, **Antigravity**, **Cline**, **Pi**, **OMP**, **Crush**, **Kimi Code**, **Kiro**, **Grok Build** and **Zoo Code**. Each agent's own CLI must be installed and signed in.
 
 Capabilities differ by agent:
 
@@ -24,7 +24,7 @@ Capabilities differ by agent:
 | Pi | Reported by the agent | — | ✅ | ✅ | None (Pi does not ask) | ✅ |
 | OMP | Reported by the agent | ✅ | ✅ | ✅ | Skip switch; two modes in the conversation view | ✅ |
 | Crush | Partly reported, partly read from the screen | ✅ | ✅ | ✗ | Skip switch | ✗ |
-| Kimi Code (K3) | Reported by the agent | ✅ | ✅ | ✗ | Skip switch | ✗ |
+| Kimi Code | Reported by the agent | ✅ | ✅ | ✗ | Skip switch | ✗ |
 | Kiro | Reported by the agent | ✗ | ✅ | ✗ | Skip switch | ✗ |
 | Grok Build | Reported by the agent | ✅ | ✅ | ✗ | Skip switch | ✗ |
 | Zoo Code | Read from the screen | ✅ | ✅ | ✗ | Skip switch | ✗ |

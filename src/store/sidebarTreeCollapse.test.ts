@@ -23,7 +23,7 @@ vi.mock("../notify", () => ({
 }));
 
 import { useTermStore } from "./termStore";
-import type { Group, Project, ProjectFolder } from "../types";
+import type { Group, Project } from "../types";
 
 const project = (id: string, collapsed: boolean): Project => ({
   id,
@@ -44,7 +44,8 @@ const group = (id: string, collapsed: boolean): Group => ({
   createdAt: 0,
 });
 
-const folder = (id: string, collapsed: boolean): ProjectFolder => ({
+const collection = (id: string, collapsed: boolean): Project => ({
+  rootPath: "",
   id,
   name: id,
   sortOrder: 0,
@@ -55,9 +56,8 @@ const folder = (id: string, collapsed: boolean): ProjectFolder => ({
 beforeEach(() => {
   localStorage.removeItem("vlx-sidebar-tree-views");
   useTermStore.setState({
-    projects: [project("p1", false)],
+    projects: [project("p1", false), collection("f1", true)],
     groups: [group("g1", true)],
-    projectFolders: [folder("f1", true)],
     sessions: [],
     ephemeralSessions: {},
     sidebarTreeViews: [{
@@ -89,9 +89,9 @@ describe("per-view collapse state", () => {
     expect(view?.collapsedOverrides).toEqual({ p1: false, g1: true, f1: true });
   });
 
-  it("snapshots folder collapse so later shared folder changes do not reach the split pane", () => {
+  it("snapshots collection collapse so later shared collection changes do not reach the split pane", () => {
     const id = useTermStore.getState().splitSidebarTreeView("vertical", "main");
-    useTermStore.setState({ projectFolders: [folder("f1", false)] });
+    useTermStore.setState({ projects: [project("p1", false), collection("f1", false)] });
 
     const view = useTermStore.getState().sidebarTreeViews.find((v) => v.id === id);
     expect(view?.collapsedOverrides?.f1).toBe(true);

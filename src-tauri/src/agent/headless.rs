@@ -319,7 +319,6 @@ pub fn run(
     }
 
     let mut command = crate::host::command(bin);
-    super::executable::prepare_command(&mut command, bin);
     command.args(args);
     match delivery {
         PromptDelivery::Arg { marker } => {
@@ -337,11 +336,23 @@ pub fn run(
     if let Some(cwd) = cwd {
         command.current_dir(cwd);
     }
+    crate::login_env::refresh_command(&mut command);
+    super::executable::prepare_command(&mut command, bin);
     // The summarizer must not be able to spawn or reference sessions of its own: that would let one
     // reference fan out into a recursion the caller never asked for and cannot see.
     command.env_remove("VLX_SPAWN_URL");
     command.env_remove("VLX_SESSION_ID");
     command.env_remove("VLX_TOKEN");
+    run_command(command, matches!(delivery, PromptDelivery::Stdin { .. }).then_some(prompt), timeout)
+}
+
+/// Capture a prepared one-shot command with the same pipe draining and process-tree deadline.
+/// Callers own arguments, working directory and environment; this function only manages execution.
+pub(crate) fn run_command(
+    mut command: std::process::Command,
+    stdin_prompt: Option<&str>,
+    timeout: Duration,
+) -> Result<String, HeadlessError> {
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -361,7 +372,7 @@ pub fn run(
 
     // Writing the prompt gets its own thread: a large one fills the pipe, and the child cannot drain it
     // while this side is still blocked on the write.
-    if let PromptDelivery::Stdin { .. } = delivery {
+    if let Some(prompt) = stdin_prompt {
         if let Some(mut stdin) = child.stdin.take() {
             let body = prompt.to_string();
             std::thread::spawn(move || {

@@ -367,10 +367,16 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
 
         // ── Tree management orchestrated by command_core ──
         "list_tree" => to_value(core::list_tree(app)?),
-        "import_project" => to_value(core::import_project(app, &req_str(args, "rootPath")?)?),
-        // Collections take a name only, never a path, so no remote path gate applies here.
+        "import_project" => {
+            let root_path = req_str(args, "rootPath")?;
+            let collection_id = opt_str(args, "collectionId");
+            to_value(if collection_id.is_some() {
+                core::import_project_into_collection(app, &root_path, collection_id.as_deref())?
+            } else { core::import_project(app, &root_path)? })
+        }
+        // Collections take a name and an optional parent, never a path, so no remote path gate applies here.
         "create_virtual_project" => {
-            to_value(core::create_virtual_project(app, &req_str(args, "name")?)?)
+            to_value(core::create_virtual_project(app, &req_str(args, "name")?, opt_str(args, "collectionId").as_deref())?)
         }
         "clone_project" => {
             // New clients supply operationId for progress filtering and cancellation; generate one for old clients.
@@ -479,6 +485,10 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
             )?;
             Ok(Value::Null)
         }
+        "session_title_options" => to_value(crate::agent::session_title::options(app, &req_str(args, "sessionId")?)?),
+        "rename_session_with_agent" => to_value(crate::agent::session_title::rename(app, &req_str(args, "sessionId")?,
+            opt_str(args, "agent").map(|kind| serde_json::from_value::<SessionKind>(Value::String(kind))
+                .map_err(|e| e.to_string())).transpose()?)?),
         "rename_node" => {
             core::rename_node(
                 app,
@@ -546,31 +556,8 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
             )?;
             Ok(Value::Null)
         }
-        "create_project_folder" => {
-            to_value(core::create_project_folder(app, &req_str(args, "name")?)?)
-        }
-        "rename_project_folder" => {
-            core::rename_project_folder(app, &req_str(args, "id")?, &req_str(args, "name")?)?;
-            Ok(Value::Null)
-        }
-        "delete_project_folder" => {
-            core::delete_project_folder(app, &req_str(args, "id")?)?;
-            Ok(Value::Null)
-        }
-        "set_project_folder_collapsed" => {
-            core::set_project_folder_collapsed(
-                app,
-                &req_str(args, "id")?,
-                req_bool(args, "collapsed")?,
-            )?;
-            Ok(Value::Null)
-        }
-        "set_project_folder" => {
-            core::set_project_folder(
-                app,
-                &req_str(args, "projectId")?,
-                opt_str(args, "folderId").as_deref(),
-            )?;
+        "set_project_collection" => {
+            core::set_project_collection(app, &req_str(args, "projectId")?, opt_str(args, "collectionId").as_deref())?;
             Ok(Value::Null)
         }
         "set_session_archived" => {
@@ -799,6 +786,11 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
             &req_str(args, "sessionId")?,
             &req_str(args, "taskId")?,
         )?),
+        "chat_subagent_rows" => to_value(core::chat_subagent_rows(
+            app,
+            &req_str(args, "sessionId")?,
+            &req_str(args, "taskId")?,
+        )?),
         "chat_background_tasks" => to_value(core::chat_background_tasks(app, &req_str(args, "sessionId")?)?),
         "chat_send" => {
             let behavior = opt_str(args, "behavior");
@@ -902,6 +894,7 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
         "model_catalog_refresh" => to_value(crate::agent::remote_model_catalog::refresh(app)),
         "chat_models" => core::chat_models(app, &req_str(args, "sessionId")?),
         "chat_commands" => to_value(core::chat_commands(app, &req_str(args, "sessionId")?)?),
+        "chat_recovery_resume" => to_value(core::chat_recovery_resume(app, &req_str(args,"sessionId")?, opt_str(args,"interruptedId").as_deref())?),
         "chat_snapshot" => {
             let window = args.get("window").filter(|value| !value.is_null()).map(|value| serde_json::from_value::<crate::agent::chat::engine::ChatWindow>(value.clone())).transpose().map_err(|e| e.to_string())?;
             let sid = req_str(args,"sessionId")?;
@@ -971,6 +964,13 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
         //   filesystem, independent of repo status — and is therefore gated above.
         // - `save_pasted_image`: writes only into a temp directory it picks itself — no caller path.
         "list_dir" => to_value(files::list_dir(&req_str(args, "path")?)?),
+        // Drive letters or `/` plus the OS name; no paths below the roots.
+        "list_roots" => to_value(files::list_roots()),
+        "preview_destination" => {
+            let parent = req_str(args, "parentDir")?;
+            guard_remote_path(app, origin, &parent)?;
+            to_value(files::preview_destination(&parent, opt_str(args, "name").as_deref(), opt_str(args, "repository").as_deref()))
+        }
         "read_file_preview" => {
             // Returns up to 64 KB of file content — the pairing token, E2EE key, and TLS key are all
             // NUL-free text and would round-trip through this arm in full.
@@ -1242,7 +1242,7 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
         }
         // Authoritative session facts. Every client asks for the whole set once it connects, then follows
         // the `session://state` broadcast; a client that never opened a session still learns about it.
-        "session_states" => to_value(crate::session_state::snapshot()),
+        "session_states" => to_value(core::session_states(app)?),
         // A session's `vrun` commands: the end of one's log for the viewer, and stopping one. Both read
         // or signal on disk, so they stay on this path rather than the main thread.
         "run_log_tail" => crate::agent::runs::log_tail(app, &req_str(args, "label")?),
@@ -1471,38 +1471,52 @@ mod tests {
     }
 
     #[test]
-    fn project_folder_commands_round_trip_through_dispatch() {
+    fn collection_membership_round_trips_through_dispatch() {
         let app = test_ctx();
         let data_dir = app.data_dir().unwrap();
-        let project = {
-            let conn = app.db().conn.lock().unwrap();
-            crate::db::repo::create_virtual_project(&conn, "payments-web").unwrap()
-        };
         let local = |cmd: &str, args: Value| dispatch(&app, cmd, &args, DESKTOP_SOURCE, CallOrigin::Local);
-
-        let folder = local("create_project_folder", json!({ "name": "Payments" })).unwrap();
-        assert_eq!(folder["name"], "Payments");
-        let folder_id = folder["id"].as_str().unwrap().to_string();
-
-        local("set_project_folder", json!({ "projectId": project.id, "folderId": folder_id })).unwrap();
-        local("set_project_folder_collapsed", json!({ "id": folder_id, "collapsed": true })).unwrap();
-        local("rename_project_folder", json!({ "id": folder_id, "name": "Billing" })).unwrap();
+        let collection = local("create_virtual_project", json!({"name": "Work"})).unwrap();
+        let member = local("create_virtual_project", json!({"name": "Member"})).unwrap();
+        local("set_project_collection", json!({"projectId": member["id"], "collectionId": collection["id"]})).unwrap();
         let tree = local("list_tree", json!({})).unwrap();
-        assert_eq!(tree["folders"][0]["name"], "Billing");
-        assert_eq!(tree["folders"][0]["collapsed"], true);
-        assert_eq!(tree["projects"][0]["folderId"], folder_id);
-
-        let err = local("set_project_folder", json!({ "projectId": project.id, "folderId": "missing" }))
-            .unwrap_err();
-        assert!(err.contains("Folder not found"), "{err}");
-
-        local("set_project_folder", json!({ "projectId": project.id, "folderId": null })).unwrap();
-        assert!(local("list_tree", json!({})).unwrap()["projects"][0]["folderId"].is_null());
-
-        local("delete_project_folder", json!({ "id": folder_id })).unwrap();
+        let project = tree["projects"].as_array().unwrap().iter().find(|p| p["id"] == member["id"]).unwrap();
+        assert_eq!(project["collectionId"], collection["id"]);
+        assert!(tree.get("folders").is_none());
+        assert!(local("set_project_collection", json!({"projectId": member["id"], "collectionId": "missing"})).is_err());
+        local("delete_node", json!({"kind": "project", "id": collection["id"]})).unwrap();
         let tree = local("list_tree", json!({})).unwrap();
-        assert_eq!(tree["folders"], json!([]));
         assert_eq!(tree["projects"].as_array().unwrap().len(), 1);
+        assert!(tree["projects"][0]["collectionId"].is_null());
+        drop(app);
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
+    fn collection_creation_and_import_assign_membership_atomically() {
+        let app = test_ctx();
+        let data_dir = app.data_dir().unwrap();
+        let local = |cmd: &str, args: Value| dispatch(&app, cmd, &args, DESKTOP_SOURCE, CallOrigin::Local);
+        let parent = local("create_virtual_project", json!({"name": "Work"})).unwrap();
+        let child = local("create_virtual_project", json!({"name": "Research", "collectionId": parent["id"]})).unwrap();
+        assert_eq!(child["collectionId"], parent["id"]);
+        let root = data_dir.join("imported-project");
+        std::fs::create_dir_all(&root).unwrap();
+        let project = local("import_project", json!({"rootPath": root, "collectionId": child["id"]})).unwrap();
+        assert_eq!(project["collectionId"], child["id"]);
+        let reused = local("import_project", json!({"rootPath": root, "collectionId": parent["id"]})).unwrap();
+        assert_eq!(reused["id"], project["id"]);
+        assert_eq!(reused["collectionId"], parent["id"]);
+        let reopened = local("import_project", json!({"rootPath": root})).unwrap();
+        assert_eq!(reopened["collectionId"], parent["id"]);
+        assert!(local("create_virtual_project", json!({"name": "Rejected", "collectionId": "missing"})).is_err());
+        assert!(local("create_virtual_project", json!({"name": "Rejected", "collectionId": project["id"]})).is_err());
+        let rejected_root = data_dir.join("rejected-project");
+        std::fs::create_dir_all(&rejected_root).unwrap();
+        assert!(local("import_project", json!({"rootPath": rejected_root, "collectionId": "missing"})).is_err());
+        assert!(local("import_project", json!({"rootPath": root, "collectionId": "missing"})).is_err());
+        let tree = local("list_tree", json!({})).unwrap();
+        assert_eq!(tree["projects"].as_array().unwrap().len(), 3);
+        assert_eq!(tree["projects"].as_array().unwrap().iter().find(|p| p["id"] == project["id"]).unwrap()["collectionId"], parent["id"]);
         drop(app);
         std::fs::remove_dir_all(data_dir).unwrap();
     }
@@ -2231,7 +2245,7 @@ mod tests {
             let conn = app.db().conn.lock().unwrap();
             conn.execute("INSERT INTO projects(id,name,root_path,created_at) VALUES ('p','test','/tmp',0)", []).unwrap();
             conn.execute(
-                "INSERT INTO sessions(id,project_id,name,kind,permission_mode,agent_path,created_at) VALUES ('s','p','Claude','claude','default','/nonexistent/vlx-test-agent',0)",
+                "INSERT INTO sessions(id,project_id,name,kind,engine,permission_mode,agent_path,created_at) VALUES ('s','p','Claude','claude','chat','default','/nonexistent/vlx-test-agent',0)",
                 [],
             ).unwrap();
         }

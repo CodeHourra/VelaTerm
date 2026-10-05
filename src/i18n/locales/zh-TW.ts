@@ -212,7 +212,7 @@ const zhTW: typeof en = {
   "memory.collectionConversation": "對話",
   "memory.collectionEmptyEntries": "這段對話還沒有知識條目。",
   "memory.title": "知識庫",
-  "memory.add": "整理至工作階段知識庫",
+  "memory.add": "整理至知識庫",
   "memory.intro": "依專案和工作階段整理知識。條目產生後獨立儲存，不隨來源變更自動更新，可手動編輯。",
   "memory.entries": "知識條目",
   "memory.emptyJobs": "尚無整理紀錄。",
@@ -294,11 +294,25 @@ const zhTW: typeof en = {
   "chat.sync.loading": "正在同步對話…",
   "chat.sync.failed": "同步失敗，仍可查看已載入的訊息。",
   "chat.sync.history": "載入更早的訊息",
+  "chat.rail.title": "使用者訊息",
+  "chat.rail.imageMessage": "圖片訊息",
+  "chat.rail.emptyMessage": "空白訊息",
+  "chat.rail.loading": "正在載入較早的訊息…",
+  "chat.rail.unavailable": "此訊息已無法使用。",
+  "chat.rail.failed": "無法載入此訊息。",
   "chat.submission.updateRequired": "請先更新伺服器，再使用此用戶端傳送訊息。",
   "chat.submission.sending": "傳送中…",
   "chat.submission.sent": "已傳送",
   "chat.submission.queued": "已排入佇列",
   "chat.submission.failed": "傳送失敗",
+  "chat.recovery.savedSubmission": "已儲存的提交（尚未與原生訊息核對）",
+  "chat.recovery.saveError": "無法在此裝置上儲存待確認的訊息。",
+  "chat.recovery.readError": "無法還原此裝置上的待確認訊息。",
+  "chat.recovery.writerBlocked": "無法確認此工作階段的使用權。繼續前，請確認其他應用程式執行個體和先前的智慧代理已停止使用此工作階段。",
+  "chat.recovery.interrupted": "智慧代理停止時，尚未確認工作是否完成。繼續前請檢查歷史記錄。",
+  "chat.recovery.paused": "排隊訊息已保留，將在您選擇繼續後傳送。",
+  "chat.recovery.resumeQueue": "繼續佇列",
+  "chat.recovery.continue": "繼續中斷的工作",
   "chat.submission.unknown": "傳送結果待確認",
   "chat.submission.check": "確認狀態",
   "common.retry": "重試", // Retry
@@ -337,6 +351,7 @@ const zhTW: typeof en = {
   "titlebar.hotReloadedAt": (time) => `熱更新於 ${time}`, // Hot reloaded at {time}
   "titlebar.themeSystem": (resolved) => `跟隨系統（目前${resolved}）`, // Follow system (currently {resolved})
   "titlebar.themeDark": "深色", // Dark
+  "titlebar.themeClassicDark": "經典深色", // Classic Dark
   "titlebar.themeLight": "淺色", // Light
   "titlebar.gameCenter": "遊戲中心",
   "titlebar.browser": "內建瀏覽器", // Built-in Browser
@@ -683,12 +698,37 @@ const zhTW: typeof en = {
   "settings.scSplitDown": "向下分割", // Split down
   "settings.scSearch": "在終端機中搜尋", // Find in terminal
   "settings.scGlobalSearch": "搜尋所有會話", // Search all sessions
-  "settings.scSelectAllTerminal": "全選終端內容", // Select all in terminal
+  "settings.scSelectAllTerminal": "全選終端機內容", // Select all in terminal
   "settings.scSaveDoc": "儲存文件", // Save document
   "settings.scRecording": "請按下按鍵…", // Press keys…
   "settings.scHint": "點一下快捷鍵，再按下新的組合鍵（需含 Cmd/Ctrl）。", // hint
+  "settings.scScreenshotSection": "截圖",
+  "settings.scScreenshot": "擷取螢幕",
+  "settings.scOff": "已關閉",
+  "settings.scScreenshotHint":
+    "在任何應用程式中都能使用，VelaTerm 在背景執行時同樣有效。如需關閉，點一下快捷鍵後按 Delete 鍵。",
+  "settings.scConflictTabs": "已用於切換分頁",
+  "settings.scInUse": "此快捷鍵已被其他應用程式使用",
   "settings.scReset": "還原為預設", // Restore defaults
   "settings.scConflict": (label: string) => `已被「${label}」使用`, // conflict
+
+  // ── Screenshot overlay ──
+  "screenshot.hint": "拖曳滑鼠選取區域，按一下擷取整個螢幕",
+  "screenshot.rect": "矩形",
+  "screenshot.ellipse": "橢圓",
+  "screenshot.arrow": "箭頭",
+  "screenshot.pen": "畫筆",
+  "screenshot.mosaic": "馬賽克",
+  "screenshot.text": "文字",
+  "screenshot.undo": "復原",
+  "screenshot.save": "儲存",
+  "screenshot.cancel": "取消",
+  "screenshot.done": "完成",
+  "screenshot.doneTip": "拷貝到剪貼簿（Enter）",
+  "screenshot.small": "小",
+  "screenshot.medium": "中",
+  "screenshot.large": "大",
+  "screenshot.failed": (detail: string) => `截圖匯出失敗：${detail}`,
 
   // ── Remote access panel ──
   "remote.title": "遠端存取（瀏覽器）", // Remote Access (Browser)
@@ -808,6 +848,7 @@ const zhTW: typeof en = {
   "tree.moveToSession": "移到會話下（成為子會話）", // Move under a session (as child)
   "tree.moveTo": "移動到…", // Move to…
   "tree.openNewTab": "在新分頁開啟", // Open in New Tab
+  "tree.openInSplit": "在分割窗格開啟", // Open in Split
   "tree.openSplitRight": "在右側分割開啟", // Open in Split Right
   "tree.openSplitDown": "在下方分割開啟", // Open in Split Down
   "tree.openInFocusedPane": "在目前窗格開啟", // Open in Focused Pane
@@ -815,6 +856,18 @@ const zhTW: typeof en = {
   "tree.tileSelectedTooMany": "並排選取的會話（最多 4 個）", // Tile Selected Sessions (up to 4)
   "tree.forkSession": "Fork 會話", // Fork Session
   "tree.exportSession": "匯出會話…", // Export Session…
+  "sessionTitle.rename": "智慧重新命名",
+  "sessionTitle.chooseAgentHint": "目前工作階段的智慧代理無法使用。請選擇其他智慧代理，將使用所選智慧代理的預設設定。",
+  "sessionTitle.agentUnavailable": "所選智慧代理無法使用。請選擇其他智慧代理或檢查其設定。",
+  "sessionTitle.generating": "正在產生標題…",
+  "sessionTitle.unavailable": "此工作階段沒有可讀取的對話內容。",
+  "sessionTitle.noAgent": "尚未安裝支援此功能的智慧代理。請安裝 Claude、Codex、OpenCode、Pi、OMP 或 Grok 後產生標題。",
+  "sessionTitle.busy": "此工作階段正在產生標題，請稍候。",
+  "sessionTitle.tooLarge": "對話內容過長，無法產生標題。已保留目前的標題。",
+  "sessionTitle.timeout": "產生標題逾時，請重試。",
+  "sessionTitle.invalid": "智慧代理傳回的標題無效，請重試。",
+  "sessionTitle.changed": "產生標題期間工作階段已變更，因此未更新標題。",
+  "sessionTitle.failed": "智慧代理未能產生標題，請重試。",
   "tree.sessionInfo": "會話資訊", // Session Info
   "tree.groupInfo": "分組資訊", // Group Info
   "tree.collectionInfo": "集合資訊", // Collection Info
@@ -833,7 +886,6 @@ const zhTW: typeof en = {
   "tree.persistDoc": "儲存到磁碟…", // Save to Disk…
   "tree.closeScratch": "關閉草稿", // Close Scratch
   "tree.importProject": "匯入專案", // Import Project
-  "tree.openInSplit": "在分割窗格開啟", // Open in Split
   "tree.createProject": "建立專案",
   "tree.dropFoldersHint": "將資料夾拖放到此處，即可新增為專案",
   // New Collection / Collection name / research / Create Collection / No directory / Delete Collection
@@ -843,29 +895,20 @@ const zhTW: typeof en = {
   "collection.name": "集合名稱",
   "collection.namePlaceholder": "research",
   "collection.submit": "建立集合",
+  "collection.duplicateName": "已有同名的集合。",
   "collection.tag": "無目錄",
   "collection.deleteTitle": "刪除集合",
   "collection.deleteBody": (name) =>
-    `刪除集合「${name}」？其中的分組與會話也會一併刪除，且無法復原。`,
-  "folder.projectCount": (count) => `${count} 個專案`, // {count} projects
-  "folder.new": "新增資料夾", // New Folder
-  "folder.createTitle": "新增資料夾", // New Folder
-  "folder.renameTitle": "重新命名資料夾", // Rename Folder
-  "folder.name": "資料夾名稱", // Folder name
-  "folder.namePlaceholder": "payments", // payments
-  "folder.create": "建立資料夾", // Create Folder
-  "folder.delete": "刪除資料夾", // Delete Folder
-  "folder.deleteTitle": "刪除資料夾", // Delete Folder
-  "folder.deleteBody": (name) => `刪除資料夾「${name}」？其中的專案會保留，並移出該資料夾。`, // Delete folder "{name}"? The projects inside are kept and moved out of the folder.
-  "folder.moveTo": "移至資料夾", // Move to Folder
-  "folder.none": "無資料夾", // No Folder
+    `刪除集合「${name}」？所屬專案將移回最上層，內容會完整保留。直屬群組與未封存的會話將被刪除，封存的會話會保留。`,
+  "collection.projectCount": (count) => `${count} 個專案`, // {count} projects
+  "collection.renameTitle": "重新命名集合",
+  "collection.moveTo": "移至集合",
+  "collection.none": "最上層",
   "tree.cloneProject": "從 Git 複製", // Clone from Git
   "createProject.title": "建立專案",
   "createProject.name": "專案名稱",
   "createProject.namePlaceholder": "我的專案",
-  "createProject.into": "建立位置",
   "createProject.choose": "選擇…",
-  "createProject.noParent": "請選擇上層資料夾",
   "createProject.invalidName": "請輸入不含 / 或 \\ 的單一資料夾名稱。",
   "createProject.creating": "正在建立…",
   "createProject.submit": "建立專案",
@@ -876,9 +919,6 @@ const zhTW: typeof en = {
   "clone.branchPlaceholder": "留空則用預設分支", // Default branch if empty
   "clone.folder": "資料夾名稱", // Folder name
   "clone.folderPlaceholder": "留空則自動取儲存庫名稱", // Auto from URL
-  "clone.into": "複製到", // Clone into
-  "clone.choose": "選擇…", // Choose…
-  "clone.noParent": "請選擇一個上層資料夾", // Choose a parent folder
   "clone.cloning": "複製中…", // Cloning…
   "clone.cancelling": "正在取消…",
   "clone.stageStarting": "正在啟動 Git…",
@@ -900,6 +940,7 @@ const zhTW: typeof en = {
   "tree.filterWorking": "工作中", // Working
   "tree.filterAsking": "等待處理", // Pending
   "tree.filterWaiting": "已查看", // Viewed
+  "tree.filterBackground": "背景工作執行中", // Tasks running
   "tree.filterStatus": "狀態篩選", // Filter by status
   "tree.refreshStatusFilter": "重新整理狀態篩選",
   "tree.refreshStatusMatch": "重新整理狀態",
@@ -926,7 +967,6 @@ const zhTW: typeof en = {
   "mark.urgent": "緊急", // Urgent
   "mark.important": "重要", // Important
   "mark.bug": "缺陷", // Bug
-  "tree.filterBackground": "背景工作執行中", // Tasks running
   "mark.done": "已完成", // Done
   "mark.wip": "進行中", // In progress
   "mark.pinned": "置頂關注", // Pinned
@@ -1108,6 +1148,7 @@ const zhTW: typeof en = {
   "center.noSessionHintPre": "從左欄選擇會話，或按 ", // Pick a session from the sidebar, or press
   "center.noSessionHintPost": " 新增終端機", // to create a terminal
   "center.createTerminal": "新增終端機", // Create Terminal
+  "center.splitHint": "開啟會話後，可使用以下快捷鍵分割畫面：",
   "tab.unsavedDot": "有未儲存的修改", // Unsaved changes
   "tab.newTerminal": "新增終端機", // New terminal
   "tab.newDocument": "新增文件", // New document
@@ -1358,18 +1399,60 @@ const zhTW: typeof en = {
   "login.authFailed":
     "認證失敗。請確認存取密碼；若配對連結已重新產生，請改用新連結。", // Authentication failed, check password or use a new pairing link
   "dir.title": "選擇專案目錄", // Choose Project Directory
-  "dir.pathPlaceholder": "搜尋，或輸入路徑後按 Enter 跳轉（支援 ~ 開頭）", // Search, or type a path and press Enter (supports ~)
   "dir.up": "上一層", // Up one level
   "dir.newFolder": "新增資料夾", // New Folder
   "dir.newFolderPlaceholder": "資料夾名稱", // Folder name
-  "dir.goInput": "前往輸入路徑", // Go to typed path
-  "dir.noSubdirs": "（無子目錄）", // (no subdirectories)
   "dir.empty": "（空目錄）", // (empty folder)
   "dir.noMatch": "沒有符合的項目", // No matching items
-  "dir.target": "目標目錄", // Target
   "dir.showHidden": "顯示隱藏項目", // Show hidden items
   "dir.importing": "匯入中…", // Importing…
-  "dir.choose": "選擇此目錄", // Choose This Directory
+  "dir.choose": "選擇", // Choose
+  "dir.back": "返回", // Back
+  "dir.forward": "前進", // Forward
+  "dir.editPath": "輸入路徑", // Type a Path
+  "dir.pathLabel": "資料夾路徑", // Folder path
+  "dir.filter": "篩選", // Filter
+  "dir.places": "常用位置", // Places
+  "dir.sectionLocations": "位置", // Locations
+  "dir.sectionDrives": "本機", // This PC
+  "dir.sectionProjects": "專案", // Projects
+  "dir.sectionRecent": "最近使用", // Recent
+  "dir.placeHome": "主資料夾", // Home
+  "dir.placeComputer": "電腦", // Computer
+  "dir.placeFileSystem": "檔案系統", // File System
+  "dir.cantOpen": "無法開啟此資料夾。", // This folder cannot be opened.
+  "dir.backTo": (path: string) => `返回 ${path}`, // Back to ${path}
+  "dir.goHome": "前往主資料夾", // Go to Home
+  "dir.folder": "資料夾", // Folder
+  "location.label": "位置", // Location
+  "location.browse": "瀏覽…", // Browse…
+  "location.pickerTitle": "選擇位置", // Choose Location
+  "location.ready": "將在此處建立新資料夾。", // A new folder will be created here.
+  "location.checking": "正在檢查…", // Checking…
+  "location.missing": (path: string) => `${path} 不存在或無法開啟。`, // ${path} does not exist or cannot be opened.
+  "location.notAbsolute": "請輸入完整路徑。", // Enter a full path.
+  "location.exists": "已有同名的檔案或資料夾。", // A file or folder with this name already exists.
+  "dir.go": "前往", // Go
+  "dir.pathPending": "按 Enter 或點選「前往」開啟此路徑。", // Press Enter or Go to open this path.
+  "dir.selectedFolder": "已選資料夾", // Selected folder
+  "dir.openFolder": "開啟資料夾", // Open Folder
+  "location.local": "本機", // Local
+  "location.server": "伺服器", // Server
+  "location.host": "未知主機", // Unknown host
+  "location.unknownOs": "未知系統", // Unknown system
+  "location.hostUnavailable": "無法取得主機資訊。", // Host information is unavailable.
+  "location.invalidName": "無法使用此名稱。", // This name cannot be used.
+  "location.validationFailed": "無法檢查此位置。", // This location could not be checked.
+  "location.enterTarget": "請輸入位置和名稱。", // Enter a location and a name.
+  "location.createTo": "建立於", // Create at
+  "clone.destination": "複製到", // Clone to
+  "clone.ready": "可以複製", // Ready to clone
+  "clone.defaultBranch": "預設分支", // Default branch
+  "createProject.createdRetry": "資料夾已建立，但專案匯入失敗。", // The folder was created, but the project could not be imported.
+  "createProject.retryImport": "重新匯入", // Retry Import
+  "doc.saveTo": "儲存至", // Save to
+  "doc.saveAsReopen": "請從文件重新開啟「另存新檔」以儲存。", // Open Save As again from the document to save it.
+  "clone.cancelClone": "取消複製", // Cancel Clone
   "conn.reconnecting": "連線已中斷，正在嘗試重新連線…", // Connection lost, reconnecting…
   "conn.reconnectNow": "立即重新連線", // Reconnect now
   "conn.retrying": "正在重新連線…", // Reconnecting…
@@ -1692,6 +1775,7 @@ const zhTW: typeof en = {
   "chat.catalogChecked": (time: string) => `上次檢查：${time}`,
   "chat.catalogFailed": "更新失敗，仍可使用原有目錄。",
   "chat.catalogRefresh": "重新整理",
+  "chat.modelsCliOutdated": "目前版本的 Claude Code 無法提供模型清單。更新 Claude Code 後即可查看所有可用模型。",
   "chat.modelDefault": "預設模型",
   "chat.mode.default": "每次詢問",
   "chat.mode.agentDefault": "智慧體預設",
@@ -1951,6 +2035,9 @@ const zhTW: typeof en = {
   "chat.tasks.command": "指令",
   "chat.tasks.output": "輸出",
   "chat.tasks.noOutput": "尚無輸出。",
+  "chat.tasks.conversation": "對話",
+  "chat.tasks.noConversation": "尚無記錄。",
+  "chat.tasks.conversationUnavailable": "無法顯示此對話。",
   "chat.tasks.outputTruncated": "僅顯示最近的輸出。",
   "chat.tasks.phases": "階段",
   "chat.tasks.noProgress": "此工作未回報各智慧代理的進度。",
@@ -2072,6 +2159,10 @@ const zhTW: typeof en = {
   "term.runs.logFinished": (code) => `已結束，結束代碼 ${code}`,
   "term.runs.logEnded": "已結束",
   "term.runs.logEmpty": "尚無輸出",
+  "chat.antigravity.placeholder": "傳送訊息給 Antigravity，可用 @檔案 引用檔案",
+  "chat.antigravity.textOnly": "Antigravity 會話檢視目前僅支援文字訊息。",
+  "chat.antigravity.permissionsHint": "需要核准的工具必須先在 Antigravity 設定中獲准使用，或在終端機檢視中使用。",
+  "chat.antigravity.settingsHint": "請在回合之間變更模型、思考程度或權限。",
 };
 
 export default zhTW;

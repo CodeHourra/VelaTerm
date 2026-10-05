@@ -49,8 +49,9 @@ pub fn list(bin: &str, extra_args: &[String]) -> Result<Vec<CodexModel>, String>
 /// A launch draft may use project-local provider settings before a session exists.
 pub fn list_in_dir(bin: &str, extra_args: &[String], cwd: Option<&str>) -> Result<Vec<CodexModel>, String> {
     let mut command = crate::host::command(bin);
-    crate::agent::executable::prepare_command(&mut command, bin);
     if let Some(cwd) = cwd { command.current_dir(cwd); }
+    crate::login_env::refresh_command(&mut command);
+    crate::agent::executable::prepare_command(&mut command, bin);
     command.arg("app-server").arg("--stdio");
     command.args(app_server_args(extra_args));
     command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());

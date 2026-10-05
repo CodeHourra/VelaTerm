@@ -12,6 +12,7 @@ import { invoke, isTauri } from "../../ipc/transport";
 import { webServerStatus, type WebServerStatus } from "../../ipc/webServer";
 import { env, platform } from "../../platform";
 import { useTermStore } from "../../store/termStore";
+import { runAfterInitialSettings } from "../../store/settingsWatch";
 import { resolveTheme } from "../../theme";
 import { ShareModal } from "../../components/ShareModal";
 import { AppMenuBar } from "./AppMenuBar";
@@ -56,6 +57,7 @@ export function TitleBar() {
   const hotReloadTime = useHotReloadTime();
   const theme = useTermStore((s) => s.theme);
   const setTheme = useTermStore((s) => s.setTheme);
+  const setDarkTheme = useTermStore((s) => s.setDarkTheme);
   const leftCollapsed = useTermStore((s) => s.leftCollapsed);
   const toggleLeft = useTermStore((s) => s.toggleLeft);
   const rightCollapsed = useTermStore((s) => s.rightCollapsed);
@@ -128,6 +130,7 @@ export function TitleBar() {
     backend: string;
   } | null>(null);
   const resolved = resolveTheme(theme);
+  const darkThemeLabel = t("titlebar.themeClassicDark");
 
   // Compare bundle __APP_VERSION__ from package.json with backend app_version from Cargo.toml at
   // startup. Release scripts update both, but remote deployments or manual edits can drift. Report
@@ -270,7 +273,7 @@ export function TitleBar() {
               textTransform: "uppercase",
               padding: "1px 6px",
               borderRadius: 4,
-              color: "var(--bg-0)",
+              color: "var(--text-on-accent)",
               background: "var(--accent)",
             }}
           >
@@ -398,7 +401,7 @@ export function TitleBar() {
               letterSpacing: 0.3,
               padding: "1px 6px",
               borderRadius: 4,
-              color: "#fff",
+              color: "var(--bg-0)",
               background: "var(--danger, #e5484d)",
             }}
           >
@@ -415,27 +418,31 @@ export function TitleBar() {
       <div className="tb-seg">
         <button
           className={theme === "system" ? "on" : ""}
+          aria-pressed={theme === "system"}
           title={t(
             "titlebar.themeSystem",
             resolved === "dark"
-              ? t("titlebar.themeDark")
+              ? darkThemeLabel
               : t("titlebar.themeLight"),
           )}
-          onClick={() => setTheme("system")}
+          onClick={() => runAfterInitialSettings(() => setTheme("system"))}
         >
           <Icons.monitor size={14} />
         </button>
         <button
           className={theme === "dark" ? "on" : ""}
-          title={t("titlebar.themeDark")}
-          onClick={() => setTheme("dark")}
+          aria-pressed={theme === "dark"}
+          title={t("titlebar.themeClassicDark")}
+          aria-label={t("titlebar.themeClassicDark")}
+          onClick={() => runAfterInitialSettings(() => setDarkTheme("classic"))}
         >
-          <Icons.moon size={14} />
+          <Icons.moon size={14} fill />
         </button>
         <button
           className={theme === "light" ? "on" : ""}
+          aria-pressed={theme === "light"}
           title={t("titlebar.themeLight")}
-          onClick={() => setTheme("light")}
+          onClick={() => runAfterInitialSettings(() => setTheme("light"))}
         >
           <Icons.sun size={14} />
         </button>

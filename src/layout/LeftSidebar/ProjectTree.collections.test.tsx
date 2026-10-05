@@ -1,12 +1,11 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Group, Project, ProjectFolder } from "../../types";
+import type { Group, Project } from "../../types";
 import type { TreeHandlers } from "./ProjectTree";
 
 const mocks = vi.hoisted(() => ({
   state: {} as Record<string, unknown>,
-  setProjectFolder: vi.fn(),
-  toggleProjectFolderCollapsed: vi.fn(),
+  setProjectCollection: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-virtual", () => ({
@@ -26,9 +25,8 @@ vi.mock("../../store/termStore", () => ({
   ),
   isVisibleSession: () => false,
 }));
-vi.mock("../../store/projectFolders", () => ({
-  setProjectFolder: mocks.setProjectFolder,
-  toggleProjectFolderCollapsed: mocks.toggleProjectFolderCollapsed,
+vi.mock("../../store/projectCollections", () => ({
+  setProjectCollection: mocks.setProjectCollection,
 }));
 vi.mock("../../i18n", () => ({ useT: () => (key: string) => key }));
 vi.mock("../../components/Icons", () => ({ default: new Proxy({}, { get: () => () => null }) }));
@@ -46,23 +44,24 @@ vi.mock("../../sharing/sessionNavigation", () => ({
 }));
 
 import { ProjectTree } from "./ProjectTree";
-import { PROJECT_DRAG_MIME } from "./projectFolderDrop";
+import { PROJECT_DRAG_MIME } from "./projectCollectionDrop";
 
-const folder = (id: string, name: string, sortOrder: number, collapsed = false): ProjectFolder => ({
+const collection = (id: string, name: string, sortOrder: number, collapsed = false): Project => ({
+  rootPath: "",
   id,
   name,
   sortOrder,
   collapsed,
   createdAt: 0,
 });
-const project = (id: string, name: string, sortOrder: number, folderId: string | null, collapsed = true): Project => ({
+const project = (id: string, name: string, sortOrder: number, collectionId: string | null, collapsed = true): Project => ({
   id,
   name,
   rootPath: `/tmp/${id}`,
   sortOrder,
   collapsed,
   createdAt: 0,
-  folderId,
+  collectionId,
 });
 const handlers = (overrides: Partial<TreeHandlers> = {}): TreeHandlers => ({
   view: {
@@ -76,10 +75,11 @@ const handlers = (overrides: Partial<TreeHandlers> = {}): TreeHandlers => ({
   },
   isPrimary: true,
   onContext: vi.fn(),
-  onFolderContext: vi.fn(),
   contextId: null,
   renamingId: null,
   renameVal: "",
+  renameError: null,
+  onNewCollection: vi.fn(),
   setRenameVal: vi.fn(),
   commitRename: vi.fn(),
   cancelRename: vi.fn(),
@@ -93,15 +93,14 @@ const rowOf = (text: string) => screen.getByText(text).closest(".row") as HTMLEl
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.setProjectFolder.mockResolvedValue(undefined);
-  mocks.toggleProjectFolderCollapsed.mockResolvedValue(undefined);
+  mocks.setProjectCollection.mockResolvedValue(undefined);
   mocks.state = {
     projects: [
+      collection("f-pay", "Payments", 1), collection("f-empty", "Empty", 2),
       project("p-web", "payments-web", 1, "f-pay"),
       project("p-notes", "notes", 2, null),
       project("p-api", "payments-api", 3, "f-pay"),
     ],
-    projectFolders: [folder("f-pay", "Payments", 1), folder("f-empty", "Empty", 2)],
     groups: [] as Group[],
     sessions: [],
     ephemeralSessions: {},
@@ -133,23 +132,23 @@ beforeEach(() => {
   };
 });
 
-describe("folder rows", () => {
-  it("lists folders with their projects indented, then loose projects", () => {
+describe("collection rows", () => {
+  it("lists collections with their projects indented, then loose projects", () => {
     const { container } = render(<ProjectTree {...handlers()} />);
     expect(names(container)).toEqual(["Payments", "payments-web", "payments-api", "Empty", "notes"]);
-    expect(within(rowOf("Payments")).getByText("2")).toBeTruthy();
+    expect(within(rowOf("Payments")).queryByText("2")).toBeNull();
     expect(rowOf("payments-web").style.paddingLeft).toBe("19px");
     expect(rowOf("notes").style.paddingLeft).toBe("6px");
   });
 
-  it("hides a collapsed folder's projects", () => {
-    mocks.state.projectFolders = [folder("f-pay", "Payments", 1, true), folder("f-empty", "Empty", 2)];
+  it("hides a collapsed collection's projects", () => {
+    mocks.state.projects = [...(mocks.state.projects as Project[]).filter(p => p.rootPath), collection("f-pay", "Payments", 1, true), collection("f-empty", "Empty", 2)];
     const { container } = render(<ProjectTree {...handlers()} />);
     expect(names(container)).toEqual(["Payments", "Empty", "notes"]);
   });
 
-  it("opens folders and drops empty ones while filtering", () => {
-    mocks.state.projectFolders = [folder("f-pay", "Payments", 1, true), folder("f-empty", "Empty", 2)];
+  it("opens collections and drops empty ones while filtering", () => {
+    mocks.state.projects = [...(mocks.state.projects as Project[]).filter(p => p.rootPath), collection("f-pay", "Payments", 1, true), collection("f-empty", "Empty", 2)];
     const base = handlers();
     const { container } = render(<ProjectTree {...base} view={{ ...base.view, treeFilter: "api" }} />);
     expect(names(container)).toEqual(["Payments", "payments-api"]);
@@ -158,22 +157,21 @@ describe("folder rows", () => {
   it("toggles the shared collapse state from the primary pane", () => {
     render(<ProjectTree {...handlers()} />);
     fireEvent.click(rowOf("Payments"));
-    expect(mocks.toggleProjectFolderCollapsed).toHaveBeenCalledWith("f-pay");
+    expect(mocks.state.toggleCollapsed).toHaveBeenCalledWith("project", "f-pay");
   });
 
-  it("keeps a split-off pane's folder collapse to that pane", () => {
+  it("keeps a split-off pane's collection collapse to that pane", () => {
     const base = handlers();
     render(
       <ProjectTree {...base} isPrimary={false} view={{ ...base.view, id: "side", collapsedOverrides: {} }} />,
     );
     fireEvent.click(rowOf("Payments"));
     expect(mocks.state.setSidebarTreeViewCollapsed).toHaveBeenCalledWith("side", "f-pay", true);
-    expect(mocks.toggleProjectFolderCollapsed).not.toHaveBeenCalled();
+    expect(mocks.state.toggleCollapsed).not.toHaveBeenCalled();
   });
 
-  it("expands a collapsed folder to reveal the active session", () => {
-    mocks.state.projectFolders = [folder("f-pay", "Payments", 1, true)];
-    mocks.state.projects = [project("p-api", "payments-api", 1, "f-pay", false)];
+  it("expands a collapsed collection to reveal the active session", () => {
+    mocks.state.projects = [collection("f-pay", "Payments", 1, true), project("p-api", "payments-api", 1, "f-pay", false)];
     mocks.state.sessions = [
       {
         id: "s1",
@@ -189,14 +187,14 @@ describe("folder rows", () => {
     ];
     mocks.state.activeSessionId = "s1";
     render(<ProjectTree {...handlers()} />);
-    expect(mocks.toggleProjectFolderCollapsed).toHaveBeenCalledWith("f-pay");
+    expect(mocks.state.toggleCollapsed).toHaveBeenCalledWith("project", "f-pay");
   });
 
-  it("expands a collapsed folder to reveal a freshly opened project", () => {
-    mocks.state.projectFolders = [folder("f-pay", "Payments", 1, true)];
+  it("expands a collapsed collection to reveal a freshly opened project", () => {
+    mocks.state.projects = [...(mocks.state.projects as Project[]).filter(p => p.rootPath), collection("f-pay", "Payments", 1, true)];
     mocks.state.revealProjectId = "p-api";
     render(<ProjectTree {...handlers()} />);
-    expect(mocks.toggleProjectFolderCollapsed).toHaveBeenCalledWith("f-pay");
+    expect(mocks.state.toggleCollapsed).toHaveBeenCalledWith("project", "f-pay");
   });
 });
 
@@ -219,40 +217,40 @@ describe("dragging projects", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
 
-  it("moves a project dropped on a folder into that folder", () => {
+  it("moves a project dropped on a collection into that collection", () => {
     render(<ProjectTree {...handlers()} />);
     fireEvent.drop(rowOf("Empty"), dropData(projectPayload("p-notes")));
-    expect(mocks.setProjectFolder).toHaveBeenCalledWith("p-notes", "f-empty");
+    expect(mocks.setProjectCollection).toHaveBeenCalledWith("p-notes", "f-empty");
     expect(mocks.state.moveNode).not.toHaveBeenCalled();
   });
 
-  it("moves a project dropped on a project inside a folder into that folder", () => {
+  it("moves a project dropped on a project inside a collection into that collection", () => {
     render(<ProjectTree {...handlers()} />);
     fireEvent.drop(rowOf("payments-api"), dropData(projectPayload("p-notes")));
-    expect(mocks.setProjectFolder).toHaveBeenCalledWith("p-notes", "f-pay");
+    expect(mocks.setProjectCollection).toHaveBeenCalledWith("p-notes", "f-pay");
   });
 
-  it("takes a project out of its folder when dropped on a loose project", () => {
+  it("takes a project out of its collection when dropped on a loose project", () => {
     render(<ProjectTree {...handlers()} />);
     fireEvent.drop(rowOf("notes"), dropData(projectPayload("p-web")));
-    expect(mocks.setProjectFolder).toHaveBeenCalledWith("p-web", null);
+    expect(mocks.setProjectCollection).toHaveBeenCalledWith("p-web", null);
   });
 
-  it("does nothing when a project is dropped on itself or its own folder", () => {
+  it("does nothing when a project is dropped on itself or its own collection", () => {
     render(<ProjectTree {...handlers()} />);
     fireEvent.drop(rowOf("payments-web"), dropData(projectPayload("p-web")));
     fireEvent.drop(rowOf("Payments"), dropData(projectPayload("p-web")));
     fireEvent.drop(rowOf("payments-api"), dropData(projectPayload("p-web")));
-    expect(mocks.setProjectFolder).not.toHaveBeenCalled();
+    expect(mocks.setProjectCollection).not.toHaveBeenCalled();
   });
 
-  it("keeps session and group drops on a project inside a folder unchanged", () => {
+  it("keeps session and group drops on a project inside a collection unchanged", () => {
     render(<ProjectTree {...handlers()} />);
     fireEvent.drop(rowOf("payments-web"), dropData({ kind: "session", id: "s1", projectId: "p-notes" }));
     expect(mocks.state.moveNode).toHaveBeenCalledWith("session", "s1", "p-web", null, null, expect.any(Number));
     fireEvent.drop(rowOf("payments-web"), dropData({ kind: "group", id: "g1", projectId: "p-web" }));
     expect(mocks.state.moveNode).toHaveBeenCalledWith("group", "g1", "p-web", null, null, expect.any(Number));
-    expect(mocks.setProjectFolder).not.toHaveBeenCalled();
+    expect(mocks.setProjectCollection).not.toHaveBeenCalled();
   });
 
   it("never treats a project dropped on a group row as a group move", () => {
@@ -265,12 +263,12 @@ describe("dragging projects", () => {
     fireEvent.drop(rowOf("backend"), dropData(projectPayload("p-notes")));
     fireEvent.drop(rowOf("backend"), dropData(projectPayload("p-web")));
     expect(mocks.state.moveNode).not.toHaveBeenCalled();
-    expect(mocks.setProjectFolder).not.toHaveBeenCalled();
+    expect(mocks.setProjectCollection).not.toHaveBeenCalled();
   });
 
-  it("lets folder rows accept only project drags", () => {
+  it("keeps collection rows available to both session and project drags", () => {
     render(<ProjectTree {...handlers()} />);
-    expect(fireEvent.dragOver(rowOf("Payments"), overData(["text/plain"]))).toBe(true);
+    expect(fireEvent.dragOver(rowOf("Payments"), overData(["text/plain"]))).toBe(false);
     expect(fireEvent.dragOver(rowOf("Payments"), overData(["text/plain", PROJECT_DRAG_MIME]))).toBe(false);
   });
 });

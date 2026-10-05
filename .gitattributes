@@ -3,3 +3,6 @@
 # Bash would then read `set -euo pipefail` as `pipefail\r` and report an invalid option.
 # `eol=lf` keeps these files on LF regardless of `autocrlf` across all build machines.
 *.sh text eol=lf
+
+# Build archives must not carry local signing or object-storage credentials.
+certs/** export-ignore

@@ -212,7 +212,7 @@ const fr: typeof en = {
   "memory.collectionConversation": "Conversation",
   "memory.collectionEmptyEntries": "Cette conversation n'a pas encore d'articles de connaissance.",
   "memory.title": "Base de connaissances",
-  "memory.add": "Organiser dans la base de connaissances des sessions",
+  "memory.add": "Ajouter à la base de connaissances",
   "memory.intro": "Organisez les connaissances par projet et par session. Les articles enregistrés restent indépendants de leurs sources et peuvent être modifiés manuellement.",
   "memory.entries": "Articles de connaissance",
   "memory.emptyJobs": "Aucune synthèse pour le moment.",
@@ -294,11 +294,25 @@ const fr: typeof en = {
   "chat.sync.loading": "Synchronisation de la conversation…",
   "chat.sync.failed": "Échec de la synchronisation. Les messages déjà chargés restent disponibles.",
   "chat.sync.history": "Charger les messages précédents",
+  "chat.rail.title": "Vos messages",
+  "chat.rail.imageMessage": "Message avec image",
+  "chat.rail.emptyMessage": "Message vide",
+  "chat.rail.loading": "Chargement des messages précédents…",
+  "chat.rail.unavailable": "Ce message n’est plus disponible.",
+  "chat.rail.failed": "Impossible de charger ce message.",
   "chat.submission.updateRequired": "Mettez le serveur à jour avant d’envoyer des messages depuis ce client.",
   "chat.submission.sending": "Envoi en cours…",
   "chat.submission.sent": "Envoyé",
   "chat.submission.queued": "En attente",
   "chat.submission.failed": "Échec de l’envoi",
+  "chat.recovery.savedSubmission": "Envoi enregistré (correspondance avec le message natif non établie)",
+  "chat.recovery.saveError": "Impossible d’enregistrer le message en attente de confirmation sur cet appareil.",
+  "chat.recovery.readError": "Impossible de restaurer les messages en attente de confirmation sur cet appareil.",
+  "chat.recovery.writerBlocked": "Impossible de vérifier qui contrôle cette session. Avant de continuer, assurez-vous qu’aucune autre instance de l’application ni aucun agent précédent ne l’utilise.",
+  "chat.recovery.interrupted": "L’agent s’est arrêté avant que la fin de son travail soit confirmée. Consultez l’historique avant de continuer.",
+  "chat.recovery.paused": "Les messages en attente sont conservés et restent en pause jusqu’à ce que vous choisissiez de reprendre leur envoi.",
+  "chat.recovery.resumeQueue": "Reprendre la file",
+  "chat.recovery.continue": "Reprendre le travail interrompu",
   "chat.submission.unknown": "Envoi non confirmé",
   "chat.submission.check": "Vérifier l’état",
   "common.retry": "Réessayer", // Retry
@@ -338,6 +352,7 @@ const fr: typeof en = {
   "titlebar.themeSystem": (resolved) =>
     `Suivre le système (actuellement ${resolved})`, // Follow system (currently {resolved})
   "titlebar.themeDark": "Sombre", // Dark
+  "titlebar.themeClassicDark": "Sombre classique", // Classic Dark
   "titlebar.themeLight": "Clair", // Light
   "titlebar.gameCenter": "Centre de jeux",
   "titlebar.browser": "Navigateur intégré", // Built-in Browser
@@ -700,8 +715,33 @@ const fr: typeof en = {
   "settings.scRecording": "Appuyez sur les touches…", // Press keys…
   "settings.scHint":
     "Cliquez sur un raccourci, puis appuyez sur une nouvelle combinaison (Cmd/Ctrl requis).", // hint
+  "settings.scScreenshotSection": "Capture d’écran",
+  "settings.scScreenshot": "Prendre une capture d’écran",
+  "settings.scOff": "Désactivé",
+  "settings.scScreenshotHint":
+    "Fonctionne dans toutes les apps, même lorsque VelaTerm est en arrière-plan. Pour le désactiver, cliquez dessus puis appuyez sur Suppr.",
+  "settings.scConflictTabs": "Déjà utilisé pour changer d’onglet",
+  "settings.scInUse": "Ce raccourci est déjà utilisé par une autre app",
   "settings.scReset": "Rétablir les valeurs par défaut", // Restore defaults
   "settings.scConflict": (label: string) => `Déjà utilisé par « ${label} »`, // conflict
+
+  // ── Screenshot overlay ──
+  "screenshot.hint": "Faites glisser pour sélectionner une zone, ou cliquez pour capturer tout l’écran",
+  "screenshot.rect": "Rectangle",
+  "screenshot.ellipse": "Ellipse",
+  "screenshot.arrow": "Flèche",
+  "screenshot.pen": "Crayon",
+  "screenshot.mosaic": "Mosaïque",
+  "screenshot.text": "Texte",
+  "screenshot.undo": "Annuler la dernière action",
+  "screenshot.save": "Enregistrer",
+  "screenshot.cancel": "Annuler",
+  "screenshot.done": "Terminé",
+  "screenshot.doneTip": "Copier dans le presse-papiers (Entrée)",
+  "screenshot.small": "Petit",
+  "screenshot.medium": "Moyen",
+  "screenshot.large": "Grand",
+  "screenshot.failed": (detail: string) => `Impossible d’exporter la capture d’écran : ${detail}`,
 
   // ── Remote access panel ──
   "remote.title": "Accès distant (navigateur)", // Remote Access (Browser)
@@ -827,6 +867,7 @@ const fr: typeof en = {
   "tree.moveToSession": "Déplacer sous une session (en enfant)", // Move under a session (as child)
   "tree.moveTo": "Déplacer vers…", // Move to…
   "tree.openNewTab": "Ouvrir dans un nouvel onglet", // Open in New Tab
+  "tree.openInSplit": "Ouvrir dans un volet", // Open in Split
   "tree.openSplitRight": "Ouvrir dans un volet à droite", // Open in Split Right
   "tree.openSplitDown": "Ouvrir dans un volet en bas", // Open in Split Down
   "tree.openInFocusedPane": "Ouvrir dans le volet actif", // Open in Focused Pane
@@ -834,6 +875,18 @@ const fr: typeof en = {
   "tree.tileSelectedTooMany": "Disposer en mosaïque (4 sessions max.)", // Tile Selected Sessions (up to 4)
   "tree.forkSession": "Forker la session", // Fork Session
   "tree.exportSession": "Exporter la session…", // Export Session…
+  "sessionTitle.rename": "Renommage intelligent",
+  "sessionTitle.chooseAgentHint": "L’agent de cette session n’est pas disponible. Choisissez un autre agent ; ses paramètres par défaut seront utilisés.",
+  "sessionTitle.agentUnavailable": "L’agent sélectionné n’est pas disponible. Choisissez un autre agent ou vérifiez sa configuration.",
+  "sessionTitle.generating": "Génération du titre…",
+  "sessionTitle.unavailable": "Aucune conversation lisible n’est disponible pour cette session.",
+  "sessionTitle.noAgent": "Aucun agent compatible n’est installé. Installez Claude, Codex, OpenCode, Pi, OMP ou Grok pour générer des titres.",
+  "sessionTitle.busy": "Un titre est déjà en cours de génération pour cette session.",
+  "sessionTitle.tooLarge": "La conversation est trop longue pour générer un titre. Le titre actuel a été conservé.",
+  "sessionTitle.timeout": "La génération du titre a dépassé le délai imparti. Réessayez.",
+  "sessionTitle.invalid": "L’agent a renvoyé un titre invalide. Réessayez.",
+  "sessionTitle.changed": "La session a été modifiée pendant la génération du titre. Le titre n’a donc pas été mis à jour.",
+  "sessionTitle.failed": "L’agent n’a pas pu générer de titre. Réessayez.",
   "tree.sessionInfo": "Infos de session", // Session Info
   "tree.groupInfo": "Infos du groupe", // Group Info
   "tree.collectionInfo": "Infos de la collection", // Collection Info
@@ -852,7 +905,6 @@ const fr: typeof en = {
   "tree.persistDoc": "Enregistrer sur le disque…", // Save to Disk…
   "tree.closeScratch": "Fermer le brouillon", // Close Scratch
   "tree.importProject": "Importer un projet", // Import Project
-  "tree.openInSplit": "Ouvrir dans un volet", // Open in Split
   "tree.createProject": "Créer un projet",
   "tree.dropFoldersHint": "Déposez des dossiers ici pour les ajouter en tant que projets",
   // New Collection / Collection name / research / Create Collection / No directory / Delete Collection
@@ -862,30 +914,20 @@ const fr: typeof en = {
   "collection.name": "Nom de la collection",
   "collection.namePlaceholder": "research",
   "collection.submit": "Créer la collection",
+  "collection.duplicateName": "Une collection portant ce nom existe déjà.",
   "collection.tag": "Aucun répertoire",
   "collection.deleteTitle": "Supprimer la collection",
   "collection.deleteBody": (name) =>
-    `Supprimer la collection « ${name} » ? Tous ses groupes et sessions seront également supprimés. Cette action est irréversible.`,
-  "folder.projectCount": (count) => (count <= 1 ? `${count} projet` : `${count} projets`), // {count} projects
-  "folder.new": "Nouveau dossier", // New Folder
-  "folder.createTitle": "Nouveau dossier", // New Folder
-  "folder.renameTitle": "Renommer le dossier", // Rename Folder
-  "folder.name": "Nom du dossier", // Folder name
-  "folder.namePlaceholder": "paiements", // payments
-  "folder.create": "Créer le dossier", // Create Folder
-  "folder.delete": "Supprimer le dossier", // Delete Folder
-  "folder.deleteTitle": "Supprimer le dossier", // Delete Folder
-  "folder.deleteBody": (name) =>
-    `Supprimer le dossier « ${name} » ? Les projets qu'il contient sont conservés et sortis du dossier.`, // Delete folder "{name}"? The projects inside are kept and moved out of the folder.
-  "folder.moveTo": "Déplacer vers un dossier", // Move to Folder
-  "folder.none": "Aucun dossier", // No Folder
+    `Supprimer la collection « ${name} » ? Ses projets seront déplacés au niveau supérieur avec tout leur contenu. Les groupes et les sessions non archivées rattachés directement à la collection seront supprimés ; les sessions archivées seront conservées.`,
+  "collection.projectCount": (count) => (count <= 1 ? `${count} projet` : `${count} projets`), // {count} projects
+  "collection.renameTitle": "Renommer la collection",
+  "collection.moveTo": "Déplacer vers une collection",
+  "collection.none": "Niveau supérieur",
   "tree.cloneProject": "Cloner depuis Git", // Clone from Git
   "createProject.title": "Créer un projet",
   "createProject.name": "Nom du projet",
   "createProject.namePlaceholder": "mon-projet",
-  "createProject.into": "Créer dans",
   "createProject.choose": "Choisir…",
-  "createProject.noParent": "Choisissez un dossier parent",
   "createProject.invalidName": "Saisissez un seul nom de dossier sans / ni \\.",
   "createProject.creating": "Création…",
   "createProject.submit": "Créer le projet",
@@ -896,9 +938,6 @@ const fr: typeof en = {
   "clone.branchPlaceholder": "Branche par défaut si vide", // Default branch if empty
   "clone.folder": "Nom du dossier", // Folder name
   "clone.folderPlaceholder": "Auto depuis l’URL", // Auto from URL
-  "clone.into": "Cloner dans", // Clone into
-  "clone.choose": "Choisir…", // Choose…
-  "clone.noParent": "Choisissez un dossier parent", // Choose a parent folder
   "clone.cloning": "Clonage…", // Cloning…
   "clone.cancelling": "Annulation…",
   "clone.stageStarting": "Démarrage de Git…",
@@ -920,6 +959,7 @@ const fr: typeof en = {
   "tree.filterWorking": "En cours", // Working
   "tree.filterAsking": "À traiter", // Pending
   "tree.filterWaiting": "Consulté", // Viewed
+  "tree.filterBackground": "Tâches actives", // Tasks running
   "tree.filterStatus": "Filtrer par état", // Filter by status
   "tree.refreshStatusFilter": "Actualiser le filtre d’état",
   "tree.refreshStatusMatch": "Actualiser l’état",
@@ -946,7 +986,6 @@ const fr: typeof en = {
   "mark.menu": "Repère", // Mark
   "mark.urgent": "Urgent", // Urgent
   "mark.important": "Important", // Important
-  "tree.filterBackground": "Tâches actives", // Tasks running
   "mark.bug": "Bogue", // Bug
   "mark.done": "Terminé", // Done
   "mark.wip": "En cours", // In progress
@@ -1143,6 +1182,7 @@ const fr: typeof en = {
     "Choisissez une session dans la barre latérale, ou appuyez sur ", // Pick a session from the sidebar, or press
   "center.noSessionHintPost": " pour créer un terminal", // to create a terminal
   "center.createTerminal": "Créer un terminal", // Create Terminal
+  "center.splitHint": "Ouvrez une session pour la diviser avec ces raccourcis :",
   "tab.unsavedDot": "Modifications non enregistrées", // Unsaved changes
   "tab.newTerminal": "Nouveau terminal", // New terminal
   "tab.newDocument": "Nouveau document", // New document
@@ -1417,19 +1457,60 @@ const fr: typeof en = {
   "login.authFailed":
     "Échec de l'authentification. Vérifiez le mot de passe d'accès, ou ouvrez un nouveau lien d'association s'il a été régénéré.", // Authentication failed, check password or use a new pairing link
   "dir.title": "Choisir le répertoire du projet", // Choose Project Directory
-  "dir.pathPlaceholder":
-    "Rechercher, ou saisir un chemin puis Entrée (supporte ~)", // Search, or type a path and press Enter (supports ~)
   "dir.up": "Dossier parent", // Up one level
   "dir.newFolder": "Nouveau dossier", // New Folder
   "dir.newFolderPlaceholder": "Nom du dossier", // Folder name
-  "dir.goInput": "Aller au chemin saisi", // Go to typed path
-  "dir.noSubdirs": "(aucun sous-répertoire)", // (no subdirectories)
   "dir.empty": "(dossier vide)", // (empty folder)
   "dir.noMatch": "Aucun élément correspondant", // No matching items
-  "dir.target": "Dossier cible", // Target
   "dir.showHidden": "Afficher les éléments masqués", // Show hidden items
   "dir.importing": "Import…", // Importing…
-  "dir.choose": "Choisir ce répertoire", // Choose This Directory
+  "dir.choose": "Choisir", // Choose
+  "dir.back": "Précédent", // Back
+  "dir.forward": "Suivant", // Forward
+  "dir.editPath": "Saisir un chemin", // Type a Path
+  "dir.pathLabel": "Chemin du dossier", // Folder path
+  "dir.filter": "Filtrer", // Filter
+  "dir.places": "Raccourcis", // Places
+  "dir.sectionLocations": "Emplacements", // Locations
+  "dir.sectionDrives": "Ce PC", // This PC
+  "dir.sectionProjects": "Projets", // Projects
+  "dir.sectionRecent": "Récents", // Recent
+  "dir.placeHome": "Dossier personnel", // Home
+  "dir.placeComputer": "Ordinateur", // Computer
+  "dir.placeFileSystem": "Système de fichiers", // File System
+  "dir.cantOpen": "Impossible d’ouvrir ce dossier.", // This folder cannot be opened.
+  "dir.backTo": (path: string) => `Revenir à ${path}`, // Back to ${path}
+  "dir.goHome": "Aller au dossier personnel", // Go to Home
+  "dir.folder": "Dossier", // Folder
+  "location.label": "Emplacement", // Location
+  "location.browse": "Parcourir…", // Browse…
+  "location.pickerTitle": "Choisir un emplacement", // Choose Location
+  "location.ready": "Un nouveau dossier sera créé ici.", // A new folder will be created here.
+  "location.checking": "Vérification…", // Checking…
+  "location.missing": (path: string) => `${path} n’existe pas ou ne peut pas être ouvert.`, // ${path} does not exist or cannot be opened.
+  "location.notAbsolute": "Saisissez un chemin complet.", // Enter a full path.
+  "location.exists": "Un fichier ou un dossier portant ce nom existe déjà.", // A file or folder with this name already exists.
+  "dir.go": "Ouvrir", // Go
+  "dir.pathPending": "Appuyez sur Entrée ou cliquez sur Ouvrir pour accéder à ce chemin.", // Press Enter or Go to open this path.
+  "dir.selectedFolder": "Dossier sélectionné", // Selected folder
+  "dir.openFolder": "Ouvrir le dossier", // Open Folder
+  "location.local": "Local", // Local
+  "location.server": "Serveur", // Server
+  "location.host": "Hôte inconnu", // Unknown host
+  "location.unknownOs": "Système inconnu", // Unknown system
+  "location.hostUnavailable": "Les informations sur l’hôte ne sont pas disponibles.", // Host information is unavailable.
+  "location.invalidName": "Ce nom ne peut pas être utilisé.", // This name cannot be used.
+  "location.validationFailed": "Impossible de vérifier cet emplacement.", // This location could not be checked.
+  "location.enterTarget": "Saisissez un emplacement et un nom.", // Enter a location and a name.
+  "location.createTo": "Créer dans", // Create at
+  "clone.destination": "Cloner dans", // Clone to
+  "clone.ready": "Prêt pour le clonage", // Ready to clone
+  "clone.defaultBranch": "Branche par défaut", // Default branch
+  "createProject.createdRetry": "Le dossier a été créé, mais le projet n’a pas pu être importé.", // The folder was created, but the project could not be imported.
+  "createProject.retryImport": "Réessayer l’importation", // Retry Import
+  "doc.saveTo": "Enregistrer dans", // Save to
+  "doc.saveAsReopen": "Rouvrez Enregistrer sous depuis le document pour l’enregistrer.", // Open Save As again from the document to save it.
+  "clone.cancelClone": "Annuler le clonage", // Cancel Clone
   "conn.reconnecting": "Connexion perdue, reconnexion…", // Connection lost, reconnecting…
   "conn.reconnectNow": "Reconnecter maintenant", // Reconnect now
   "conn.retrying": "Reconnexion…", // Reconnecting…
@@ -1758,6 +1839,7 @@ const fr: typeof en = {
   "chat.catalogChecked": (time: string) => `Dernière vérification : ${time}`,
   "chat.catalogFailed": "Échec de la mise à jour. Le catalogue précédent reste disponible.",
   "chat.catalogRefresh": "Actualiser",
+  "chat.modelsCliOutdated": "Cette version de Claude Code ne peut pas fournir la liste de ses modèles. Mettez à jour Claude Code pour afficher tous les modèles disponibles.",
   "chat.modelDefault": "Modèle par défaut",
   "chat.mode.default": "Toujours demander",
   "chat.mode.agentDefault": "Par défaut de l'agent",
@@ -2019,6 +2101,9 @@ const fr: typeof en = {
   "chat.tasks.command": "Commande",
   "chat.tasks.output": "Sortie",
   "chat.tasks.noOutput": "Aucune sortie pour le moment.",
+  "chat.tasks.conversation": "Conversation",
+  "chat.tasks.noConversation": "Rien n’a encore été enregistré.",
+  "chat.tasks.conversationUnavailable": "Cette conversation n’est pas disponible.",
   "chat.tasks.outputTruncated": "Seule la sortie la plus récente est affichée.",
   "chat.tasks.phases": "Phases",
   "chat.tasks.noProgress": "Cette tâche ne fournit pas la progression de chaque agent.",
@@ -2140,6 +2225,10 @@ const fr: typeof en = {
   "term.runs.logFinished": (code) => `Terminé avec le code de sortie ${code}`,
   "term.runs.logEnded": "Terminé",
   "term.runs.logEmpty": "Aucune sortie pour le moment",
+  "chat.antigravity.placeholder": "Écrivez à Antigravity ou utilisez @fichiers pour référencer des fichiers",
+  "chat.antigravity.textOnly": "La vue de conversation d’Antigravity ne prend actuellement en charge que les messages texte.",
+  "chat.antigravity.permissionsHint": "Les outils nécessitant une autorisation doivent être autorisés dans les paramètres d’Antigravity ou utilisés dans la vue terminal.",
+  "chat.antigravity.settingsHint": "Modifiez le modèle, le niveau de raisonnement ou les autorisations entre les tours.",
 };
 
 export default fr;

@@ -212,7 +212,7 @@ const ja: typeof en = {
   "memory.collectionConversation": "会話",
   "memory.collectionEmptyEntries": "この会話にはまだナレッジ記事がありません。",
   "memory.title": "ナレッジベース",
-  "memory.add": "セッションナレッジベースに整理",
+  "memory.add": "ナレッジベースに追加",
   "memory.intro": "プロジェクトとセッションごとに知識を整理します。保存された記事は元の情報の変更に連動せず、手動で編集できます。",
   "memory.entries": "ナレッジ記事",
   "memory.emptyJobs": "整理履歴はまだありません。",
@@ -294,11 +294,25 @@ const ja: typeof en = {
   "chat.sync.loading": "会話を同期中…",
   "chat.sync.failed": "同期できませんでした。読み込み済みのメッセージは引き続き表示できます。",
   "chat.sync.history": "以前のメッセージを読み込む",
+  "chat.rail.title": "自分のメッセージ",
+  "chat.rail.imageMessage": "画像メッセージ",
+  "chat.rail.emptyMessage": "空のメッセージ",
+  "chat.rail.loading": "過去のメッセージを読み込み中…",
+  "chat.rail.unavailable": "このメッセージは利用できなくなりました。",
+  "chat.rail.failed": "このメッセージを読み込めませんでした。",
   "chat.submission.updateRequired": "このクライアントからメッセージを送信するには、サーバーを更新してください。",
   "chat.submission.sending": "送信中…",
   "chat.submission.sent": "送信済み",
   "chat.submission.queued": "送信待ち",
   "chat.submission.failed": "送信に失敗しました",
+  "chat.recovery.savedSubmission": "保存済みの送信内容（ネイティブメッセージとの照合待ち）",
+  "chat.recovery.saveError": "このデバイスに確認待ちのメッセージを保存できません。",
+  "chat.recovery.readError": "このデバイスの確認待ちメッセージを復元できません。",
+  "chat.recovery.writerBlocked": "このセッションの管理元を確認できませんでした。続行する前に、別のアプリケーションインスタンスや以前のエージェントがこのセッションを使用していないことを確認してください。",
+  "chat.recovery.interrupted": "エージェントは、作業の完了が確認される前に停止しました。続行する前に履歴を確認してください。",
+  "chat.recovery.paused": "送信待ちのメッセージは保持されています。再開するまで送信されません。",
+  "chat.recovery.resumeQueue": "送信待ちを再開",
+  "chat.recovery.continue": "中断した作業を続行",
   "chat.submission.unknown": "送信結果を確認できません",
   "chat.submission.check": "状態を確認",
   "common.retry": "再試行", // Retry
@@ -337,6 +351,7 @@ const ja: typeof en = {
   "titlebar.hotReloadedAt": (time) => `ホットリロード: ${time}`, // Hot reloaded at {time}
   "titlebar.themeSystem": (resolved) => `システムに従う（現在: ${resolved}）`, // Follow system (currently {resolved})
   "titlebar.themeDark": "ダーク", // Dark
+  "titlebar.themeClassicDark": "クラシックダーク", // Classic Dark
   "titlebar.themeLight": "ライト", // Light
   "titlebar.gameCenter": "ゲームセンター",
   "titlebar.browser": "内蔵ブラウザ", // Built-in Browser
@@ -698,9 +713,34 @@ const ja: typeof en = {
   "settings.scRecording": "キーを押してください…", // Press keys…
   "settings.scHint":
     "ショートカットをクリックし、新しい組み合わせを押します（Cmd/Ctrl が必要）。", // hint
+  "settings.scScreenshotSection": "スクリーンショット",
+  "settings.scScreenshot": "スクリーンショットを撮る",
+  "settings.scOff": "オフ",
+  "settings.scScreenshotHint":
+    "VelaTerm がバックグラウンドにあっても、どのアプリからでも使えます。オフにするには、ショートカットをクリックして Delete キーを押します。",
+  "settings.scConflictTabs": "タブの切り替えで既に使用されています",
+  "settings.scInUse": "このショートカットは他のアプリで使用されています",
   "settings.scReset": "デフォルトに戻す", // Restore defaults
   "settings.scConflict": (label: string) =>
     `「${label}」で既に使用されています`, // conflict
+
+  // ── Screenshot overlay ──
+  "screenshot.hint": "ドラッグで範囲を選択、クリックで画面全体をキャプチャ",
+  "screenshot.rect": "四角形",
+  "screenshot.ellipse": "楕円",
+  "screenshot.arrow": "矢印",
+  "screenshot.pen": "ペン",
+  "screenshot.mosaic": "モザイク",
+  "screenshot.text": "テキスト",
+  "screenshot.undo": "取り消す",
+  "screenshot.save": "保存",
+  "screenshot.cancel": "キャンセル",
+  "screenshot.done": "完了",
+  "screenshot.doneTip": "クリップボードにコピー（Enter）",
+  "screenshot.small": "小",
+  "screenshot.medium": "中",
+  "screenshot.large": "大",
+  "screenshot.failed": (detail: string) => `スクリーンショットを書き出せませんでした: ${detail}`,
 
   // ── Remote access panel ──
   "remote.title": "リモートアクセス（ブラウザ）", // Remote Access (Browser)
@@ -824,6 +864,7 @@ const ja: typeof en = {
   "tree.moveToSession": "セッションの下へ移動（子にする）", // Move under a session (as child)
   "tree.moveTo": "移動先…", // Move to…
   "tree.openNewTab": "新しいタブで開く", // Open in New Tab
+  "tree.openInSplit": "分割して開く", // Open in Split
   "tree.openSplitRight": "右に分割して開く", // Open in Split Right
   "tree.openSplitDown": "下に分割して開く", // Open in Split Down
   "tree.openInFocusedPane": "アクティブなペインで開く", // Open in Focused Pane
@@ -831,6 +872,18 @@ const ja: typeof en = {
   "tree.tileSelectedTooMany": "タイル表示（最大 4 セッション）", // Tile Selected Sessions (up to 4)
   "tree.forkSession": "セッションをフォーク", // Fork Session
   "tree.exportSession": "セッションをエクスポート…", // Export Session…
+  "sessionTitle.rename": "スマートリネーム",
+  "sessionTitle.chooseAgentHint": "現在のセッションのエージェントを使用できません。別のエージェントを選択してください。選択したエージェントの既定の設定が使われます。",
+  "sessionTitle.agentUnavailable": "選択したエージェントを使用できません。別のエージェントを選択するか、設定を確認してください。",
+  "sessionTitle.generating": "タイトルを生成中…",
+  "sessionTitle.unavailable": "このセッションには読み取れる会話がありません。",
+  "sessionTitle.noAgent": "対応するエージェントがインストールされていません。タイトルを生成するには、Claude、Codex、OpenCode、Pi、OMP、Grok のいずれかをインストールしてください。",
+  "sessionTitle.busy": "このセッションのタイトルはすでに生成中です。",
+  "sessionTitle.tooLarge": "会話が長すぎるため、タイトルを生成できません。現在のタイトルは保持されています。",
+  "sessionTitle.timeout": "タイトルの生成がタイムアウトしました。もう一度お試しください。",
+  "sessionTitle.invalid": "エージェントが返したタイトルが無効です。もう一度お試しください。",
+  "sessionTitle.changed": "タイトルの生成中にセッションが変更されたため、タイトルは更新されませんでした。",
+  "sessionTitle.failed": "エージェントがタイトルを生成できませんでした。もう一度お試しください。",
   "tree.sessionInfo": "セッション情報", // Session Info
   "tree.groupInfo": "グループ情報", // Group Info
   "tree.collectionInfo": "コレクション情報", // Collection Info
@@ -849,7 +902,6 @@ const ja: typeof en = {
   "tree.persistDoc": "ディスクに保存…", // Save to Disk…
   "tree.closeScratch": "下書きを閉じる", // Close Scratch
   "tree.importProject": "プロジェクトをインポート", // Import Project
-  "tree.openInSplit": "分割して開く", // Open in Split
   "tree.createProject": "プロジェクトを作成",
   "tree.dropFoldersHint": "フォルダーをここにドロップすると、プロジェクトとして追加されます",
   // New Collection / Collection name / research / Create Collection / No directory / Delete Collection
@@ -859,30 +911,20 @@ const ja: typeof en = {
   "collection.name": "コレクション名",
   "collection.namePlaceholder": "research",
   "collection.submit": "コレクションを作成",
+  "collection.duplicateName": "同じ名前のコレクションがすでに存在します。",
   "collection.tag": "ディレクトリなし",
   "collection.deleteTitle": "コレクションを削除",
   "collection.deleteBody": (name) =>
-    `コレクション「${name}」を削除しますか？中のグループとセッションもすべて削除され、元に戻せません。`,
-  "folder.projectCount": (count) => `${count} 件のプロジェクト`, // {count} projects
-  "folder.new": "新しいフォルダー", // New Folder
-  "folder.createTitle": "新しいフォルダー", // New Folder
-  "folder.renameTitle": "フォルダー名を変更", // Rename Folder
-  "folder.name": "フォルダー名", // Folder name
-  "folder.namePlaceholder": "payments", // payments
-  "folder.create": "フォルダーを作成", // Create Folder
-  "folder.delete": "フォルダーを削除", // Delete Folder
-  "folder.deleteTitle": "フォルダーを削除", // Delete Folder
-  "folder.deleteBody": (name) =>
-    `フォルダー「${name}」を削除しますか？中のプロジェクトは削除されず、フォルダーの外に移動します。`, // Delete folder "{name}"? The projects inside are kept and moved out of the folder.
-  "folder.moveTo": "フォルダーへ移動", // Move to Folder
-  "folder.none": "フォルダーなし", // No Folder
+    `コレクション「${name}」を削除しますか？所属するプロジェクトは内容を保持したまま最上位に移動します。コレクション直属のグループと未アーカイブのセッションは削除され、アーカイブ済みのセッションは保持されます。`,
+  "collection.projectCount": (count) => `${count} 件のプロジェクト`, // {count} projects
+  "collection.renameTitle": "コレクション名を変更",
+  "collection.moveTo": "コレクションへ移動",
+  "collection.none": "最上位",
   "tree.cloneProject": "Git からクローン", // Clone from Git
   "createProject.title": "プロジェクトを作成",
   "createProject.name": "プロジェクト名",
   "createProject.namePlaceholder": "my-project",
-  "createProject.into": "作成先",
   "createProject.choose": "選択…",
-  "createProject.noParent": "親フォルダーを選択してください",
   "createProject.invalidName":
     "/ または \\ を含まない単一のフォルダー名を入力してください。",
   "createProject.creating": "作成中…",
@@ -894,9 +936,6 @@ const ja: typeof en = {
   "clone.branchPlaceholder": "空欄なら既定のブランチ", // Default branch if empty
   "clone.folder": "フォルダ名", // Folder name
   "clone.folderPlaceholder": "URL から自動取得", // Auto from URL
-  "clone.into": "クローン先", // Clone into
-  "clone.choose": "選択…", // Choose…
-  "clone.noParent": "親フォルダを選択してください", // Choose a parent folder
   "clone.cloning": "クローン中…", // Cloning…
   "clone.cancelling": "キャンセル中…",
   "clone.stageStarting": "Git を起動しています…",
@@ -918,6 +957,7 @@ const ja: typeof en = {
   "tree.filterWorking": "作業中", // Working
   "tree.filterAsking": "対応待ち", // Pending
   "tree.filterWaiting": "確認済み", // Viewed
+  "tree.filterBackground": "タスク実行中", // Tasks running
   "tree.filterStatus": "ステータスで絞り込み", // Filter by status
   "tree.refreshStatusFilter": "ステータスフィルターを更新",
   "tree.refreshStatusMatch": "ステータスを更新",
@@ -944,7 +984,6 @@ const ja: typeof en = {
   "mark.urgent": "緊急", // Urgent
   "mark.important": "重要", // Important
   "mark.bug": "バグ", // Bug
-  "tree.filterBackground": "タスク実行中", // Tasks running
   "mark.done": "完了", // Done
   "mark.wip": "進行中", // In progress
   "mark.pinned": "ピン留め", // Pinned
@@ -1134,6 +1173,7 @@ const ja: typeof en = {
   "center.noSessionHintPre": "サイドバーからセッションを選ぶか、", // Pick a session from the sidebar, or press
   "center.noSessionHintPost": " でターミナルを作成", // to create a terminal
   "center.createTerminal": "ターミナルを作成", // Create Terminal
+  "center.splitHint": "セッションを開くと、次のショートカットで画面を分割できます：",
   "tab.unsavedDot": "未保存の変更あり", // Unsaved changes
   "tab.newTerminal": "新規ターミナル", // New terminal
   "tab.newDocument": "新規ドキュメント", // New document
@@ -1404,19 +1444,60 @@ const ja: typeof en = {
   "login.authFailed":
     "認証に失敗しました。アクセスパスワードを確認してください。リンクを再生成した場合は新しいペアリングリンクを使用してください。", // Authentication failed, check password or use a new pairing link
   "dir.title": "プロジェクトディレクトリを選択", // Choose Project Directory
-  "dir.pathPlaceholder":
-    "検索、またはパスを入力して Enter で移動（~ 始まりに対応）", // Search, or type a path and press Enter (supports ~)
   "dir.up": "一つ上へ", // Up one level
   "dir.newFolder": "新しいフォルダ", // New Folder
   "dir.newFolderPlaceholder": "フォルダ名", // Folder name
-  "dir.goInput": "入力したパスへ移動", // Go to typed path
-  "dir.noSubdirs": "（サブディレクトリなし）", // (no subdirectories)
   "dir.empty": "（空のフォルダ）", // (empty folder)
   "dir.noMatch": "一致する項目がありません", // No matching items
-  "dir.target": "対象フォルダ", // Target
   "dir.showHidden": "隠しファイルを表示", // Show hidden items
   "dir.importing": "インポート中…", // Importing…
-  "dir.choose": "このディレクトリを選択", // Choose This Directory
+  "dir.choose": "選択", // Choose
+  "dir.back": "戻る", // Back
+  "dir.forward": "進む", // Forward
+  "dir.editPath": "パスを入力", // Type a Path
+  "dir.pathLabel": "フォルダーのパス", // Folder path
+  "dir.filter": "絞り込み", // Filter
+  "dir.places": "よく使う場所", // Places
+  "dir.sectionLocations": "場所", // Locations
+  "dir.sectionDrives": "PC", // This PC
+  "dir.sectionProjects": "プロジェクト", // Projects
+  "dir.sectionRecent": "最近使った項目", // Recent
+  "dir.placeHome": "ホーム", // Home
+  "dir.placeComputer": "コンピュータ", // Computer
+  "dir.placeFileSystem": "ファイルシステム", // File System
+  "dir.cantOpen": "このフォルダーを開けません。", // This folder cannot be opened.
+  "dir.backTo": (path: string) => `${path} に戻る`, // Back to ${path}
+  "dir.goHome": "ホームに移動", // Go to Home
+  "dir.folder": "フォルダー", // Folder
+  "location.label": "場所", // Location
+  "location.browse": "参照…", // Browse…
+  "location.pickerTitle": "場所を選択", // Choose Location
+  "location.ready": "ここに新しいフォルダーを作成します。", // A new folder will be created here.
+  "location.checking": "確認中…", // Checking…
+  "location.missing": (path: string) => `${path} は存在しないか、開けません。`, // ${path} does not exist or cannot be opened.
+  "location.notAbsolute": "完全なパスを入力してください。", // Enter a full path.
+  "location.exists": "同じ名前のファイルまたはフォルダーが既にあります。", // A file or folder with this name already exists.
+  "dir.go": "開く", // Go
+  "dir.pathPending": "このパスを開くには、Enter キーを押すか［開く］をクリックしてください。", // Press Enter or Go to open this path.
+  "dir.selectedFolder": "選択したフォルダー", // Selected folder
+  "dir.openFolder": "フォルダーを開く", // Open Folder
+  "location.local": "ローカル", // Local
+  "location.server": "サーバー", // Server
+  "location.host": "不明なホスト", // Unknown host
+  "location.unknownOs": "不明なシステム", // Unknown system
+  "location.hostUnavailable": "ホスト情報を取得できません。", // Host information is unavailable.
+  "location.invalidName": "この名前は使用できません。", // This name cannot be used.
+  "location.validationFailed": "この場所を確認できませんでした。", // This location could not be checked.
+  "location.enterTarget": "場所と名前を入力してください。", // Enter a location and a name.
+  "location.createTo": "作成先", // Create at
+  "clone.destination": "クローン先", // Clone to
+  "clone.ready": "クローンできます", // Ready to clone
+  "clone.defaultBranch": "デフォルトブランチ", // Default branch
+  "createProject.createdRetry": "フォルダーは作成されましたが、プロジェクトをインポートできませんでした。", // The folder was created, but the project could not be imported.
+  "createProject.retryImport": "再インポート", // Retry Import
+  "doc.saveTo": "保存先", // Save to
+  "doc.saveAsReopen": "保存するには、ドキュメントから［名前を付けて保存］を開き直してください。", // Open Save As again from the document to save it.
+  "clone.cancelClone": "クローンを中止", // Cancel Clone
   "conn.reconnecting": "接続が切断されました。再接続しています…", // Connection lost, reconnecting…
   "conn.reconnectNow": "今すぐ再接続", // Reconnect now
   "conn.retrying": "再接続しています…", // Reconnecting…
@@ -1743,6 +1824,7 @@ const ja: typeof en = {
   "chat.catalogChecked": (time: string) => `最終確認：${time}`,
   "chat.catalogFailed": "更新に失敗しました。既存の一覧は引き続き使用できます。",
   "chat.catalogRefresh": "更新",
+  "chat.modelsCliOutdated": "このバージョンの Claude Code はモデル一覧を提供できません。Claude Code を更新すると、利用可能なすべてのモデルが表示されます。",
   "chat.modelDefault": "既定のモデル",
   "chat.mode.default": "毎回確認",
   "chat.mode.agentDefault": "エージェント既定",
@@ -2002,6 +2084,9 @@ const ja: typeof en = {
   "chat.tasks.command": "コマンド",
   "chat.tasks.output": "出力",
   "chat.tasks.noOutput": "まだ出力はありません。",
+  "chat.tasks.conversation": "会話",
+  "chat.tasks.noConversation": "まだ記録はありません。",
+  "chat.tasks.conversationUnavailable": "この会話は表示できません。",
   "chat.tasks.outputTruncated": "最新の出力のみを表示しています。",
   "chat.tasks.phases": "フェーズ",
   "chat.tasks.noProgress": "このタスクでは、エージェントごとの進捗は報告されません。",
@@ -2123,6 +2208,10 @@ const ja: typeof en = {
   "term.runs.logFinished": (code) => `終了しました（終了コード ${code}）`,
   "term.runs.logEnded": "終了しました",
   "term.runs.logEmpty": "まだ出力はありません",
+  "chat.antigravity.placeholder": "Antigravity にメッセージを送信。@ファイル でファイルを参照できます",
+  "chat.antigravity.textOnly": "Antigravity の会話ビューは現在、テキストメッセージのみに対応しています。",
+  "chat.antigravity.permissionsHint": "承認が必要なツールは、Antigravity の設定で事前に許可するか、ターミナルビューで使用してください。",
+  "chat.antigravity.settingsHint": "モデル、推論の強度、権限はターンの合間に変更してください。",
 };
 
 export default ja;

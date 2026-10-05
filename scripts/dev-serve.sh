@@ -41,8 +41,8 @@ mkdir -p "$DATA_DIR"
 
 # Reserve ports free on 0.0.0.0 so they work for loopback and LAN bindings.
 free_port() { node -e 'const s=require("net").createServer();s.listen(0,"0.0.0.0",()=>{process.stdout.write(String(s.address().port));s.close()})'; }
-BACKEND_PORT="$(free_port)"
-VITE_PORT="$(free_port)"
+BACKEND_PORT="${VLX_DEV_BACKEND_PORT:-$(free_port)}"
+VITE_PORT="${VLX_VITE_PORT:-$(free_port)}"
 
 # Discover the first non-loopback IPv4 using platform-specific methods, so the printed URL is one that
 # other machines can also open. Fall back to 127.0.0.1 nonfatally when discovery fails.
@@ -78,7 +78,7 @@ echo "   URL       : ${URL}      (also reachable from other devices on this netw
 echo "   Local     : ${LOCAL_URL}"
 echo "   Password  : ${PASSWORD}"
 echo "   Data dir  : ${DATA_DIR}"
-echo "   Ports     : Vite ${VITE_PORT} / backend ${BACKEND_PORT} (both random, so instances run in parallel)"
+echo "   Ports     : Vite ${VITE_PORT} / backend ${BACKEND_PORT} (random unless overridden)"
 echo "   Pair link : vlxterm://pair?host=${CLIENT_HOST}&port=${VITE_PORT}&password=${PASSWORD}&name=dev"
 echo "   (type the link into Add host in the phone app, or turn it into a QR code)"
 echo " Ctrl+C stops both the backend and Vite; elsewhere, use pnpm dev:stop ${LABEL}"
@@ -100,7 +100,8 @@ VLX_VITE_PORT="$VITE_PORT" VLX_DEV_BACKEND="http://127.0.0.1:${BACKEND_PORT}" \
   pnpm exec vite &
 pids+=($!)
 
-# 3. Open a local browser once Vite answers. Other devices connect themselves using the LAN URL above.
+# 3. Automated tests open their dedicated profile explicitly instead of the personal browser.
+if [[ "${VLX_DEV_NO_OPEN:-0}" != "1" ]]; then
 (
   for _ in $(seq 1 60); do
     if curl -s -o /dev/null "http://127.0.0.1:${VITE_PORT}/" 2>/dev/null; then
@@ -114,5 +115,6 @@ pids+=($!)
     sleep 0.5
   done
 ) &
+fi
 
 wait

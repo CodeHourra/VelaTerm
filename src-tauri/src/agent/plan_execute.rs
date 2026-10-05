@@ -11,6 +11,7 @@ use sha2::{Digest, Sha256};
 
 pub mod menu;
 pub mod split;
+mod query;
 use super::chat::protocol::ChatImage;
 
 use crate::{
@@ -393,6 +394,7 @@ fn bootstrap(app: &AppCtx, run: &Run) -> Result<(), String> {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Request {
     pub session_id: String,
+    /// A workflow ID for existing actions; a session reference (or empty for self) for read-only list.
     pub run_id: String,
     pub action: String,
     #[serde(default)]
@@ -428,7 +430,22 @@ pub fn action(app: &AppCtx, req: &Request) -> Result<Value, String> {
         return Err("Submit execution reports with vtell --report".into());
     }
     let _guard = operation_lock().lock().unwrap();
+    if req.action == "list" {
+        return query::list(app, &req.session_id, &req.run_id);
+    }
     apply_action(app, req)
+}
+
+fn status(app: &AppCtx, run: &Run) -> Result<Value, String> {
+    let conn = app.db().conn.lock().unwrap();
+    let mut query=conn.prepare("SELECT m.id,m.target_id,m.action,m.round,s.outcome FROM plan_execute_messages m LEFT JOIN chat_submissions s ON s.session_id=m.target_id AND s.id=m.id WHERE m.run_id=?1 ORDER BY m.rowid DESC LIMIT 5").map_err(|e|e.to_string())?;
+    let receipts=query.query_map([&run.id],|r|Ok(json!({"messageId":r.get::<_,String>(0)?,"targetSessionId":r.get::<_,String>(1)?,"action":r.get::<_,String>(2)?,"round":r.get::<_,u32>(3)?,"receipt":r.get::<_,Option<String>>(4)?})))
+        .map_err(|e|e.to_string())?.collect::<Result<Vec<_>,_>>().map_err(|e|e.to_string())?;
+    drop(query);
+    drop(conn);
+    Ok(json!({"planner":health(app,&run.planner_id),"executor":run.executor_id.as_deref().map(|id|health(app,id)),"run":brief(run),"recentDeliveries":receipts,
+        "parentRunId":split::parent_id(app,&run.id)?,"tasks":split::tasks(app,&run.id)?,
+        "proposal":if run.config.split_tasks {split::read(app,&run.id).ok()} else {None}}))
 }
 
 /// Resolve a report from its real executor; a target override must name that workflow's planner.
@@ -496,17 +513,7 @@ fn apply_action(app: &AppCtx, req: &Request) -> Result<Value, String> {
     }
     session(app, &req.session_id)?;
     if req.action == "status" {
-        let conn = app.db().conn.lock().unwrap();
-        let mut query=conn.prepare("SELECT m.id,m.target_id,m.action,m.round,s.outcome FROM plan_execute_messages m LEFT JOIN chat_submissions s ON s.session_id=m.target_id AND s.id=m.id WHERE m.run_id=?1 ORDER BY m.rowid DESC LIMIT 5").map_err(|e|e.to_string())?;
-        let receipts=query.query_map([&run.id],|r|Ok(json!({"messageId":r.get::<_,String>(0)?,"targetSessionId":r.get::<_,String>(1)?,"action":r.get::<_,String>(2)?,"round":r.get::<_,u32>(3)?,"receipt":r.get::<_,Option<String>>(4)?})))
-            .map_err(|e|e.to_string())?.collect::<Result<Vec<_>,_>>().map_err(|e|e.to_string())?;
-        drop(query);
-        drop(conn);
-        return Ok(
-            json!({"planner":health(app,&run.planner_id),"executor":run.executor_id.as_deref().map(|id|health(app,id)),"run":brief(&run),"recentDeliveries":receipts,
-                "parentRunId":split::parent_id(app,&run.id)?,"tasks":split::tasks(app,&run.id)?,
-                "proposal":if run.config.split_tasks {split::read(app,&run.id).ok()} else {None}}),
-        );
+        return status(app, &run);
     }
     if req.action == "propose" { return split::propose(app, &run, req); }
     if req.action == "stop" {
@@ -864,8 +871,13 @@ pub fn run_cli(args: &[String]) -> ! {
         let rest = &args[args.len().min(2)..];
         if rest.is_empty() || rest[0] == "--help" {
             return Ok(
-                json!({"usage":"vflow status|stop|propose|dispatch|accept|block <run-id> [--round N --message-id msg-UUID] < message.txt","note":"propose reads a JSON object with tasks [{name,prompt,config:{agent,model,effort}}]. It requires user confirmation before execution. Other mutation text is read from stdin. Reuse the exact message ID, round and text when retrying."}),
+                json!({"usage":"vflow list [session]\nvflow status|stop|propose|dispatch|accept|block <run-id> [--round N --message-id msg-UUID] < message.txt","note":"list is read-only and defaults to the calling session. It returns related workflows and direct child sessions with saved properties; session accepts an ID, ID prefix, exact name or unique name substring. propose reads a JSON object with tasks [{name,prompt,config:{agent,model,effort}}]. It requires user confirmation before execution. Other mutation text is read from stdin. Reuse the exact message ID, round and text when retrying."}),
             );
+        }
+        if rest[0] == "list" {
+            let caller = std::env::var("VLX_SESSION_ID").map_err(|_| "Run inside a VelaTerm session")?;
+            let req = query::list_request(&caller, &rest[1..])?;
+            return super::tell::post_local("plan-execute", &serde_json::to_value(req).unwrap());
         }
         if !matches!(
             rest[0].as_str(),

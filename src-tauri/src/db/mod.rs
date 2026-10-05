@@ -40,6 +40,8 @@ impl Db {
             .map_err(|e| format!("Failed to initialize schema: {e}"))?;
         migrate(&conn)?;
         conn.execute_batch(crate::agent::chat::submissions::SCHEMA).map_err(|e| e.to_string())?;
+        conn.execute_batch(crate::agent::chat::recovery::SCHEMA).map_err(|e| e.to_string())?;
+        conn.execute_batch(crate::agent::chat::ownership::SCHEMA).map_err(|e| e.to_string())?;
         conn.execute_batch(crate::agent::chat::auto_continue::SCHEMA).map_err(|e| e.to_string())?;
         conn.execute_batch(crate::agent::spawn_requests::SCHEMA).map_err(|e| e.to_string())?;
         conn.execute_batch(crate::agent::plan_execute::SCHEMA).map_err(|e| e.to_string())?;
@@ -266,24 +268,11 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         conn.execute("ALTER TABLE sessions ADD COLUMN agent_path TEXT", [])
             .map_err(|e| format!("Failed to migrate sessions.agent_path: {e}"))?;
     }
-    // Migration tests start from bare legacy tables that never ran SCHEMA, so the folder table is created here too.
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS project_folders (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            sort_order INTEGER NOT NULL DEFAULT 0,
-            collapsed INTEGER NOT NULL DEFAULT 0,
-            created_at INTEGER NOT NULL
-        );",
-    )
-    .map_err(|e| format!("Failed to migrate project folders: {e}"))?;
-    if table_exists(conn, "projects") && !column_exists(conn, "projects", "folder_id") {
-        conn.execute(
-            "ALTER TABLE projects ADD COLUMN folder_id TEXT REFERENCES project_folders(id) ON DELETE SET NULL",
-            [],
-        )
-        .map_err(|e| format!("Failed to migrate projects.folder_id: {e}"))?;
+    if table_exists(conn, "projects") && !column_exists(conn, "projects", "collection_id") {
+        conn.execute("ALTER TABLE projects ADD COLUMN collection_id TEXT REFERENCES projects(id) ON DELETE SET NULL", [])
+            .map_err(|e| format!("Failed to migrate projects.collection_id: {e}"))?;
     }
+    migrate_project_folders(conn)?;
     // Create the parent index only after migration adds parent_session_id. Putting it in SCHEMA would fail
     // on old databases before ALTER runs; IF NOT EXISTS remains safe and idempotent for new databases.
     conn.execute(
@@ -292,6 +281,52 @@ fn migrate(conn: &Connection) -> Result<(), String> {
     )
     .map_err(|e| format!("Failed to create session parent index: {e}"))?;
     Ok(())
+}
+
+/// Convert PR #121's separate folders to ordinary collections exactly once. Existing names and IDs take
+/// priority; collisions receive a stable suffix/new ID. Membership, collapse and ordering survive the conversion.
+/// Dropping the obsolete column/table in the same transaction prevents a second source of container state.
+fn migrate_project_folders(conn: &Connection) -> Result<(), String> {
+    if !table_exists(conn, "project_folders") || !table_exists(conn, "projects") { return Ok(()); }
+    let tx = conn.unchecked_transaction().map_err(|e| format!("Failed to begin folder migration: {e}"))?;
+    let folders = {
+        let mut stmt = tx.prepare("SELECT id, name, sort_order, collapsed, created_at FROM project_folders ORDER BY sort_order, created_at")
+            .map_err(|e| format!("Failed to read legacy folders: {e}"))?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?,
+            r.get::<_, i64>(2)?, r.get::<_, bool>(3)?, r.get::<_, i64>(4)?)))
+            .map_err(|e| format!("Failed to read legacy folders: {e}"))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| format!("Failed to read legacy folder: {e}"))?
+    };
+    let mut names = {
+        let mut stmt = tx.prepare("SELECT name FROM projects WHERE root_path = '' AND deleted_at IS NULL")
+            .map_err(|e| format!("Failed to read collection names: {e}"))?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))
+            .map_err(|e| format!("Failed to read collection names: {e}"))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| format!("Failed to read collection name: {e}"))?
+            .into_iter().map(|name| name.trim().to_lowercase()).collect::<std::collections::HashSet<_>>()
+    };
+    for (folder_id, original, order, collapsed, created) in folders {
+        let base = if original.trim().is_empty() { "Collection" } else { original.trim() };
+        let mut name = base.to_string();
+        let mut suffix = 2;
+        while !names.insert(name.to_lowercase()) { name = format!("{base} ({suffix})"); suffix += 1; }
+        let conflict = tx.query_row("SELECT 1 FROM projects WHERE id = ?1", [&folder_id], |_| Ok(()))
+            .optional().map_err(|e| format!("Failed to check collection identity: {e}"))?.is_some();
+        let id = if conflict { uuid::Uuid::new_v4().to_string() } else { folder_id.clone() };
+        tx.execute("INSERT INTO projects (id, name, root_path, sort_order, collapsed, created_at) VALUES (?1, ?2, '', ?3, ?4, ?5)",
+            rusqlite::params![id, name, order, collapsed, created])
+            .map_err(|e| format!("Failed to migrate folder to collection: {e}"))?;
+        if column_exists(&tx, "projects", "folder_id") {
+            tx.execute("UPDATE projects SET collection_id = ?1 WHERE folder_id = ?2", rusqlite::params![id, folder_id])
+                .map_err(|e| format!("Failed to migrate project membership: {e}"))?;
+        }
+    }
+    if column_exists(&tx, "projects", "folder_id") {
+        tx.execute("ALTER TABLE projects DROP COLUMN folder_id", [])
+            .map_err(|e| format!("Failed to remove legacy folder membership: {e}"))?;
+    }
+    tx.execute("DROP TABLE project_folders", []).map_err(|e| format!("Failed to remove legacy folders: {e}"))?;
+    tx.commit().map_err(|e| format!("Failed to commit collection migration: {e}"))
 }
 
 /// Whether a table already has a column, based on PRAGMA table_info.
@@ -364,34 +399,55 @@ mod tests {
         assert!(column_exists(&conn, "sessions", "parent_session_id"));
     }
 
-    /// A database created before folders keeps every project, now loose, and gains the folder table.
     #[test]
-    fn migrate_adds_project_folders_to_existing_projects() {
+    fn migrate_pre_folder_database_keeps_direct_collection_content() {
         let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE projects (
-               id TEXT PRIMARY KEY, name TEXT NOT NULL, root_path TEXT NOT NULL, color TEXT,
-               sort_order INTEGER NOT NULL DEFAULT 0, collapsed INTEGER NOT NULL DEFAULT 0,
-               created_at INTEGER NOT NULL
-             );
-             INSERT INTO projects (id, name, root_path, created_at) VALUES ('p1', 'legacy', '/tmp', 0);
-             CREATE TABLE sessions (
-               id TEXT PRIMARY KEY, project_id TEXT NOT NULL, group_id TEXT,
-               name TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0,
-               created_at INTEGER NOT NULL
-             );",
-        )
-        .unwrap();
-
+        conn.execute_batch(schema::SCHEMA).unwrap();
+        let collection = repo::create_virtual_project(&conn, "Existing collection").unwrap();
+        let group = repo::create_group(&conn, &collection.id, None, "Existing group").unwrap();
+        let session = repo::create_session(&conn, &collection.id, Some(&group.id), "Existing session",
+            crate::models::SessionKind::Terminal, None, Some("/tmp/existing"), None, None, None).unwrap();
+        conn.execute("ALTER TABLE projects DROP COLUMN collection_id", []).unwrap();
         migrate(&conn).unwrap();
-
-        assert!(column_exists(&conn, "projects", "folder_id"));
-        assert!(table_exists(&conn, "project_folders"));
-        let folder: Option<String> = conn
-            .query_row("SELECT folder_id FROM projects WHERE id = 'p1'", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(folder, None);
         migrate(&conn).unwrap();
+        let tree = repo::list_tree(&conn).unwrap();
+        assert_eq!(tree.projects[0].id, collection.id);
+        assert!(tree.projects[0].collection_id.is_none());
+        assert_eq!(tree.groups[0].id, group.id);
+        assert_eq!(tree.sessions[0].id, session.id);
+        assert_eq!(tree.sessions[0].cwd.as_deref(), Some("/tmp/existing"));
+        assert!(!table_exists(&conn, "project_folders"));
+    }
+
+    /// Legacy folders become collections without changing project/session identities, including virtual projects.
+    #[test]
+    fn migrate_legacy_project_folders_to_collections() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(schema::SCHEMA).unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;
+            CREATE TABLE project_folders (id TEXT PRIMARY KEY, name TEXT NOT NULL, sort_order INTEGER, collapsed INTEGER, created_at INTEGER);
+            ALTER TABLE projects ADD COLUMN folder_id TEXT REFERENCES project_folders(id) ON DELETE SET NULL;
+            INSERT INTO project_folders VALUES ('f1', 'Work', 10, 1, 100), ('f2', ' work ', 20, 0, 200), ('collision', 'Notes', 30, 0, 300);
+            INSERT INTO projects (id, name, root_path, created_at, folder_id) VALUES
+                ('existing', 'WORK', '', 0, NULL), ('real', 'Repo', '/tmp/repo', 0, 'f1'),
+                ('virtual', 'Scratch', '', 0, 'f2'), ('collision', 'Other', '/tmp/other', 0, 'collision');").unwrap();
+        migrate(&conn).unwrap();
+        migrate(&conn).unwrap();
+        assert!(!table_exists(&conn, "project_folders"));
+        assert!(!column_exists(&conn, "projects", "folder_id"));
+        let tree = repo::list_tree(&conn).unwrap();
+        let project = |id: &str| tree.projects.iter().find(|p| p.id == id).unwrap();
+        assert_eq!(project("f1").name, "Work (2)");
+        assert_eq!(project("f2").name, "work (3)");
+        assert!(project("f1").collapsed);
+        assert_eq!(project("f1").sort_order, 10);
+        assert_eq!(project("real").root_path, "/tmp/repo");
+        assert_eq!(project("real").collection_id.as_deref(), Some("f1"));
+        assert_eq!(project("virtual").collection_id.as_deref(), Some("f2"));
+        let parent = project("collision").collection_id.as_ref().unwrap();
+        assert_ne!(parent, "collision");
+        assert_eq!(project(parent).name, "Notes");
+        assert_eq!(tree.projects.len(), 7);
     }
 
     /// The database file is owner-only after open: app_settings holds the remote-access password

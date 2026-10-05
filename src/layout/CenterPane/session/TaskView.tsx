@@ -3,7 +3,7 @@
 //! The view subscribes independently of its conversation pane. Reconnection registers the new socket
 //! with a snapshot without starting an agent; backend facts own lifecycle and elapsed time.
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import Icons from "../../../components/Icons";
 import { fmtTokens } from "../../../format";
@@ -11,17 +11,24 @@ import { dateLocale, useT, type I18nKey } from "../../../i18n";
 import {
   chatSnapshot,
   chatStopTask,
+  chatSubagentRows,
   chatTaskOutput,
   extrasOf,
   isTaskFinished,
   onChatEvent,
   type ChatBackgroundTask,
+  type ChatRewindScope,
+  type ChatRow,
   type ChatTaskOutput,
   type ChatWorkflowAgent,
   type ChatWorkflowPhase,
 } from "../../../ipc/chat";
 import { onTransportReconnect, onTransportDisconnect } from "../../../ipc/transport";
 import { useTermStore, type TaskTab } from "../../../store/termStore";
+import { kindIconEl } from "../../sessionViewers/sessionMeta";
+import { assistantLabel } from "../../sessionViewers/TranscriptViewer";
+import { Entry } from "./ConversationRows";
+import { groupToolRuns, markAgentTurns } from "./toolRuns";
 
 /** The icon a task kind is drawn with, here and on its tab. */
 export function taskIcon(taskType: string) {
@@ -185,6 +192,7 @@ export function TaskView({ tab, hidden }: { tab: TaskTab; hidden: boolean }) {
   const unphased = agents.filter((agent) => !phases.some((phase) => phase.index != null && phase.index === agent.phaseIndex));
   const isWorkflow = (task?.task_type || tab.taskType) === "local_workflow";
   const isShell = (task?.task_type || tab.taskType) === "local_bash";
+  const isAgent = (task?.task_type || tab.taskType) === "local_agent";
   const when = (ms: number) => new Date(ms).toLocaleString(dateLocale());
 
   return (
@@ -242,6 +250,8 @@ export function TaskView({ tab, hidden }: { tab: TaskTab; hidden: boolean }) {
           <div className="sv-task-preview">{task.output_file}</div>
         </section>
       ) : null}
+
+      {isAgent ? <SubagentConversation sessionId={tab.sessionId} taskId={tab.taskId} live={ticking} hidden={hidden} /> : null}
 
       {isWorkflow ? (
         <section className="sv-task-section">
@@ -335,6 +345,106 @@ function ShellDetails({ sessionId, taskId, live, hidden }: { sessionId: string; 
         </section>
       ) : null}
     </>
+  );
+}
+
+const NO_REWIND: ChatRewindScope[] = [];
+const ignoreRewindRequest = () => {};
+
+/**
+ * A subagent's own conversation: the prompt it was given, its reasoning, tool calls and replies, drawn
+ * with the conversation's rows and re-read while it runs.
+ */
+function SubagentConversation({ sessionId, taskId, live, hidden }: { sessionId: string; taskId: string; live: boolean; hidden: boolean }) {
+  const t = useT();
+  const [rows, setRows] = useState<ChatRow[] | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
+  const [openRuns, setOpenRuns] = useState<ReadonlySet<string>>(() => new Set());
+  const sectionRef = useRef<HTMLElement>(null);
+  /** Stay pinned to the newest step until the reader scrolls up. */
+  const follow = useRef(true);
+  const parent = useTermStore((state) => state.sessions.find((session) => session.id === sessionId));
+  const kind = parent?.kind ?? "claude";
+  const label = assistantLabel(kind);
+  const icon = useMemo(() => kindIconEl(kind, 12), [kind]);
+
+  useEffect(() => {
+    if (hidden) return;
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let last = "";
+    const load = async () => {
+      try {
+        const value = await chatSubagentRows(sessionId, taskId);
+        const text = JSON.stringify(value);
+        if (!disposed && text !== last) {
+          last = text;
+          const scroller = sectionRef.current?.closest(".sv-task-view");
+          follow.current = !scroller || scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 8;
+          setRows(value);
+        }
+        if (!disposed) setUnavailable(false);
+      } catch {
+        // Keep what was last read; the recording may not exist until the subagent writes its first step.
+        if (!disposed) setUnavailable(true);
+      }
+      if (!disposed && live) timer = setTimeout(() => void load(), OUTPUT_POLL_MS);
+    };
+    void load();
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+    };
+  }, [sessionId, taskId, live, hidden]);
+
+  useLayoutEffect(() => {
+    const scroller = sectionRef.current?.closest(".sv-task-view");
+    if (scroller && follow.current && live) scroller.scrollTop = scroller.scrollHeight;
+  }, [rows, live]);
+
+  const entries = useMemo(() => {
+    if (!rows) return [];
+    // The prompt came from the parent conversation, not from the person reading it.
+    const attributed = rows.map((row, index) =>
+      index === 0 && row.kind === "user" && !row.origin && parent
+        ? { ...row, origin: { sessionId, name: parent.name, agent: parent.kind, role: "session" as const } }
+        : row,
+    );
+    return markAgentTurns(groupToolRuns(attributed));
+  }, [rows, parent, sessionId]);
+  const toggleRun = useCallback((id: string) => {
+    setOpenRuns((current) => {
+      const next = new Set(current);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  }, []);
+
+  if (!rows && !unavailable) return null;
+  return (
+    <section className="sv-task-section sv-task-conversation" ref={sectionRef}>
+      <h3>{t("chat.tasks.conversation")}</h3>
+      {!rows ? (
+        <div className="sv-task-empty">{t("chat.tasks.conversationUnavailable")}</div>
+      ) : entries.length === 0 ? (
+        <div className="sv-task-empty">{t("chat.tasks.noConversation")}</div>
+      ) : (
+        entries.map((entry) => (
+          <div className="sv-item" key={entry.id}>
+            <Entry
+              entry={entry}
+              label={label}
+              icon={icon}
+              openRuns={openRuns}
+              onToggleRun={toggleRun}
+              rewindScopes={NO_REWIND}
+              rewindRequest={null}
+              onRewindRequestHandled={ignoreRewindRequest}
+            />
+          </div>
+        ))
+      )}
+    </section>
   );
 }
 

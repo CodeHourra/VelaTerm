@@ -1,3 +1,49 @@
+## v0.2.7 — 2026-10-05
+
+- 🪐 Antigravity được thêm vào chế độ hội thoại dưới dạng tác nhân thử nghiệm, hỗ trợ văn bản, công cụ, hàng đợi tin nhắn và lịch sử gốc; hình ảnh, chỉ dẫn trong lúc trả lời, phê duyệt tương tác, phân nhánh và quay lui vẫn chưa được hỗ trợ, còn việc kiểm chứng khôi phục đầy đủ trên mọi nền tảng vẫn đang chờ hoàn tất.
+
+- 🗂️ Bộ sưu tập có thể chứa bộ sưu tập con, dự án và nhóm phiên, được tạo hoặc nhập từ không gian làm việc, đồng thời giữ lại các dự án và phiên đã lưu trữ khi bị xóa.
+
+- ⚠️ Không được dùng phiên bản cũ với cơ sở dữ liệu đã chuyển thư mục thành bộ sưu tập; để hạ cấp, cần khôi phục bản sao lưu được tạo trước khi chuyển đổi.
+
+- 🏷️ Đổi tên thông minh đặt tên phiên theo nội dung hội thoại bằng thiết lập của tác nhân hiện tại và cho phép chọn tác nhân khi không thể dùng thiết lập đó.
+
+- 🌱 Phiên mới sử dụng môi trường shell mới nhất và các tác nhân vừa cài đặt mà không cần khởi động lại VelaTerm.
+
+- 💾 Sau khi khởi động lại, tính năng khôi phục hội thoại thử nghiệm khôi phục tin nhắn, hình ảnh và nội dung trong hàng đợi đã lưu, đồng thời tạm dừng công việc bị gián đoạn cho đến khi người dùng chủ động tiếp tục; việc nghiệm thu đầy đủ trong môi trường gốc và trên mọi nền tảng vẫn đang chờ hoàn tất.
+
+- 📸 Chụp màn hình thử nghiệm trong ứng dụng Tauri trên macOS và Windows cho phép chọn vùng, chú thích, sao chép hoặc lưu PNG gốc; việc nghiệm thu ứng dụng gốc vẫn đang chờ hoàn tất, còn Electron, trình duyệt và chế độ xem từ xa chưa được hỗ trợ.
+
+- 🧵 Các thẻ tác vụ nền của Claude hiển thị toàn bộ lịch sử hội thoại gốc, bao gồm các lệnh gọi công cụ song song.
+
+- 🖼️ Mỗi tin nhắn hội thoại có thể chứa tối đa 20 hình ảnh, với giới hạn 5 MiB cho mỗi hình.
+
+- 📍 Các dấu mốc tin nhắn cho phép xem trước nội dung và chuyển thẳng đến tin nhắn trước đó của người dùng.
+
+- 🧭 Bộ chọn thư mục cho dự án, sao chép kho mã và Lưu thành đều hỗ trợ chỉnh sửa đường dẫn và tự động hoàn thành vị trí.
+
+- 🪪 `vself` đọc thiết lập đã lưu của phiên và quan hệ cha-con, còn `vflow list` liệt kê các quy trình lập kế hoạch và thực thi liên quan mà không thay đổi chúng.
+
+- ⌨️ Chọn tất cả trong terminal có thể được cấu hình trong phím tắt, mặc định là Cmd+A trên macOS và Ctrl+Shift+A trên nền tảng khác, và chỉ áp dụng khi terminal có tiêu điểm.
+
+- 🐚 Tự động hoàn thành của Bash hỗ trợ đường dẫn bắt đầu bằng `~`, và các phiên bản Bash cũ mở phiên mà không gặp lỗi PS0.
+
+- 🛑 Hook của tác vụ con không còn thay đổi trạng thái hội thoại của phiên cha, và đóng thẻ hội thoại sẽ dừng tiến trình Chat đang chạy của thẻ đó.
+
+- 🪟 Windows khôi phục tiêu điểm bàn phím của terminal khi quay lại cửa sổ và không còn hiển thị đường xanh trong lúc nhập ghép chữ tiếng Trung.
+
+- 🎨 Giao diện tối cổ điển có độ tương phản rõ hơn, biểu tượng máy tính theo giao diện hệ thống, biểu tượng dự án có màu xanh và hàng bộ sưu tập không còn hiển thị số dự án.
+
+- 📚 Menu phiên và bộ sưu tập dùng nhãn rõ ràng hơn cho thao tác thêm vào cơ sở tri thức.
+
+- 🌐 Khi truy cập VelaTerm qua HTTP thông thường trong mạng cục bộ, trang mở bình thường.
+
+- 🌍 Kiểm tra cập nhật gửi kèm ngôn ngữ giao diện để hiển thị ghi chú phát hành tương ứng, và dịch vụ cập nhật hỗ trợ trình cập nhật Electron trên Linux.
+
+- 🧰 Tên tác nhân Kimi Code và Grok Build không còn kèm số phiên bản mô hình.
+
+---
+
 ## v0.2.6 — 2026-09-30
 
 - 🐧 Phiên bản Linux nay được xây dựng trên Electron. AppImage giữ nguyên tên tệp và dữ liệu của bạn, không còn yêu cầu WebKitGTK hay libfuse2, và các bản đã cài đặt có thể cập nhật lên qua trình cập nhật tích hợp.

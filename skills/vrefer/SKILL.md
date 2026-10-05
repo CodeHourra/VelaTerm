@@ -105,6 +105,7 @@ line gives you the exact command to read them.
 
 ## Notes
 
+- For parent/child IDs and saved session properties, use `vself [session] --json`; for associated plan-execute workflows and execute sessions, use `vflow list [session]`. `vrefer --list` identifies sessions but does not itself return their hierarchy.
 - Exit code 2 with a candidate list means the reference matched several sessions — pick one id from the
   list and rerun.
 - Only agents with a readable transcript can be opened: claude, codex, opencode, pi, omp, and grok. Other agent kinds, plain

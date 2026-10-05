@@ -1,39 +1,21 @@
-//! Clone from Git dialog: enter a repository URL and choose a parent directory, then clone into
-//! parent/repository-name and import it as a project. Desktop/Electron use a native directory picker; browser and
-//! remote clients reuse ServerFileBrowser to browse the server, matching DirectoryPickerModal's interaction model.
+//! Clone Git Repository dialog: repository URL, Location, folder name, and optional branch. The clone lands in
+//! `location/folder` and is imported as a project. Location is an editable path with Browse… (LocationField),
+//! the same on every platform; the destination is checked live before Clone is enabled.
 
+import "./folder-picker.css";
 import { useEffect, useRef, useState } from "react";
-import type { CSSProperties } from "react";
 import { genId } from "../genId";
 import { useT } from "../i18n";
 import { onCloneProgress, type CloneProgress } from "../ipc/events";
 import { cancelCloneProject } from "../ipc/tree";
-import { isTauri } from "../ipc/transport";
-import { env, platform } from "../platform";
 import { useTermStore } from "../store/termStore";
 import { Backdrop } from "../components/Backdrop";
-import {
-  cardStyle,
-  ghostBtn,
-  joinPath,
-  primaryBtn,
-  ServerBrowserView,
-  useServerBrowser,
-} from "./ServerFileBrowser";
-
-/** Derive the default directory name from the repository URL using the backend git::derive_clone_dir_name rules; used only for placeholders/prefill. */
-function deriveFolder(url: string): string {
-  const trimmed = url.trim().replace(/\/+$/, "");
-  if (!trimmed) return "";
-  const last = trimmed.split(/[/:]/).pop() ?? "";
-  return last.replace(/\.git$/, "").trim();
-}
-
-const fieldLabel: CSSProperties = {
-  fontSize: 11,
-  color: "var(--text-muted)",
-  marginBottom: 4,
-};
+import Icons from "../components/Icons";
+import { DestinationBox, LocationField, rememberProjectLocation, useDestination, useProjectLocation } from "./LocationField";
+import { pushRecentFolder } from "./ServerFileBrowser";
+import { ExecutionContext } from "./ExecutionContext";
+import { trapDialogFocus, useDialogFocus } from "./dialogFocus";
+import { useDialogDraft, useDialogNavigationLock } from "./dialogNavigation";
 
 export function CloneProjectModal() {
   const t = useT();
@@ -41,16 +23,11 @@ export function CloneProjectModal() {
   const setOpen = useTermStore((s) => s.setCloneModalOpen);
   const cloneProjectInto = useTermStore((s) => s.cloneProjectInto);
 
-  // Desktop/Electron have a native directory dialog; browser/remote windows do not, so embed the server directory
-  // browser. This matches store.importProject behavior.
-  const useNativePicker = isTauri || env.isElectron;
-  const browser = useServerBrowser(open && !useNativePicker);
-
   const [url, setUrl] = useState("");
-  const [branch, setBranch] = useState("");
-  const [folder, setFolder] = useState("");
+  const [branch, setBranch] = useDialogDraft("projectBranch", open);
+  const [folder, setFolder] = useDialogDraft("projectName", open);
   const [folderTouched, setFolderTouched] = useState(false);
-  const [nativeParent, setNativeParent] = useState("");
+  const [location, setLocation] = useProjectLocation(open);
   const [cloning, setCloning] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [progress, setProgress] = useState<CloneProgress | null>(null);
@@ -60,15 +37,19 @@ export function CloneProjectModal() {
   const cancelRequested = useRef(false);
   const startedAt = useRef(0);
   const lastProgressAt = useRef(0);
+  const [branchOpen, setBranchOpen] = useState(false);
+  const dialogRef = useDialogFocus(open);
+  useDialogNavigationLock("clone", cloning);
+
+  const dest = useDestination(location, folderTouched || folder ? folder : null, open && !cloning, url);
+  const effectiveFolder = folderTouched || folder ? folder : dest.name;
 
   // Reset input state each time the dialog opens.
   useEffect(() => {
     if (open) {
       setUrl("");
-      setBranch("");
-      setFolder("");
       setFolderTouched(false);
-      setNativeParent("");
+      setBranchOpen(!!new URLSearchParams(window.location.search).get("projectBranch"));
       setCloning(false);
       setCancelling(false);
       setProgress(null);
@@ -103,19 +84,11 @@ export function CloneProjectModal() {
 
   if (!open) return null;
 
-  const autoFolder = deriveFolder(url);
-  const effectiveFolder = folderTouched ? folder : autoFolder;
-  const parentDir = useNativePicker ? nativeParent : browser.selectedDir;
-  const canClone =
-    !cloning && url.trim().length > 0 && !!parentDir && effectiveFolder.trim().length > 0;
-
-  const chooseNative = async () => {
-    const picked = await platform.dialog.pickDirectory();
-    if (picked) setNativeParent(picked);
-  };
+  const canClone = !cloning && url.trim().length > 0 && dest.kind === "ok";
 
   const confirm = async () => {
-    if (!canClone) return;
+    if (!canClone || dest.kind !== "ok") return;
+    const parent = dest.parent;
     const currentOperationId = genId();
     operationId.current = currentOperationId;
     cancelRequested.current = false;
@@ -127,14 +100,9 @@ export function CloneProjectModal() {
     setElapsedSeconds(0);
     setError("");
     try {
-      await cloneProjectInto(
-        url.trim(),
-        parentDir,
-        effectiveFolder.trim(),
-        branch.trim(),
-        currentOperationId,
-      );
-      if (!useNativePicker) browser.pushRecent(parentDir);
+      await cloneProjectInto(url.trim(), parent, effectiveFolder.trim(), branch.trim(), currentOperationId);
+      rememberProjectLocation(parent);
+      pushRecentFolder(parent);
     } catch (e) {
       const message = String(e);
       const wasCancelled = message === "CLONE_CANCELLED" || message === "Error: CLONE_CANCELLED";
@@ -197,171 +165,125 @@ export function CloneProjectModal() {
 
   return (
     <Backdrop onClose={() => !cloning && setOpen(false)} zIndex={300}>
-      <div
+      <form
+        role="dialog"
+        ref={dialogRef}
+        aria-modal="true"
+        aria-label={t("clone.title")}
+        className="fp-dialog fp-form"
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
+          trapDialogFocus(e);
           if (e.key === "Escape" && !cloning) setOpen(false);
         }}
-        style={cardStyle}
+        onSubmit={(e) => {
+          e.preventDefault();
+          void confirm();
+        }}
       >
-        <div style={{ padding: "14px 16px 8px" }}>
-          <div style={{ fontWeight: 700, fontSize: 14, color: "var(--text)" }}>
-            {t("clone.title")}
-          </div>
+        <div className="fp-head">
+          <span className="fp-title">{t("clone.title")}</span>
+          {!cloning && (
+            <button type="button" className="icon-btn" aria-label={t("common.cancel")} title={t("common.cancel")} onClick={() => setOpen(false)}>
+              <Icons.x size={14} />
+            </button>
+          )}
         </div>
+        <ExecutionContext />
 
-        <div
-          style={{
-            padding: "0 16px",
-            display: "flex",
-            flexDirection: "column",
-            gap: 12,
-            overflow: "auto",
-          }}
-        >
-          <label style={{ display: "block" }}>
-            <div style={fieldLabel}>{t("clone.url")}</div>
+        <div className="fp-fields">
+          <label className="fp-field">
+            <span className="fp-label">{t("clone.url")}</span>
             <input
               className="vlx-input"
               autoFocus
               disabled={cloning}
               placeholder={t("clone.urlPlaceholder")}
+              spellCheck={false}
               value={url}
               onChange={(e) => setUrl(e.target.value)}
             />
           </label>
 
-          <label style={{ display: "block" }}>
-            <div style={fieldLabel}>{t("clone.branch")}</div>
-            <input
-              className="vlx-input"
+          <div className="fp-field">
+            <label className="fp-label" htmlFor="clone-location">{t("location.label")}</label>
+            <LocationField
+              id="clone-location"
+              value={location}
+              onChange={setLocation}
               disabled={cloning}
-              placeholder={t("clone.branchPlaceholder")}
-              value={branch}
-              onChange={(e) => setBranch(e.target.value)}
+              invalid={dest.kind === "bad" && dest.field === "location"}
             />
-          </label>
-
-          <label style={{ display: "block" }}>
-            <div style={fieldLabel}>{t("clone.folder")}</div>
-            <input
-              className="vlx-input"
-              disabled={cloning}
-              placeholder={autoFolder || t("clone.folderPlaceholder")}
-              value={effectiveFolder}
-              onChange={(e) => {
-                setFolderTouched(true);
-                setFolder(e.target.value);
-              }}
-            />
-          </label>
-
-          <div>
-            <div style={fieldLabel}>{t("clone.into")}</div>
-            {useNativePicker ? (
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <div
-                  title={parentDir || ""}
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    fontSize: 12,
-                    color: parentDir ? "var(--text)" : "var(--text-faint)",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {parentDir || t("clone.noParent")}
-                </div>
-                <button onClick={() => void chooseNative()} disabled={cloning} style={ghostBtn}>
-                  {t("clone.choose")}
-                </button>
-              </div>
-            ) : (
-              <div
-                aria-disabled={cloning}
-                style={{ pointerEvents: cloning ? "none" : undefined, opacity: cloning ? 0.72 : 1 }}
-              >
-                <ServerBrowserView browser={browser} />
-              </div>
-            )}
           </div>
 
-          {parentDir && effectiveFolder.trim() && (
-            <div style={{ fontSize: 11.5, color: "var(--text-faint)", wordBreak: "break-all" }}>
-              → {joinPath(parentDir.replace(/\/+$/, ""), effectiveFolder.trim())}
-            </div>
-          )}
-
-          {cloning && (
-            <div
-              style={{
-                padding: "9px 10px",
-                border: "1px solid var(--border)",
-                borderRadius: 7,
-                background: "var(--bg-0)",
-              }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-                <span style={{ fontSize: 12, color: "var(--text-mid)" }}>
-                  {cancelling ? t("clone.cancelling") : stageText()}
-                </span>
-                <span style={{ flexShrink: 0, fontSize: 11, color: "var(--text-faint)" }}>
-                  {t("clone.elapsed", elapsedSeconds)}
-                </span>
-              </div>
-              <div
-                style={{
-                  height: 4,
-                  marginTop: 7,
-                  borderRadius: 2,
-                  background: "var(--bg-active)",
-                  overflow: "hidden",
+          <div className="fp-field">
+            <label className="fp-field">
+              <span className="fp-label">{t("clone.folder")}</span>
+              <input
+                className={"vlx-input" + (dest.kind === "bad" && dest.field === "name" ? " bad" : "")}
+                disabled={cloning}
+                placeholder={t("clone.folderPlaceholder")}
+                spellCheck={false}
+                value={effectiveFolder}
+                onChange={(e) => {
+                  setFolderTouched(true);
+                  setFolder(e.target.value);
                 }}
-              >
+              />
+            </label>
+          </div>
+
+          <div className="fp-branch">
+            <button type="button" className="fp-branch-toggle" aria-expanded={branchOpen} aria-controls="clone-branch"
+              onClick={() => setBranchOpen(v => !v)}>
+              {branchOpen ? <Icons.chevD size={16} /> : <Icons.chevR size={16} />}
+              <span>{t("clone.branch")}<small>{branch || t("clone.defaultBranch")}</small></span>
+            </button>
+            {branchOpen && <label className="fp-field" id="clone-branch">
+              <span className="fp-label">{t("clone.branch")}</span>
+              <input
+                className="vlx-input"
+                disabled={cloning}
+                placeholder={t("clone.branchPlaceholder")}
+                spellCheck={false}
+                value={branch}
+                onChange={(e) => setBranch(e.target.value)}
+              />
+            </label>}
+          </div>
+
+          <DestinationBox dest={dest} label={t("clone.destination")} readyLabel={t("clone.ready")} />
+          {cloning && (
+            <div className="fp-progress" aria-live="polite">
+              <div className="fp-progress-top">
+                <span className="fp-spin" />
+                <span>{cancelling ? t("clone.cancelling") : stageText()}</span>
+                <span className="fp-elapsed">{t("clone.elapsed", elapsedSeconds)}</span>
+              </div>
+              <div className="fp-bar-track">
                 <div
-                  style={{
-                    width: progress?.percent != null ? `${progress.percent}%` : "35%",
-                    height: "100%",
-                    background: "var(--accent)",
-                    transition: "width 0.25s ease",
-                    animation: progress?.percent == null ? "pulse 1.2s ease-in-out infinite" : undefined,
-                  }}
+                  className={"fp-bar-fill" + (progress?.percent == null ? " indeterminate" : "")}
+                  style={progress?.percent != null ? { width: `${progress.percent}%` } : undefined}
                 />
               </div>
-              {progressStalled && (
-                <div style={{ marginTop: 7, fontSize: 11, color: "var(--text-faint)" }}>
-                  {t("clone.slowHint")}
-                </div>
-              )}
+              {progressStalled && <div className="fp-progress-hint">{t("clone.slowHint")}</div>}
             </div>
           )}
 
-          {error && (
-            <div style={{ fontSize: 12, color: "var(--status-error)", wordBreak: "break-all" }}>
-              {error}
-            </div>
-          )}
+          {error && <div className="fp-error">{error}</div>}
         </div>
 
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "flex-end",
-            gap: 8,
-            padding: "10px 16px",
-            borderTop: "1px solid var(--border)",
-          }}
-        >
-          <button onClick={() => void cancel()} disabled={cancelling} style={ghostBtn}>
-            {cancelling ? t("clone.cancelling") : t("common.cancel")}
+        <div className="fp-foot">
+          <span className="fp-spacer" />
+          <button type="button" className="vlx-btn" onClick={() => void cancel()} disabled={cancelling}>
+            {cloning ? (cancelling ? t("clone.cancelling") : t("clone.cancelClone")) : t("common.cancel")}
           </button>
-          <button onClick={() => void confirm()} disabled={!canClone} style={primaryBtn(!canClone)}>
+          <button type="submit" className="vlx-btn vlx-btn-primary" disabled={!canClone}>
             {cloning ? t("clone.cloning") : t("clone.submit")}
           </button>
         </div>
-      </div>
+      </form>
     </Backdrop>
   );
 }

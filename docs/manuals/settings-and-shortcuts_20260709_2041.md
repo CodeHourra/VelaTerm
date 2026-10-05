@@ -111,11 +111,14 @@ Click an action's key combination, then press the new combination; Escape cancel
 | Close pane / tab | ⌘W | Ctrl+Alt+W |
 | Find in terminal | ⌘F | Ctrl+Alt+F |
 | Search all sessions | ⌘⇧F | Ctrl+Alt+G |
+| Select all in terminal | ⌘A | Ctrl+Shift+A |
 | Save document | ⌘S | Ctrl+S |
 
 **Regular browsers.** When you use VelaTerm in a regular browser (URL remote access), the browser itself uses many ⌘ and Ctrl combinations, so the Windows and Linux bindings above apply on every system, and the settings page shows them that way. The exception is a browser on macOS, where split right and split down stay ⌘D and ⌘⇧D. Remote-connection windows of the desktop app use the desktop bindings.
 
 **Fixed keys** that cannot be changed: ⌘1–9 switches tabs, and ⌘+ / ⌘- / ⌘0 changes or resets the terminal font size (Ctrl on Windows, Linux and in browsers).
+
+**Terminal selection.** Select all applies only while a terminal has keyboard focus. Text fields and conversation views retain their normal selection behavior. Plain Ctrl+A remains available to the shell unless you explicitly assign it to this action.
 
 ## 9. New agent session picker
 

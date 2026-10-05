@@ -674,6 +674,14 @@
   background: var(--doc-paper);
 }
 [data-theme="dark"] .doc-markdown-layout {
+  --doc-paper: var(--bg-term);
+  --doc-ink: var(--text);
+  --doc-muted: var(--text-dim);
+  --doc-rule: var(--border);
+  --doc-code: var(--bg-2);
+  --doc-link: var(--cyan);
+}
+[data-theme="dark"][data-dark-style="classic"] .doc-markdown-layout {
   --doc-paper: #202124;
   --doc-ink: #d8dadd;
   --doc-muted: #a0a4aa;

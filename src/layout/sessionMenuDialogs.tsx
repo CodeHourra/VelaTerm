@@ -43,6 +43,7 @@ import {
 import { kindIconEl } from "./sessionViewers/sessionMeta";
 import { fileToIconDataUrl, PresetIcon } from "./agentPresetIcon";
 import type { AgentPreset } from "../types";
+import { lockGroupNavigation, readGroupDraft, writeGroupDraft } from "./LeftSidebar/groupNavigation";
 
 export function ConfirmDelete({
   name,
@@ -50,28 +51,36 @@ export function ConfirmDelete({
   collection,
   batchCount,
   worktreePaths = [],
-  title: titleText,
-  body: bodyText,
   onConfirm,
   onCancel,
 }: {
   name: string;
-  /** Optional only for callers that supply both title and body, such as project folders, which are not nodes. */
-  kind?: NodeKind;
-  /** Wording only: a collection is a project row with no folder and reads as a collection to the user. */
+  kind: NodeKind;
+  /** Wording only: a collection is a project row with no directory of its own. */
   collection?: boolean;
   batchCount?: number;
   worktreePaths?: string[];
-  title?: string;
-  body?: string;
-  onConfirm: (removeWorktree: boolean) => void;
+  onConfirm: (removeWorktree: boolean) => void | Promise<void>;
   onCancel: () => void;
 }) {
   const t = useT();
   const isBatch = batchCount != null;
   const hasWt = worktreePaths.length > 0;
   const [removeWt, setRemoveWt] = useState(false);
-  const title = titleText ?? (isBatch
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  const [error, setError] = useState<string | null>(null);
+  const cancel = () => { if (!busyRef.current) onCancel(); };
+  const confirm = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    setError(null);
+    try { await onConfirm(removeWt); }
+    catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
+    finally { busyRef.current = false; setBusy(false); }
+  };
+  const title = isBatch
     ? t("tree.batchDeleteTitle")
     : kind === "project"
       ? collection
@@ -79,8 +88,8 @@ export function ConfirmDelete({
         : t("tree.deleteProjectTitle")
       : kind === "group"
         ? t("tree.deleteGroupTitle")
-        : t("tree.deleteSessionTitle"));
-  const body = bodyText ?? (isBatch
+        : t("tree.deleteSessionTitle");
+  const body = isBatch
     ? t("tree.batchDeleteBody", batchCount)
     : kind === "project"
       ? collection
@@ -88,10 +97,14 @@ export function ConfirmDelete({
         : t("tree.deleteProjectBody", name)
       : kind === "group"
         ? t("tree.deleteGroupBody", name)
-        : t("tree.deleteSessionBody", name));
+        : t("tree.deleteSessionBody", name);
   return (
-    <Backdrop onClose={onCancel}>
+    <Backdrop onClose={cancel}>
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        aria-busy={busy}
         style={{
           width: 360,
           background: "var(--bg-panel)",
@@ -121,18 +134,20 @@ export function ConfirmDelete({
               cursor: "pointer",
             }}
           >
-            <input type="checkbox" checked={removeWt} onChange={(e) => setRemoveWt(e.target.checked)} />
+            <input type="checkbox" disabled={busy} checked={removeWt} onChange={(e) => setRemoveWt(e.target.checked)} />
             {t("tree.deleteWorktrees", worktreePaths.length)}
           </label>
         )}
+        {error && <div role="alert" style={{ color: "var(--status-error)", marginBottom: 12 }}>{error}</div>}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button className="vlx-btn" onClick={onCancel}>
+          <button className="vlx-btn" disabled={busy} onClick={cancel}>
             {t("common.cancel")}
           </button>
           <button
             className="vlx-btn vlx-btn-primary"
             style={{ background: "var(--status-error)", borderColor: "var(--status-error)" }}
-            onClick={() => onConfirm(removeWt)}
+            disabled={busy}
+            onClick={() => void confirm()}
           >
             {t("common.delete")}
           </button>
@@ -933,16 +948,24 @@ export function WorktreeChoiceField({
 export function NewGroup({
   projectId,
   parentGroupId,
+  urlBacked = false,
   onConfirm,
   onCancel,
 }: {
   projectId: string;
   parentGroupId: string | null;
+  urlBacked?: boolean;
   onConfirm: (payload: { name: string; worktree: WorktreeChoice }) => Promise<void>;
   onCancel: () => void;
 }) {
   const t = useT();
-  const [name, setName] = useState("");
+  const [name, setName] = useState(() => urlBacked ? readGroupDraft() : "");
+  useEffect(() => {
+    if (!urlBacked) return;
+    const update = () => setName(readGroupDraft());
+    window.addEventListener("popstate", update);
+    return () => { window.removeEventListener("popstate", update); lockGroupNavigation(false); };
+  }, [urlBacked]);
 
   // Resolve repository root once from a parent group's worktree or the project root.
   const [repoRoot] = useState<string | null>(() => {
@@ -968,18 +991,23 @@ export function NewGroup({
     const worktree: WorktreeChoice = wt.choice(finalName);
     setBusy(true);
     setError(null);
+    if (urlBacked) lockGroupNavigation(true);
     try {
       await onConfirm({ name: finalName, worktree });
       // The parent closes on success; catch leaves the dialog open on failure.
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setBusy(false);
-    }
+    } finally { if (urlBacked) lockGroupNavigation(false); }
   };
+  const cancel = () => { if (!busy) onCancel(); };
 
   return (
-    <Backdrop onClose={onCancel}>
+    <Backdrop onClose={cancel}>
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("tree.newGroup")}
         style={{
           width: 400,
           background: "var(--bg-panel)",
@@ -991,7 +1019,7 @@ export function NewGroup({
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey) void submit();
-          if (e.key === "Escape") onCancel();
+          if (e.key === "Escape") cancel();
         }}
       >
         <div
@@ -1019,6 +1047,7 @@ export function NewGroup({
             onChange={(e) => {
               const v = e.target.value;
               setName(v);
+              if (urlBacked) writeGroupDraft(v);
               // Keep the worktree name synchronized until the user edits it independently.
               wt.follow(v);
             }}
@@ -1064,7 +1093,7 @@ export function NewGroup({
         )}
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
-          <button className="vlx-btn" onClick={onCancel}>
+          <button className="vlx-btn" onClick={cancel} disabled={busy}>
             {t("common.cancel")}
           </button>
           <button

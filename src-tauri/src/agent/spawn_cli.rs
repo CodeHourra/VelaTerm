@@ -1,5 +1,5 @@
 //! Installation and discovery of built-in command shims and their companion skills (`vspawn`,
-//! `vspawn-tree`, `vopen`, `vrefer`, `vsearch`, `vask`, `vtell`, and `vkb`).
+//! `vspawn-tree`, `vopen`, `vrefer`, `vsearch`, `vask`, `vself`, `vflow`, `vtell`, and `vkb`).
 //!
 //! At startup VelaTerm installs thin shims under the application data `bin/` directory and prepends it
 //! to each session shell's PATH, allowing `vspawn "task"`, `vopen <file>`, `vrefer <session>`, and
@@ -66,6 +66,8 @@ const SKILLS: &[(&str, &str)] = &[
     ("vsearch", include_str!("../../../skills/vsearch/SKILL.md")),
     ("vask", include_str!("../../../skills/vask/SKILL.md")),
     ("vstat", include_str!("../../../skills/vstat/SKILL.md")),
+    ("vself", include_str!("../../../skills/vself/SKILL.md")),
+    ("vflow", include_str!("../../../skills/vflow/SKILL.md")),
     ("vtell", include_str!("../../../skills/vtell/SKILL.md")),
     ("vkb", include_str!("../../../skills/vkb/SKILL.md")),
 ];
@@ -775,6 +777,8 @@ mod tests {
                     assert!(!dir.join("vorch").exists());
                     assert_eq!(dir.join("vkb/SKILL.md").exists(), enabled);
                     assert_eq!(dir.join("vask/SKILL.md").exists(), enabled);
+                    assert_eq!(dir.join("vself/SKILL.md").exists(), enabled);
+                    assert_eq!(dir.join("vflow/SKILL.md").exists(), enabled);
                     if enabled {
                         let skill = std::fs::read_to_string(dir.join("vask/SKILL.md")).unwrap();
                         assert!(skill.contains("name: vask"));

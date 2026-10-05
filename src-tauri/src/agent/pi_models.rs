@@ -46,12 +46,13 @@ pub fn list_for_launch(kind: SessionKind, bin: &str, cwd: Option<&str>, extra_ar
 fn list_raw(kind: SessionKind, bin: &str, cwd: Option<&str>, extra_args: &[String]) -> Result<Vec<Value>, String> {
     let variant = PiVariant::of(kind).ok_or("This session is not a Pi or OMP conversation")?;
     let mut cmd = crate::host::command(bin);
-    crate::agent::executable::prepare_command(&mut cmd, bin);
     cmd.args(wire::launch_args(variant, None, false, None, false));
     cmd.args(extra_args);
     if let Some(cwd) = cwd {
         cmd.current_dir(cwd);
     }
+    crate::login_env::refresh_command(&mut cmd);
+    crate::agent::executable::prepare_command(&mut cmd, bin);
     for key in crate::pty::manager::AGENT_HARNESS_MARKERS {
         cmd.env_remove(key);
     }

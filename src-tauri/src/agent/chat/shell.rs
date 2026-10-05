@@ -18,7 +18,7 @@
 use std::io::Read;
 
 #[cfg(windows)]
-mod windows;
+pub(crate) mod windows;
 use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -356,7 +356,7 @@ pub fn spawn_run(
     if let Some(cwd) = cwd {
         cmd.current_dir(cwd);
     }
-    super::engine::agent_environment(app, session_id, &mut cmd);
+    super::engine::agent_environment_in_shell(app, session_id, &mut cmd, Some(&shell));
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(unix)]
     {
@@ -453,7 +453,11 @@ fn spawn_pump(
                 break;
             }
             let available = match pipe_ready(&pipe, bytes.len()) {
-                Ok(0) => { std::thread::sleep(WAIT_POLL); continue; }
+                Ok(0) => {
+                    #[cfg(not(unix))]
+                    std::thread::sleep(WAIT_POLL);
+                    continue;
+                }
                 Ok(available) => available,
                 Err(error) => {
                     if error.raw_os_error() != Some(109) { run.output_incomplete.store(true, Ordering::Relaxed); }
@@ -506,7 +510,8 @@ impl<T: Read + std::os::windows::io::AsRawHandle + Send + 'static> ShellPipe for
 #[cfg(unix)]
 fn pipe_ready(pipe: &impl ShellPipe, capacity: usize) -> std::io::Result<usize> {
     let mut descriptor = libc::pollfd { fd: pipe.as_raw_fd(), events: libc::POLLIN, revents: 0 };
-    let ready = unsafe { libc::poll(&mut descriptor, 1, 0) };
+    // Wake immediately when a blocked producer writes, while still checking the drain deadline.
+    let ready = unsafe { libc::poll(&mut descriptor, 1, WAIT_POLL.as_millis() as i32) };
     if ready < 0 { return Err(std::io::Error::last_os_error()); }
     Ok(if ready == 0 { 0 } else { capacity })
 }

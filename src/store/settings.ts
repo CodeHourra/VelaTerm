@@ -6,6 +6,7 @@ import { pushSetting } from "../ipc/settingsSync";
 import { DEFAULT_CONVERSATION_FONT_SIZE, DEFAULT_TERMINAL_FONT_SIZE, DEFAULT_TERMINAL_LINE_HEIGHT, normalizeTextSize, normalizeTextLineHeight } from "../theme";
 import type {
   AccentChoice,
+  DarkStyle,
   Density,
   DividerStyle,
   InspectorTab,
@@ -110,6 +111,7 @@ export type ImagePasteMode = "upload" | "agent";
 /** Persisted Vlinx appearance settings for accent, density, splits, separators, navigation, and Inspector. */
 export const SETTINGS_KEY = "vlx-settings";
 export interface PersistedSettings {
+  darkStyle: DarkStyle;
   accent: AccentChoice;
   density: Density;
   paneStyle: PaneStyle;
@@ -230,6 +232,7 @@ export const DEFAULT_COMPOSER_INLINE_CHIPS: ComposerChipId[] = ["model", "effort
 export const COMPOSER_INLINE_CHIPS_REVISION = 1;
 
 const SETTINGS_DEFAULTS: PersistedSettings = {
+  darkStyle: "classic",
   accent: "auto",
   density: "regular",
   paneStyle: "flush",
@@ -326,6 +329,8 @@ export function loadSettings(): PersistedSettings {
       defaultSessionEngine?: SessionEngine;
     };
     const merged = { ...SETTINGS_DEFAULTS, ...parsed };
+    // Retired comparison styles and missing preferences use the single supported dark palette.
+    merged.darkStyle = "classic";
     merged.chatFontFamily = typeof merged.chatFontFamily === "string" ? merged.chatFontFamily.trim() || null : null;
     merged.chatFontSize = normalizeTextSize(merged.chatFontSize, DEFAULT_CONVERSATION_FONT_SIZE);
     merged.chatLineHeight = normalizeTextLineHeight(merged.chatLineHeight);
@@ -394,6 +399,7 @@ export function saveSettings(s: PersistedSettings) {
   }
 }
 export const visualOf = (s: PersistedSettings): VisualSettings => ({
+  darkStyle: s.darkStyle,
   accent: s.accent,
   density: s.density,
   paneStyle: s.paneStyle,

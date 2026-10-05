@@ -33,12 +33,12 @@ pub enum SessionKind {
     /// resumes with `--resume <id>`, forks with `--fork <id>`, and unlike Pi does prompt for tool approval,
     /// which `--yolo` bypasses.
     Omp,
-    /// Moonshot AI Kimi Code CLI (`kimi`), with K3 available by default and official lifecycle hooks.
+    /// Moonshot AI Kimi Code CLI (`kimi`), using the CLI default model, with official lifecycle hooks.
     Kimi,
     /// Kiro CLI (`kiro-cli chat`), driven by lifecycle hooks in a shadow agent config and resumed with
     /// `--resume-id <id>`. It exposes no permission-request hook, so it has no asking state.
     Kiro,
-    /// xAI Grok Build CLI (`grok`), defaulting to Grok 4.5 with caller-controlled model overrides.
+    /// xAI Grok Build CLI (`grok`), using the CLI default model unless the caller overrides it.
     Grok,
     /// Zoo Code headless CLI, currently executable as `roo`, using screen/activity state fallbacks.
     Zoo,
@@ -50,6 +50,11 @@ pub enum SessionKind {
 }
 
 impl SessionKind {
+    /// Verified protocol drivers accepted by the conversation engine.
+    pub fn supports_chat(self) -> bool {
+        matches!(self, Self::Claude | Self::Codex | Self::Opencode | Self::Pi | Self::Omp | Self::Antigravity)
+    }
+
     /// Lowercase string used for persistence.
     pub fn as_str(self) -> &'static str {
         match self {
@@ -130,17 +135,6 @@ pub struct AgentPreset {
 /// this is generous for a PNG of that size while keeping the row small enough to sync cheaply.
 pub const AGENT_PRESET_ICON_MAX_BYTES: usize = 64 * 1024;
 
-/// User-created sidebar folder grouping projects. One level only; deleting it leaves its projects loose.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProjectFolder {
-    pub id: String,
-    pub name: String,
-    pub sort_order: i64,
-    pub collapsed: bool,
-    pub created_at: i64,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Project {
@@ -152,10 +146,9 @@ pub struct Project {
     pub collapsed: bool,
     /// Optional emoji marker shown before the name in the sidebar; see [`Session::mark`].
     pub mark: Option<String>,
-    /// Sidebar folder holding this project; None keeps it at the top level. `default` accepts payloads from
-    /// builds that predate folders.
+    /// Collection containing this project; None keeps it at the top level.
     #[serde(default)]
-    pub folder_id: Option<String>,
+    pub collection_id: Option<String>,
     pub created_at: i64,
 }
 
@@ -254,7 +247,6 @@ pub struct Tree {
     pub projects: Vec<Project>,
     pub groups: Vec<Group>,
     pub sessions: Vec<Session>,
-    pub folders: Vec<ProjectFolder>,
 }
 
 /// Node kind used by rename, delete, and move to select the target table.

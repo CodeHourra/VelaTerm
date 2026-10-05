@@ -45,6 +45,7 @@ import { CloneProjectModal } from "./remote/CloneProjectModal";
 import { CreateProjectModal } from "./remote/CreateProjectModal";
 import { DirectoryPickerModal } from "./remote/DirectoryPickerModal";
 import { SaveAsModal } from "./remote/SaveAsModal";
+import { ProjectDialogRoutes } from "./remote/ProjectDialogRoutes";
 import { startMirrorSync } from "./store/mirrorSync";
 import { useTermStore } from "./store/termStore";
 import { startUsageSync } from "./store/usageSync";
@@ -63,6 +64,9 @@ const ImportSessionsRoute = lazy(() =>
 );
 const NewAgentSessionRoute = lazy(() =>
   import("./layout/NewAgentSession/NewAgentSessionRoute").then((m) => ({ default: m.NewAgentSessionRoute })),
+);
+const SmartRenameRoute = lazy(() =>
+  import("./layout/SmartRename/SmartRenameRoute").then((m) => ({ default: m.SmartRenameRoute })),
 );
 const KiroHistoryRoute = lazy(() =>
   import("./layout/KiroHistory/KiroHistoryRoute").then((m) => ({ default: m.KiroHistoryRoute })),
@@ -256,6 +260,7 @@ function App() {
       <Suspense fallback={null}>
         <ImportSessionsRoute />
         {!isShareSurface && <NewAgentSessionRoute />}
+        {!isShareSurface && <SmartRenameRoute />}
         {!isShareSurface && !isMobileView() && <KiroHistoryRoute />}
       </Suspense>
       <Suspense fallback={null}>
@@ -268,6 +273,7 @@ function App() {
         <SharedProjectsRoute />
       </Suspense>
       <DirectoryPickerModal />
+      <ProjectDialogRoutes />
       <CreateProjectModal />
       <CloneProjectModal />
       <SaveAsModal />

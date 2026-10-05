@@ -64,8 +64,7 @@ describe("shortcut defaults per shell", () => {
     expect(DEFAULT_BINDINGS.splitDown).toBe("mod+shift+d");
     expect(DEFAULT_BINDINGS.newTab).toBe("mod+t");
     expect(DEFAULT_BINDINGS.newAgentSession).toBe("mod+n");
-    // Cmd+A is the terminal select-all convention on macOS (iTerm2, Terminal.app), and leaves plain Ctrl+A
-    // free for readline's move-to-beginning-of-line which every shell and agent CLI relies on.
+    // Desktop selection uses Cmd+A, leaving plain Ctrl+A available to the terminal.
     expect(DEFAULT_BINDINGS.selectAllTerminal).toBe("mod+a");
     expect(formatCombo("mod+shift+d")).toBe("\u2318\u21E7D");
   });
@@ -150,8 +149,7 @@ describe("shortcut defaults per shell", () => {
     expect(IS_PLAIN_BROWSER).toBe(false);
     expect(DEFAULT_BINDINGS.splitRight).toBe("mod+alt+d");
     expect(DEFAULT_BINDINGS.splitDown).toBe("mod+alt+e");
-    // Ctrl+Shift+A matches Windows Terminal, GNOME Terminal, Konsole and WezTerm, keeping plain
-    // Ctrl+A free for readline's beginning-of-line binding.
+    // Select all uses Shift so plain Ctrl+A remains available to the terminal.
     expect(DEFAULT_BINDINGS.selectAllTerminal).toBe("mod+shift+a");
     expect(formatCombo("mod+alt+d")).toBe("Ctrl+Alt+D");
     expect(formatCombo("mod+shift+a")).toBe("Ctrl+Shift+A");

@@ -156,6 +156,14 @@ URL/SSH 项目网页可通过来源受限的 `__VELATERM_NOTIFICATIONS__` 调用
 
 原生账号集成测试默认不访问公网。显式运行前，应准备可删除的专用账号并在 vlx-browser 测试 Profile 登录；测试启动后会将待确认设备的 code 和 URL 写入 App 私有目录的 `remote-account-request.json`，由该 Profile 完成确认。iOS 需预先在 App Documents 目录创建 `remote-account-fixture.json` 标记，并只运行 `AppTests/RemoteAccountIntegrationTests`；测试结束删除标记。Android instrumentation 需显式传入 `-e remoteAccount true -e class com.velaterm.mobile.RemoteAccountIntegrationTest`。测试恢复原有安全存储，验证结束后还应删除专用账号和遗留测试文件。这些测试不代替物理手机中的第三方登录与后台恢复验收。
 
+### Sign in with Apple（4.8 本地修复）
+
+账号服务的本地实现已添加 Apple 登录，保留 Google、Facebook、X、GitHub 和邮箱密码入口。iOS 继续通过 SFSafariViewController 打开网站登录，Apple 授权后沿现有设备确认、轮询领取凭据和关闭浏览器流程返回 App，Remote 浏览器票据协议不变。新 Apple 身份与原有其他方式的账号独立，不按邮箱自动合并。主动关闭账号浏览器后，App 先检查设备是否已批准；未批准则允许重新登录，已批准则继续领取凭据。
+
+`ios/App/App/App.entitlements` 已声明 Sign in with Apple entitlement，Xcode 项目也已启用对应 Capability 标记。仍需在 Apple Developer 后台为 `com.velaterm.mobile` 配置 Primary App ID、网页 Services ID、真实团队与密钥，以及 `https://velaterm.com/api/auth/callback/apple` Return URL，并更新发布签名 Profile。本地无签名模拟器编译不能验证后台配置或真实授权；此次未部署账号生产服务、未创建 Apple 资源、未上传或提交 App。
+
+账号服务实现与配置说明见 [Sign in with Apple](../../vlx-term-server/docs/apple-sign-in.md)，本次状态及逐项验收见 [4.8 修复清单](../../plans/processed/iOS_Apple登录_4.8修复_20261005.md)。真实 Apple 授权、隐藏邮箱、设备确认后返回 App 与正常 Remote 连接仍需在配置完成后用真实 iOS 构建验收。
+
 ### 连接期间的加载与返回
 
 点击 URL 或 SSH 连接后，手机壳立即显示居中的加载状态和返回入口。远端 WebView 首次加载、重新连接时继续显示原生加载页；只有检测到已渲染的项目界面或可操作的登录页面后才移除，不以 HTML 加载完成作为界面可用的依据。加载超过 30 秒时显示恢复提示，网络错误、空白文档和脚本未启动时仍可返回。

@@ -1,4 +1,6 @@
 //! Diagnostics retain fixed classifications, never error text or user payloads.
+import { genId } from "../genId";
+
 const commands = new Set([
   "agent_context_info",
   "agent_install_recipe",
@@ -63,6 +65,7 @@ const commands = new Set([
   "chat_start",
   "chat_stop",
   "chat_stop_task",
+  "chat_subagent_rows",
   "chat_task_output",
   "claude",
   "clean_pasted_images",
@@ -82,7 +85,6 @@ const commands = new Set([
   "create_download_ticket",
   "create_file",
   "create_group",
-  "create_project_folder",
   "create_session",
   "create_virtual_project",
   "create_worktree",
@@ -90,7 +92,6 @@ const commands = new Set([
   "delete_branch",
   "delete_node",
   "delete_path",
-  "delete_project_folder",
   "diagnostic_event",
   "diagnostic_health",
   "discover_agent_sessions",
@@ -139,6 +140,7 @@ const commands = new Set([
   "list_agent_presets",
   "list_archived_sessions",
   "list_dir",
+  "list_roots",
   "list_shells",
   "list_tree",
   "list_worktrees",
@@ -200,8 +202,9 @@ const commands = new Set([
   "record_split_trace",
   "remove_worktree",
   "rename_node",
+  "rename_session_with_agent",
+  "session_title_options",
   "rename_path",
-  "rename_project_folder",
   "reorder_agent_presets",
   "resolve_spawn",
   "save_doc_image",
@@ -226,8 +229,7 @@ const commands = new Set([
   "set_collapsed",
   "set_group_worktree",
   "set_node_mark",
-  "set_project_folder",
-  "set_project_folder_collapsed",
+  "set_project_collection",
   "set_session_archived",
   "set_session_engine",
   "single",
@@ -277,7 +279,7 @@ export function safeError(error: unknown): string {
 const operations = new Map<string, { id: string; until: number }>();
 /** Retain correlation briefly across the remount caused by a shell switch. */
 export function beginDiagnosticOperation(sessionId: string): string {
-  const id=crypto.randomUUID();
+  const id=genId();
   if (operations.size >= 256) operations.delete(operations.keys().next().value!);
   operations.set(sessionId,{id,until:Date.now()+120_000});
   return id;

@@ -82,7 +82,7 @@ private final class Relay: ChannelInboundHandler {
 }
 
 @objc(VelaRemotePlugin)
-public class VelaRemotePlugin: CAPPlugin, CAPBridgedPlugin {
+public class VelaRemotePlugin: CAPPlugin, CAPBridgedPlugin, SFSafariViewControllerDelegate {
     public let identifier = "VelaRemotePlugin"
     public let jsName = "VelaRemote"
     public let pluginMethods: [CAPPluginMethod] = ["list", "save", "remove", "connect", "disconnect", "status", "scanURL", "account", "notifications"].map { CAPPluginMethod(name: $0, returnType: CAPPluginReturnPromise) }
@@ -196,6 +196,7 @@ public class VelaRemotePlugin: CAPPlugin, CAPBridgedPlugin {
     }
     private var accountAttempt: [String: String]?
     private weak var accountBrowser: SFSafariViewController?
+    @MainActor private var accountBrowserClosed = false
     private func accountRequest(_ path: String, token: String? = nil, body: [String: Any]? = nil) async throws -> Any {
         var request = URLRequest(url: URL(string: "https://velaterm.com" + path)!)
         request.timeoutInterval = 40
@@ -217,8 +218,11 @@ public class VelaRemotePlugin: CAPPlugin, CAPBridgedPlugin {
     @MainActor private func accountPage(_ address: String) throws {
         guard let url = URL(string: address), url.scheme == "https", url.host == "velaterm.com", url.user == nil, url.port == nil,
             let presenter = bridge?.viewController, presenter.presentedViewController == nil else { throw RemoteFailure(MobileText.get("mobile.native.accountWindowBusy")) }
-        let view = SFSafariViewController(url: url); view.modalPresentationStyle = .fullScreen
+        let view = SFSafariViewController(url: url); view.modalPresentationStyle = .fullScreen; view.delegate = self
         accountBrowser = view; presenter.present(view, animated: true)
+    }
+    @MainActor public func safariViewControllerDidFinish(_ controller: SFSafariViewController) {
+        if controller === accountBrowser { accountBrowserClosed = true }
     }
     @objc func account(_ call: CAPPluginCall) {
         let action = call.getString("action") ?? "status"
@@ -234,18 +238,30 @@ public class VelaRemotePlugin: CAPPlugin, CAPBridgedPlugin {
                     guard let attempt = try await accountRequest("/api/device-link", body:["name":name,"publicKey":key.publicKey.rawRepresentation.base64EncodedString()]) as? [String:String],
                         let url = attempt["url"], attempt["code"] != nil, attempt["pollToken"] != nil else {throw RemoteFailure(MobileText.get("mobile.native.loginResponseInvalid"))}
                     accountAttempt = attempt
+                    await MainActor.run { accountBrowserClosed = false }
                     try vault.update { $0["accountAttempt"] = attempt }
                     do { try await MainActor.run {try accountPage(url)} }
                     catch { accountAttempt = nil; try vault.update { $0.removeValue(forKey:"accountAttempt") }; throw error }
                     call.resolve(["linked":false])
                 case "poll":
                     guard let attempt = accountAttempt, let code = attempt["code"], let poll = attempt["pollToken"], code.range(of:"^[A-Za-z0-9_-]{43}$",options:.regularExpression) != nil else {throw AccountFailure(code:"ACCOUNT_LOGIN_EXPIRED",message:MobileText.get("mobile.native.loginRestart"))}
-                    let result = try await accountRequest("/api/device-link/\(code)/poll", token:poll, body:[:])
+                    var result = try await accountRequest("/api/device-link/\(code)/poll", token:poll, body:[:])
+                    let browserClosed = await MainActor.run { accountBrowserClosed }
+                    if result is NSNull && browserClosed {
+                        // The first response may predate Done; confirm once more after observing the close.
+                        result = try await accountRequest("/api/device-link/\(code)/poll", token:poll, body:[:])
+                    }
                     if let value = result as? [String:Any], let credential = value["token"] as? String {
                         try vault.update {$0["accountToken"] = credential; $0.removeValue(forKey:"accountAttempt")}
                         accountAttempt = nil
-                        await MainActor.run {accountBrowser?.dismiss(animated:true)}
+                        await MainActor.run {accountBrowserClosed = false; accountBrowser?.dismiss(animated:true)}
                         call.resolve(["linked":true])
+                    } else if browserClosed {
+                        // Check approval first: closing the browser must not discard an approved device.
+                        try vault.update { $0.removeValue(forKey:"accountAttempt") }
+                        accountAttempt = nil
+                        await MainActor.run { accountBrowserClosed = false }
+                        throw AccountFailure(code:"ACCOUNT_LOGIN_CANCELLED",message:MobileText.get("mobile.native.loginRestart"))
                     } else {call.resolve(["linked":false])}
                 case "status":
                     guard let token else {call.resolve(["linked":false,"pending":accountAttempt != nil]);return}
@@ -264,7 +280,9 @@ public class VelaRemotePlugin: CAPPlugin, CAPBridgedPlugin {
                         _ = try await accountRequest("/api/device-link/host/logout",token:token,body:[:])
                     }
                     try vault.update {$0.removeValue(forKey:"accountToken"); $0.removeValue(forKey:"accountAttempt")}
-                    accountAttempt = nil; call.resolve()
+                    accountAttempt = nil
+                    await MainActor.run { accountBrowserClosed = false }
+                    call.resolve()
                 case "open":
                     guard let token else {throw RemoteFailure(MobileText.get("mobile.native.signInFirst"))}
                     var body:[String:Any] = [:]

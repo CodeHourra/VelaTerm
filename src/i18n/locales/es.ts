@@ -212,7 +212,7 @@ const es: typeof en = {
   "memory.collectionConversation": "Conversación",
   "memory.collectionEmptyEntries": "Esta conversación aún no tiene artículos de conocimiento.",
   "memory.title": "Base de conocimientos",
-  "memory.add": "Organizar en la base de conocimientos de sesiones",
+  "memory.add": "Añadir a la base de conocimientos",
   "memory.intro": "Organiza el conocimiento por proyecto y sesión. Los artículos guardados son independientes de sus fuentes y se pueden editar manualmente.",
   "memory.entries": "Artículos de conocimiento",
   "memory.emptyJobs": "Aún no hay registros de organización.",
@@ -294,11 +294,25 @@ const es: typeof en = {
   "chat.sync.loading": "Sincronizando conversación…",
   "chat.sync.failed": "No se pudo sincronizar. Los mensajes cargados siguen disponibles.",
   "chat.sync.history": "Cargar mensajes anteriores",
+  "chat.rail.title": "Tus mensajes",
+  "chat.rail.imageMessage": "Mensaje con imagen",
+  "chat.rail.emptyMessage": "Mensaje vacío",
+  "chat.rail.loading": "Cargando mensajes anteriores…",
+  "chat.rail.unavailable": "Este mensaje ya no está disponible.",
+  "chat.rail.failed": "No se pudo cargar este mensaje.",
   "chat.submission.updateRequired": "Actualiza el servidor antes de enviar mensajes desde este cliente.",
   "chat.submission.sending": "Enviando…",
   "chat.submission.sent": "Enviado",
   "chat.submission.queued": "En cola",
   "chat.submission.failed": "Error al enviar",
+  "chat.recovery.savedSubmission": "Envío guardado (aún sin correspondencia con el mensaje nativo)",
+  "chat.recovery.saveError": "No se puede guardar en este dispositivo el mensaje pendiente de confirmación.",
+  "chat.recovery.readError": "No se pueden restaurar los mensajes pendientes de confirmación de este dispositivo.",
+  "chat.recovery.writerBlocked": "No se pudo verificar quién controla esta sesión. Antes de continuar, confirme que ninguna otra instancia de la aplicación ni ningún agente anterior la esté usando.",
+  "chat.recovery.interrupted": "El agente se detuvo antes de que se confirmara la finalización del trabajo. Revise el historial antes de continuar.",
+  "chat.recovery.paused": "Los mensajes en cola se han conservado y permanecerán en pausa hasta que decida reanudarlos.",
+  "chat.recovery.resumeQueue": "Reanudar cola",
+  "chat.recovery.continue": "Continuar el trabajo interrumpido",
   "chat.submission.unknown": "Entrega sin confirmar",
   "chat.submission.check": "Comprobar estado",
   "common.retry": "Reintentar", // Retry
@@ -338,6 +352,7 @@ const es: typeof en = {
   "titlebar.themeSystem": (resolved) =>
     `Seguir al sistema (actualmente ${resolved})`, // Follow system (currently {resolved})
   "titlebar.themeDark": "Oscuro", // Dark
+  "titlebar.themeClassicDark": "Oscuro clásico", // Classic Dark
   "titlebar.themeLight": "Claro", // Light
   "titlebar.gameCenter": "Centro de juegos",
   "titlebar.browser": "Navegador integrado", // Built-in Browser
@@ -695,13 +710,38 @@ const es: typeof en = {
   "settings.scSplitDown": "Dividir abajo", // Split down
   "settings.scSearch": "Buscar en la terminal", // Find in terminal
   "settings.scGlobalSearch": "Buscar en todas las sesiones", // Search all sessions
-  "settings.scSelectAllTerminal": "Seleccionar todo en el terminal", // Select all in terminal
+  "settings.scSelectAllTerminal": "Seleccionar todo en la terminal", // Select all in terminal
   "settings.scSaveDoc": "Guardar documento", // Save document
   "settings.scRecording": "Pulsa las teclas…", // Press keys…
   "settings.scHint":
     "Haz clic en un atajo y pulsa una nueva combinación (se requiere Cmd/Ctrl).", // hint
+  "settings.scScreenshotSection": "Captura de pantalla",
+  "settings.scScreenshot": "Hacer una captura de pantalla",
+  "settings.scOff": "Desactivado",
+  "settings.scScreenshotHint":
+    "Funciona en cualquier app, incluso con VelaTerm en segundo plano. Para desactivarlo, haz clic en él y pulsa Supr.",
+  "settings.scConflictTabs": "Ya se usa para cambiar de pestaña",
+  "settings.scInUse": "Otra app ya usa este atajo",
   "settings.scReset": "Restaurar valores predeterminados", // Restore defaults
   "settings.scConflict": (label: string) => `Ya lo usa "${label}"`, // conflict
+
+  // ── Screenshot overlay ──
+  "screenshot.hint": "Arrastra para seleccionar un área o haz clic para capturar toda la pantalla",
+  "screenshot.rect": "Rectángulo",
+  "screenshot.ellipse": "Elipse",
+  "screenshot.arrow": "Flecha",
+  "screenshot.pen": "Lápiz",
+  "screenshot.mosaic": "Mosaico",
+  "screenshot.text": "Texto",
+  "screenshot.undo": "Deshacer",
+  "screenshot.save": "Guardar",
+  "screenshot.cancel": "Cancelar",
+  "screenshot.done": "Listo",
+  "screenshot.doneTip": "Copiar al portapapeles (Intro)",
+  "screenshot.small": "Pequeño",
+  "screenshot.medium": "Mediano",
+  "screenshot.large": "Grande",
+  "screenshot.failed": (detail: string) => `No se pudo exportar la captura de pantalla: ${detail}`,
 
   // ── Remote access panel ──
   "remote.title": "Acceso remoto (navegador)", // Remote Access (Browser)
@@ -827,6 +867,7 @@ const es: typeof en = {
   "tree.moveToSession": "Mover bajo una sesión (como hija)", // Move under a session (as child)
   "tree.moveTo": "Mover a…", // Move to…
   "tree.openNewTab": "Abrir en pestaña nueva", // Open in New Tab
+  "tree.openInSplit": "Abrir en panel dividido", // Open in Split
   "tree.openSplitRight": "Abrir en división a la derecha", // Open in Split Right
   "tree.openSplitDown": "Abrir en división abajo", // Open in Split Down
   "tree.openInFocusedPane": "Abrir en el panel activo", // Open in Focused Pane
@@ -834,6 +875,18 @@ const es: typeof en = {
   "tree.tileSelectedTooMany": "Organizar en mosaico (hasta 4 sesiones)", // Tile Selected Sessions (up to 4)
   "tree.forkSession": "Bifurcar sesión", // Fork Session
   "tree.exportSession": "Exportar sesión…", // Export Session…
+  "sessionTitle.rename": "Renombrado inteligente",
+  "sessionTitle.chooseAgentHint": "El agente de esta sesión no está disponible. Seleccione otro agente; se utilizará su configuración predeterminada.",
+  "sessionTitle.agentUnavailable": "El agente seleccionado no está disponible. Seleccione otro agente o revise su configuración.",
+  "sessionTitle.generating": "Generando título…",
+  "sessionTitle.unavailable": "Esta sesión no tiene una conversación que se pueda leer.",
+  "sessionTitle.noAgent": "No hay ningún agente compatible instalado. Instale Claude, Codex, OpenCode, Pi, OMP o Grok para generar títulos.",
+  "sessionTitle.busy": "Ya se está generando un título para esta sesión.",
+  "sessionTitle.tooLarge": "La conversación es demasiado larga para generar un título. Se ha conservado el título actual.",
+  "sessionTitle.timeout": "Se agotó el tiempo para generar el título. Inténtelo de nuevo.",
+  "sessionTitle.invalid": "El agente devolvió un título no válido. Inténtelo de nuevo.",
+  "sessionTitle.changed": "La sesión cambió mientras se generaba el título, por lo que no se actualizó.",
+  "sessionTitle.failed": "El agente no pudo generar un título. Inténtelo de nuevo.",
   "tree.sessionInfo": "Información de sesión", // Session Info
   "tree.groupInfo": "Información del grupo", // Group Info
   "tree.collectionInfo": "Información de la colección", // Collection Info
@@ -852,7 +905,6 @@ const es: typeof en = {
   "tree.persistDoc": "Guardar en disco…", // Save to Disk…
   "tree.closeScratch": "Cerrar borrador", // Close Scratch
   "tree.importProject": "Importar proyecto", // Import Project
-  "tree.openInSplit": "Abrir en panel dividido", // Open in Split
   "tree.createProject": "Crear proyecto",
   "tree.dropFoldersHint": "Suelta carpetas aquí para añadirlas como proyectos",
   // New Collection / Collection name / research / Create Collection / No directory / Delete Collection
@@ -862,30 +914,20 @@ const es: typeof en = {
   "collection.name": "Nombre de la colección",
   "collection.namePlaceholder": "research",
   "collection.submit": "Crear colección",
+  "collection.duplicateName": "Ya existe una colección con este nombre.",
   "collection.tag": "Sin directorio",
   "collection.deleteTitle": "Eliminar colección",
   "collection.deleteBody": (name) =>
-    `¿Eliminar la colección "${name}"? También se eliminarán sus grupos y sesiones. Esto no se puede deshacer.`,
-  "folder.projectCount": (count) => (count === 1 ? "1 proyecto" : `${count} proyectos`), // {count} projects
-  "folder.new": "Nueva carpeta", // New Folder
-  "folder.createTitle": "Nueva carpeta", // New Folder
-  "folder.renameTitle": "Renombrar carpeta", // Rename Folder
-  "folder.name": "Nombre de la carpeta", // Folder name
-  "folder.namePlaceholder": "pagos", // payments
-  "folder.create": "Crear carpeta", // Create Folder
-  "folder.delete": "Eliminar carpeta", // Delete Folder
-  "folder.deleteTitle": "Eliminar carpeta", // Delete Folder
-  "folder.deleteBody": (name) =>
-    `¿Eliminar la carpeta "${name}"? Los proyectos que contiene se conservan y salen de la carpeta.`, // Delete folder "{name}"? The projects inside are kept and moved out of the folder.
-  "folder.moveTo": "Mover a carpeta", // Move to Folder
-  "folder.none": "Sin carpeta", // No Folder
+    `¿Eliminar la colección «${name}»? Sus proyectos pasarán al nivel superior con todo su contenido. Se eliminarán los grupos y las sesiones sin archivar que pertenezcan directamente a la colección; las sesiones archivadas se conservarán.`,
+  "collection.projectCount": (count) => (count === 1 ? "1 proyecto" : `${count} proyectos`), // {count} projects
+  "collection.renameTitle": "Renombrar colección",
+  "collection.moveTo": "Mover a colección",
+  "collection.none": "Nivel superior",
   "tree.cloneProject": "Clonar desde Git", // Clone from Git
   "createProject.title": "Crear proyecto",
   "createProject.name": "Nombre del proyecto",
   "createProject.namePlaceholder": "mi-proyecto",
-  "createProject.into": "Crear en",
   "createProject.choose": "Elegir…",
-  "createProject.noParent": "Elige una carpeta principal",
   "createProject.invalidName":
     "Introduce un único nombre de carpeta sin / ni \\.",
   "createProject.creating": "Creando…",
@@ -897,9 +939,6 @@ const es: typeof en = {
   "clone.branchPlaceholder": "Rama por defecto si se deja vacío", // Default branch if empty
   "clone.folder": "Nombre de carpeta", // Folder name
   "clone.folderPlaceholder": "Automático desde la URL", // Auto from URL
-  "clone.into": "Clonar en", // Clone into
-  "clone.choose": "Elegir…", // Choose…
-  "clone.noParent": "Elige una carpeta principal", // Choose a parent folder
   "clone.cloning": "Clonando…", // Cloning…
   "clone.cancelling": "Cancelando…",
   "clone.stageStarting": "Iniciando Git…",
@@ -921,6 +960,7 @@ const es: typeof en = {
   "tree.filterWorking": "En curso", // Working
   "tree.filterAsking": "Pendiente", // Pending
   "tree.filterWaiting": "Visto", // Viewed
+  "tree.filterBackground": "Tareas activas", // Tasks running
   "tree.filterStatus": "Filtrar por estado", // Filter by status
   "tree.refreshStatusFilter": "Actualizar filtro de estado",
   "tree.refreshStatusMatch": "Actualizar estado",
@@ -947,7 +987,6 @@ const es: typeof en = {
   "mark.urgent": "Urgente", // Urgent
   "mark.important": "Importante", // Important
   "mark.bug": "Error", // Bug
-  "tree.filterBackground": "Tareas activas", // Tasks running
   "mark.done": "Hecho", // Done
   "mark.wip": "En curso", // In progress
   "mark.pinned": "Fijado", // Pinned
@@ -1142,6 +1181,7 @@ const es: typeof en = {
   "center.noSessionHintPre": "Elige una sesión en la barra lateral, o pulsa ", // Pick a session from the sidebar, or press
   "center.noSessionHintPost": " para crear un terminal", // to create a terminal
   "center.createTerminal": "Crear terminal", // Create Terminal
+  "center.splitHint": "Abre una sesión para dividirla con estos atajos:",
   "tab.unsavedDot": "Cambios sin guardar", // Unsaved changes
   "tab.newTerminal": "Nuevo terminal", // New terminal
   "tab.newDocument": "Nuevo documento", // New document
@@ -1415,18 +1455,60 @@ const es: typeof en = {
   "login.authFailed":
     "Error de autenticación. Comprueba la contraseña de acceso o abre un nuevo enlace de emparejamiento si se ha regenerado.", // Authentication failed, check password or use a new pairing link
   "dir.title": "Elegir directorio del proyecto", // Choose Project Directory
-  "dir.pathPlaceholder": "Busca, o escribe una ruta y pulsa Enter (admite ~)", // Search, or type a path and press Enter (supports ~)
   "dir.up": "Subir un nivel", // Up one level
   "dir.newFolder": "Nueva carpeta", // New Folder
   "dir.newFolderPlaceholder": "Nombre de la carpeta", // Folder name
-  "dir.goInput": "Ir a la ruta escrita", // Go to typed path
-  "dir.noSubdirs": "(sin subdirectorios)", // (no subdirectories)
   "dir.empty": "(carpeta vacía)", // (empty folder)
   "dir.noMatch": "Sin elementos coincidentes", // No matching items
-  "dir.target": "Carpeta destino", // Target
   "dir.showHidden": "Mostrar elementos ocultos", // Show hidden items
   "dir.importing": "Importando…", // Importing…
-  "dir.choose": "Elegir este directorio", // Choose This Directory
+  "dir.choose": "Elegir", // Choose
+  "dir.back": "Atrás", // Back
+  "dir.forward": "Adelante", // Forward
+  "dir.editPath": "Escribir una ruta", // Type a Path
+  "dir.pathLabel": "Ruta de la carpeta", // Folder path
+  "dir.filter": "Filtrar", // Filter
+  "dir.places": "Accesos rápidos", // Places
+  "dir.sectionLocations": "Ubicaciones", // Locations
+  "dir.sectionDrives": "Este equipo", // This PC
+  "dir.sectionProjects": "Proyectos", // Projects
+  "dir.sectionRecent": "Recientes", // Recent
+  "dir.placeHome": "Carpeta personal", // Home
+  "dir.placeComputer": "Equipo", // Computer
+  "dir.placeFileSystem": "Sistema de archivos", // File System
+  "dir.cantOpen": "No se puede abrir esta carpeta.", // This folder cannot be opened.
+  "dir.backTo": (path: string) => `Volver a ${path}`, // Back to ${path}
+  "dir.goHome": "Ir a la carpeta personal", // Go to Home
+  "dir.folder": "Carpeta", // Folder
+  "location.label": "Ubicación", // Location
+  "location.browse": "Examinar…", // Browse…
+  "location.pickerTitle": "Elegir ubicación", // Choose Location
+  "location.ready": "Se creará una carpeta nueva aquí.", // A new folder will be created here.
+  "location.checking": "Comprobando…", // Checking…
+  "location.missing": (path: string) => `${path} no existe o no se puede abrir.`, // ${path} does not exist or cannot be opened.
+  "location.notAbsolute": "Introduce una ruta completa.", // Enter a full path.
+  "location.exists": "Ya existe un archivo o una carpeta con este nombre.", // A file or folder with this name already exists.
+  "dir.go": "Ir", // Go
+  "dir.pathPending": "Pulsa Intro o Ir para abrir esta ruta.", // Press Enter or Go to open this path.
+  "dir.selectedFolder": "Carpeta seleccionada", // Selected folder
+  "dir.openFolder": "Abrir carpeta", // Open Folder
+  "location.local": "Local", // Local
+  "location.server": "Servidor", // Server
+  "location.host": "Host desconocido", // Unknown host
+  "location.unknownOs": "Sistema desconocido", // Unknown system
+  "location.hostUnavailable": "La información del host no está disponible.", // Host information is unavailable.
+  "location.invalidName": "No se puede usar este nombre.", // This name cannot be used.
+  "location.validationFailed": "No se pudo comprobar esta ubicación.", // This location could not be checked.
+  "location.enterTarget": "Introduce una ubicación y un nombre.", // Enter a location and a name.
+  "location.createTo": "Crear en", // Create at
+  "clone.destination": "Clonar en", // Clone to
+  "clone.ready": "Listo para clonar", // Ready to clone
+  "clone.defaultBranch": "Rama predeterminada", // Default branch
+  "createProject.createdRetry": "Se creó la carpeta, pero no se pudo importar el proyecto.", // The folder was created, but the project could not be imported.
+  "createProject.retryImport": "Reintentar importación", // Retry Import
+  "doc.saveTo": "Guardar en", // Save to
+  "doc.saveAsReopen": "Vuelve a abrir Guardar como desde el documento para guardarlo.", // Open Save As again from the document to save it.
+  "clone.cancelClone": "Cancelar clonación", // Cancel Clone
   "conn.reconnecting": "Conexión perdida, reconectando…", // Connection lost, reconnecting…
   "conn.reconnectNow": "Reconectar ahora", // Reconnect now
   "conn.retrying": "Reconectando…", // Reconnecting…
@@ -1754,6 +1836,7 @@ const es: typeof en = {
   "chat.catalogChecked": (time: string) => `Última comprobación: ${time}`,
   "chat.catalogFailed": "No se pudo actualizar. El catálogo anterior sigue disponible.",
   "chat.catalogRefresh": "Actualizar",
+  "chat.modelsCliOutdated": "Esta versión de Claude Code no puede mostrar su lista de modelos. Actualice Claude Code para ver todos los modelos disponibles.",
   "chat.modelDefault": "Modelo predeterminado",
   "chat.mode.default": "Preguntar siempre",
   "chat.mode.agentDefault": "Predeterminado del agente",
@@ -2015,6 +2098,9 @@ const es: typeof en = {
   "chat.tasks.command": "Comando",
   "chat.tasks.output": "Salida",
   "chat.tasks.noOutput": "Todavía no hay salida.",
+  "chat.tasks.conversation": "Conversación",
+  "chat.tasks.noConversation": "Todavía no hay nada registrado.",
+  "chat.tasks.conversationUnavailable": "Esta conversación no está disponible.",
   "chat.tasks.outputTruncated": "Solo se muestra la salida más reciente.",
   "chat.tasks.phases": "Fases",
   "chat.tasks.noProgress": "Esta tarea no informa del progreso de cada agente.",
@@ -2136,6 +2222,10 @@ const es: typeof en = {
   "term.runs.logFinished": (code) => `Finalizado con código de salida ${code}`,
   "term.runs.logEnded": "Finalizado",
   "term.runs.logEmpty": "Todavía no hay salida",
+  "chat.antigravity.placeholder": "Escribe a Antigravity o usa @archivos para hacer referencia a archivos",
+  "chat.antigravity.textOnly": "La vista de conversación de Antigravity actualmente solo admite mensajes de texto.",
+  "chat.antigravity.permissionsHint": "Las herramientas que requieren aprobación deben autorizarse previamente en la configuración de Antigravity o utilizarse en la vista de terminal.",
+  "chat.antigravity.settingsHint": "Cambie el modelo, el nivel de razonamiento o los permisos entre turnos.",
 };
 
 export default es;

@@ -781,9 +781,7 @@ fn clone_to_with_progress_inner(
         .map(str::to_string)
         .or_else(|| derive_clone_dir_name(url))
         .ok_or_else(|| "Could not determine a target folder name from the URL".to_string())?;
-    if folder.contains('/') || folder.contains('\\') {
-        return Err(format!("Invalid folder name: {folder}"));
-    }
+    crate::files::validate_child_name(&folder)?;
     let target = parent.join(&folder);
     if target.exists() {
         return Err(format!(

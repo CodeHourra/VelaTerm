@@ -74,14 +74,7 @@ pub fn copy(conn: &Connection, source: &str, target: &str) -> Result<(), String>
 pub fn session(ctx: &AppCtx, id: &str) -> Result<Session, String> {
     let session =
         repo::get_session(&ctx.db().conn.lock().unwrap(), id)?.ok_or("Session not found")?;
-    if !matches!(
-        session.kind,
-        SessionKind::Claude
-            | SessionKind::Codex
-            | SessionKind::Opencode
-            | SessionKind::Pi
-            | SessionKind::Omp
-    ) {
+    if !session.kind.supports_chat() {
         return Err(
             "Model transfer is available only for chat-capable sessions".into(),
         );
@@ -417,7 +410,7 @@ pub fn from_args(kind: SessionKind, text: Option<&str>) -> Selection {
                 state.model = clean(value);
                 true
             }
-            "--effort" if kind == SessionKind::Claude => {
+            "--effort" if matches!(kind, SessionKind::Claude | SessionKind::Antigravity) => {
                 state.effort = clean(value).filter(|v| v != "auto");
                 true
             }
@@ -463,7 +456,7 @@ pub fn without_selection_args(kind: SessionKind, text: Option<&str>) -> String {
             .map(|s| super::inject::split_extra_args(Some(s)));
         let value = inline.or_else(|| next.as_ref().and_then(|v| v.first()).map(String::as_str));
         let remove = matches!(flag, "--model" | "-m")
-            || (kind == SessionKind::Claude && flag == "--effort")
+            || (matches!(kind, SessionKind::Claude | SessionKind::Antigravity) && flag == "--effort")
             || (kind == SessionKind::Opencode && flag == "--variant")
             || (matches!(kind, SessionKind::Pi | SessionKind::Omp) && flag == "--thinking")
             || (kind == SessionKind::Codex
@@ -496,7 +489,7 @@ pub fn terminal_args(
         add("--model", "VLX_SESSION_MODEL", model.clone());
     }
     match kind {
-        SessionKind::Claude => {
+        SessionKind::Claude | SessionKind::Antigravity => {
             // The launcher merges "off" into its existing settings JSON so hooks remain installed.
             if let Some(effort) = choice.effort.as_ref().filter(|v| *v != "off") {
                 add("--effort", "VLX_SESSION_EFFORT", effort.clone());

@@ -261,7 +261,7 @@
   padding: 4px 12px;
   border-radius: var(--r-sm);
   background: var(--red, #c0392b);
-  color: #fff;
+  color: var(--bg-0);
   font-size: 12px;
   white-space: nowrap;
   overflow: hidden;

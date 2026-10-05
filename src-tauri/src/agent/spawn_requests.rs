@@ -261,15 +261,15 @@ fn launch_defaults(app: &AppCtx, conn: &Connection, parent: Option<&Session>, ki
     let args = same.and_then(|p| p.agent_args.clone()).or_else(|| prefs["agentDefaults"][kind.as_str()]["args"].as_str().map(str::to_owned));
     let permission = permission_catalog::effective(conn, kind, same.and_then(|p| p.permission_mode.as_deref()))?;
     permission_catalog::validate(kind, permission.as_deref())?;
-    let engine = if !super::plan_execute::supported(kind) { "tui" }
-        else if let Some(parent) = parent.filter(|p| super::plan_execute::supported(p.kind)) { &parent.engine }
+    let engine = if !kind.supports_chat() { "tui" }
+        else if let Some(parent) = parent.filter(|p| p.kind.supports_chat()) { &parent.engine }
         else { prefs["agentDefaults"][kind.as_str()]["engine"].as_str().unwrap_or("chat") };
     let _ = app;
     if !matches!(engine, "tui" | "chat") { return Err("Invalid default session engine".into()); }
     Ok((args, permission, engine.into()))
 }
 
-fn default_selection(conn: &Connection, kind: SessionKind, args: Option<&str>) -> Result<session_settings::Selection, String> {
+pub(crate) fn default_selection(conn: &Connection, kind: SessionKind, args: Option<&str>) -> Result<session_settings::Selection, String> {
     let mut selection = session_settings::from_args(kind, args);
     if selection != session_settings::Selection::default() { return Ok(selection); }
     let prefs = settings(conn)?;
@@ -300,7 +300,7 @@ fn prepare_launch(app: &AppCtx, request: &SpawnRequest) -> Result<Launch, String
             args, permission, engine, preset_id: None, agent_path: None, worktree: None, base: None };
         (parent, launch)
     };
-    if parent.kind == launch.kind && super::plan_execute::supported(launch.kind) {
+    if parent.kind == launch.kind && launch.kind.supports_chat() {
         let mut inherited = session_settings::resolve(app, &parent)?;
         if request.model.is_some() { inherited.model = session_settings::clean(request.model.as_deref()); }
         if request.effort.is_some() { inherited.effort = session_settings::clean(request.effort.as_deref()); }
@@ -1110,6 +1110,7 @@ mod tests {
     #[test]
     fn chat_receipt_known_rejection_can_retry_but_pending_and_legacy_errors_cannot() {
         let f = fixture(); let result = confirm(&f,request(&f,false));
+        f.app.db().conn.lock().unwrap().execute("UPDATE sessions SET engine='chat' WHERE id=?1",[&result.session_id]).unwrap();
         let send = || core::chat_send(&f.app,&result.session_id,&result.request.prompt,vec![],Some("queue"),Some(&result.message_id));
         assert!(send().unwrap_err().contains("running agent"));
         let raw = submission_outcome(&f.app.db().conn.lock().unwrap(),&result.session_id,&result.message_id).unwrap().unwrap();

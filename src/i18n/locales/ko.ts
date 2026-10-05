@@ -212,7 +212,7 @@ const ko: typeof en = {
   "memory.collectionConversation": "대화",
   "memory.collectionEmptyEntries": "이 대화에는 아직 지식 항목이 없습니다.",
   "memory.title": "지식 베이스",
-  "memory.add": "세션 지식 베이스로 정리",
+  "memory.add": "지식 베이스에 추가",
   "memory.intro": "프로젝트와 세션별로 지식을 정리합니다. 저장된 항목은 원본 변경에 따라 자동으로 갱신되지 않으며 직접 편집할 수 있습니다.",
   "memory.entries": "지식 항목",
   "memory.emptyJobs": "아직 정리 기록이 없습니다.",
@@ -294,11 +294,25 @@ const ko: typeof en = {
   "chat.sync.loading": "대화 동기화 중…",
   "chat.sync.failed": "동기화하지 못했습니다. 이미 불러온 메시지는 계속 볼 수 있습니다.",
   "chat.sync.history": "이전 메시지 불러오기",
+  "chat.rail.title": "내 메시지",
+  "chat.rail.imageMessage": "이미지 메시지",
+  "chat.rail.emptyMessage": "빈 메시지",
+  "chat.rail.loading": "이전 메시지를 불러오는 중…",
+  "chat.rail.unavailable": "이 메시지는 더 이상 사용할 수 없습니다.",
+  "chat.rail.failed": "메시지를 불러오지 못했습니다.",
   "chat.submission.updateRequired": "이 클라이언트에서 메시지를 보내려면 먼저 서버를 업데이트하세요.",
   "chat.submission.sending": "전송 중…",
   "chat.submission.sent": "전송됨",
   "chat.submission.queued": "대기 중",
   "chat.submission.failed": "전송 실패",
+  "chat.recovery.savedSubmission": "저장된 전송 내용(원본 메시지와 대조 대기 중)",
+  "chat.recovery.saveError": "이 기기에 확인 대기 중인 메시지를 저장할 수 없습니다.",
+  "chat.recovery.readError": "이 기기의 확인 대기 중인 메시지를 복원할 수 없습니다.",
+  "chat.recovery.writerBlocked": "이 세션의 소유권을 확인할 수 없습니다. 계속하기 전에 다른 앱 인스턴스나 이전 에이전트가 이 세션을 사용하고 있지 않은지 확인하세요.",
+  "chat.recovery.interrupted": "작업 완료가 확인되기 전에 에이전트가 중지되었습니다. 계속하기 전에 기록을 확인하세요.",
+  "chat.recovery.paused": "대기 중인 메시지는 보존되며, 재개를 선택할 때까지 전송되지 않습니다.",
+  "chat.recovery.resumeQueue": "대기 메시지 전송 재개",
+  "chat.recovery.continue": "중단된 작업 계속",
   "chat.submission.unknown": "전송 결과 확인 필요",
   "chat.submission.check": "상태 확인",
   "common.retry": "다시 시도", // Retry
@@ -337,6 +351,7 @@ const ko: typeof en = {
   "titlebar.hotReloadedAt": (time) => `핫 리로드: ${time}`, // Hot reloaded at {time}
   "titlebar.themeSystem": (resolved) => `시스템 따름 (현재: ${resolved})`, // Follow system (currently {resolved})
   "titlebar.themeDark": "다크", // Dark
+  "titlebar.themeClassicDark": "클래식 다크", // Classic Dark
   "titlebar.themeLight": "라이트", // Light
   "titlebar.gameCenter": "게임 센터",
   "titlebar.browser": "내장 브라우저", // Built-in Browser
@@ -697,8 +712,33 @@ const ko: typeof en = {
   "settings.scSaveDoc": "문서 저장", // Save document
   "settings.scRecording": "키를 누르세요…", // Press keys…
   "settings.scHint": "단축키를 클릭한 다음 새 조합을 누르세요(Cmd/Ctrl 필요).", // hint
+  "settings.scScreenshotSection": "스크린샷",
+  "settings.scScreenshot": "스크린샷 찍기",
+  "settings.scOff": "끔",
+  "settings.scScreenshotHint":
+    "VelaTerm이 백그라운드에 있어도 모든 앱에서 사용할 수 있습니다. 끄려면 단축키를 클릭한 다음 Delete 키를 누르세요.",
+  "settings.scConflictTabs": "이미 탭 전환에 사용 중",
+  "settings.scInUse": "다른 앱에서 이미 사용 중인 단축키입니다",
   "settings.scReset": "기본값 복원", // Restore defaults
   "settings.scConflict": (label: string) => `이미 "${label}"에서 사용 중`, // conflict
+
+  // ── Screenshot overlay ──
+  "screenshot.hint": "드래그하여 영역을 선택하거나 클릭하여 전체 화면을 캡처하세요",
+  "screenshot.rect": "사각형",
+  "screenshot.ellipse": "타원",
+  "screenshot.arrow": "화살표",
+  "screenshot.pen": "펜",
+  "screenshot.mosaic": "모자이크",
+  "screenshot.text": "텍스트",
+  "screenshot.undo": "실행 취소",
+  "screenshot.save": "저장",
+  "screenshot.cancel": "취소",
+  "screenshot.done": "완료",
+  "screenshot.doneTip": "클립보드에 복사(Enter)",
+  "screenshot.small": "작게",
+  "screenshot.medium": "보통",
+  "screenshot.large": "크게",
+  "screenshot.failed": (detail: string) => `스크린샷을 내보내지 못했습니다: ${detail}`,
 
   // ── Remote access panel ──
   "remote.title": "원격 접속 (브라우저)", // Remote Access (Browser)
@@ -820,6 +860,7 @@ const ko: typeof en = {
   "tree.moveToSession": "세션 아래로 이동 (하위로)", // Move under a session (as child)
   "tree.moveTo": "이동…", // Move to…
   "tree.openNewTab": "새 탭에서 열기", // Open in New Tab
+  "tree.openInSplit": "분할 창에서 열기", // Open in Split
   "tree.openSplitRight": "오른쪽 분할에서 열기", // Open in Split Right
   "tree.openSplitDown": "아래쪽 분할에서 열기", // Open in Split Down
   "tree.openInFocusedPane": "활성 분할 창에서 열기", // Open in Focused Pane
@@ -827,6 +868,18 @@ const ko: typeof en = {
   "tree.tileSelectedTooMany": "바둑판 배열 (최대 4개 세션)", // Tile Selected Sessions (up to 4)
   "tree.forkSession": "세션 포크", // Fork Session
   "tree.exportSession": "세션 내보내기…", // Export Session…
+  "sessionTitle.rename": "AI로 이름 변경",
+  "sessionTitle.chooseAgentHint": "현재 세션의 에이전트를 사용할 수 없습니다. 다른 에이전트를 선택하면 해당 에이전트의 기본 설정을 사용합니다.",
+  "sessionTitle.agentUnavailable": "선택한 에이전트를 사용할 수 없습니다. 다른 에이전트를 선택하거나 설정을 확인하세요.",
+  "sessionTitle.generating": "제목 생성 중…",
+  "sessionTitle.unavailable": "이 세션에는 읽을 수 있는 대화가 없습니다.",
+  "sessionTitle.noAgent": "지원되는 에이전트가 설치되어 있지 않습니다. 제목을 생성하려면 Claude, Codex, OpenCode, Pi, OMP 또는 Grok을 설치하세요.",
+  "sessionTitle.busy": "이 세션의 제목을 이미 생성하고 있습니다.",
+  "sessionTitle.tooLarge": "대화가 너무 길어 제목을 생성할 수 없습니다. 현재 제목은 유지됩니다.",
+  "sessionTitle.timeout": "제목 생성 시간이 초과되었습니다. 다시 시도하세요.",
+  "sessionTitle.invalid": "에이전트가 유효하지 않은 제목을 반환했습니다. 다시 시도하세요.",
+  "sessionTitle.changed": "제목 생성 중에 세션이 변경되어 제목을 업데이트하지 않았습니다.",
+  "sessionTitle.failed": "에이전트가 제목을 생성하지 못했습니다. 다시 시도하세요.",
   "tree.sessionInfo": "세션 정보", // Session Info
   "tree.groupInfo": "그룹 정보", // Group Info
   "tree.collectionInfo": "컬렉션 정보", // Collection Info
@@ -845,7 +898,6 @@ const ko: typeof en = {
   "tree.persistDoc": "디스크에 저장…", // Save to Disk…
   "tree.closeScratch": "초안 닫기", // Close Scratch
   "tree.importProject": "프로젝트 가져오기", // Import Project
-  "tree.openInSplit": "분할 창에서 열기", // Open in Split
   "tree.createProject": "프로젝트 만들기",
   "tree.dropFoldersHint": "폴더를 여기에 놓으면 프로젝트로 추가됩니다",
   // New Collection / Collection name / research / Create Collection / No directory / Delete Collection
@@ -855,30 +907,20 @@ const ko: typeof en = {
   "collection.name": "컬렉션 이름",
   "collection.namePlaceholder": "research",
   "collection.submit": "컬렉션 만들기",
+  "collection.duplicateName": "같은 이름의 컬렉션이 이미 있습니다.",
   "collection.tag": "디렉터리 없음",
   "collection.deleteTitle": "컬렉션 삭제",
   "collection.deleteBody": (name) =>
-    `컬렉션 "${name}"을(를) 삭제할까요? 안의 그룹과 세션도 모두 삭제되며 되돌릴 수 없습니다.`,
-  "folder.projectCount": (count) => `프로젝트 ${count}개`, // {count} projects
-  "folder.new": "새 폴더", // New Folder
-  "folder.createTitle": "새 폴더", // New Folder
-  "folder.renameTitle": "폴더 이름 바꾸기", // Rename Folder
-  "folder.name": "폴더 이름", // Folder name
-  "folder.namePlaceholder": "payments", // payments
-  "folder.create": "폴더 만들기", // Create Folder
-  "folder.delete": "폴더 삭제", // Delete Folder
-  "folder.deleteTitle": "폴더 삭제", // Delete Folder
-  "folder.deleteBody": (name) =>
-    `폴더 "${name}"을(를) 삭제할까요? 안의 프로젝트는 유지되며 폴더 밖으로 이동합니다.`, // Delete folder "{name}"? The projects inside are kept and moved out of the folder.
-  "folder.moveTo": "폴더로 이동", // Move to Folder
-  "folder.none": "폴더 없음", // No Folder
+    `컬렉션 "${name}"을(를) 삭제할까요? 포함된 프로젝트는 모든 내용을 유지한 채 최상위로 이동합니다. 컬렉션에 직접 속한 그룹과 보관되지 않은 세션은 삭제되며, 보관된 세션은 유지됩니다.`,
+  "collection.projectCount": (count) => `프로젝트 ${count}개`, // {count} projects
+  "collection.renameTitle": "컬렉션 이름 바꾸기",
+  "collection.moveTo": "컬렉션으로 이동",
+  "collection.none": "최상위",
   "tree.cloneProject": "Git에서 클론", // Clone from Git
   "createProject.title": "프로젝트 만들기",
   "createProject.name": "프로젝트 이름",
   "createProject.namePlaceholder": "내-프로젝트",
-  "createProject.into": "만들 위치",
   "createProject.choose": "선택…",
-  "createProject.noParent": "상위 폴더를 선택하세요",
   "createProject.invalidName": "/ 또는 \\가 없는 단일 폴더 이름을 입력하세요.",
   "createProject.creating": "만드는 중…",
   "createProject.submit": "프로젝트 만들기",
@@ -889,9 +931,6 @@ const ko: typeof en = {
   "clone.branchPlaceholder": "비우면 기본 브랜치", // Default branch if empty
   "clone.folder": "폴더 이름", // Folder name
   "clone.folderPlaceholder": "URL에서 자동", // Auto from URL
-  "clone.into": "클론 위치", // Clone into
-  "clone.choose": "선택…", // Choose…
-  "clone.noParent": "상위 폴더를 선택하세요", // Choose a parent folder
   "clone.cloning": "클론 중…", // Cloning…
   "clone.cancelling": "취소 중…",
   "clone.stageStarting": "Git 시작 중…",
@@ -913,6 +952,7 @@ const ko: typeof en = {
   "tree.filterWorking": "작업 중", // Working
   "tree.filterAsking": "처리 대기", // Pending
   "tree.filterWaiting": "확인함", // Viewed
+  "tree.filterBackground": "백그라운드 실행 중", // Tasks running
   "tree.filterStatus": "상태로 필터", // Filter by status
   "tree.refreshStatusFilter": "상태 필터 새로 고침",
   "tree.refreshStatusMatch": "상태 새로 고침",
@@ -939,7 +979,6 @@ const ko: typeof en = {
   "mark.urgent": "긴급", // Urgent
   "mark.important": "중요", // Important
   "mark.bug": "버그", // Bug
-  "tree.filterBackground": "백그라운드 실행 중", // Tasks running
   "mark.done": "완료", // Done
   "mark.wip": "진행 중", // In progress
   "mark.pinned": "고정", // Pinned
@@ -1126,6 +1165,7 @@ const ko: typeof en = {
   "center.noSessionHintPre": "사이드바에서 세션을 선택하거나 ", // Pick a session from the sidebar, or press
   "center.noSessionHintPost": " 로 터미널을 만드세요", // to create a terminal
   "center.createTerminal": "터미널 만들기", // Create Terminal
+  "center.splitHint": "세션을 연 후 다음 단축키로 화면을 분할할 수 있습니다:",
   "tab.unsavedDot": "저장되지 않은 변경", // Unsaved changes
   "tab.newTerminal": "새 터미널", // New terminal
   "tab.newDocument": "새 문서", // New document
@@ -1388,18 +1428,60 @@ const ko: typeof en = {
   "login.authFailed":
     "인증에 실패했습니다. 액세스 비밀번호를 확인하세요. 링크를 다시 생성했다면 새 페어링 링크를 사용하세요.", // Authentication failed, check password or use a new pairing link
   "dir.title": "프로젝트 디렉터리 선택", // Choose Project Directory
-  "dir.pathPlaceholder": "검색하거나 경로를 입력하고 Enter로 이동 (~ 지원)", // Search, or type a path and press Enter (supports ~)
   "dir.up": "상위 폴더로", // Up one level
   "dir.newFolder": "새 폴더", // New Folder
   "dir.newFolderPlaceholder": "폴더 이름", // Folder name
-  "dir.goInput": "입력한 경로로 이동", // Go to typed path
-  "dir.noSubdirs": "(하위 디렉터리 없음)", // (no subdirectories)
   "dir.empty": "(빈 폴더)", // (empty folder)
   "dir.noMatch": "일치하는 항목 없음", // No matching items
-  "dir.target": "대상 폴더", // Target
   "dir.showHidden": "숨김 항목 표시", // Show hidden items
   "dir.importing": "가져오는 중…", // Importing…
-  "dir.choose": "이 디렉터리 선택", // Choose This Directory
+  "dir.choose": "선택", // Choose
+  "dir.back": "뒤로", // Back
+  "dir.forward": "앞으로", // Forward
+  "dir.editPath": "경로 입력", // Type a Path
+  "dir.pathLabel": "폴더 경로", // Folder path
+  "dir.filter": "필터", // Filter
+  "dir.places": "위치 목록", // Places
+  "dir.sectionLocations": "위치", // Locations
+  "dir.sectionDrives": "내 PC", // This PC
+  "dir.sectionProjects": "프로젝트", // Projects
+  "dir.sectionRecent": "최근 항목", // Recent
+  "dir.placeHome": "홈", // Home
+  "dir.placeComputer": "컴퓨터", // Computer
+  "dir.placeFileSystem": "파일 시스템", // File System
+  "dir.cantOpen": "이 폴더를 열 수 없습니다.", // This folder cannot be opened.
+  "dir.backTo": (path: string) => `${path}(으)로 돌아가기`, // Back to ${path}
+  "dir.goHome": "홈으로 이동", // Go to Home
+  "dir.folder": "폴더", // Folder
+  "location.label": "위치", // Location
+  "location.browse": "찾아보기…", // Browse…
+  "location.pickerTitle": "위치 선택", // Choose Location
+  "location.ready": "이 위치에 새 폴더가 생성됩니다.", // A new folder will be created here.
+  "location.checking": "확인 중…", // Checking…
+  "location.missing": (path: string) => `${path}이(가) 없거나 열 수 없습니다.`, // ${path} does not exist or cannot be opened.
+  "location.notAbsolute": "전체 경로를 입력하세요.", // Enter a full path.
+  "location.exists": "같은 이름의 파일 또는 폴더가 이미 있습니다.", // A file or folder with this name already exists.
+  "dir.go": "이동", // Go
+  "dir.pathPending": "Enter 키를 누르거나 [이동]을 클릭하면 이 경로가 열립니다.", // Press Enter or Go to open this path.
+  "dir.selectedFolder": "선택한 폴더", // Selected folder
+  "dir.openFolder": "폴더 열기", // Open Folder
+  "location.local": "로컬", // Local
+  "location.server": "서버", // Server
+  "location.host": "알 수 없는 호스트", // Unknown host
+  "location.unknownOs": "알 수 없는 시스템", // Unknown system
+  "location.hostUnavailable": "호스트 정보를 가져올 수 없습니다.", // Host information is unavailable.
+  "location.invalidName": "이 이름은 사용할 수 없습니다.", // This name cannot be used.
+  "location.validationFailed": "이 위치를 확인할 수 없습니다.", // This location could not be checked.
+  "location.enterTarget": "위치와 이름을 입력하세요.", // Enter a location and a name.
+  "location.createTo": "생성 위치", // Create at
+  "clone.destination": "클론 위치", // Clone to
+  "clone.ready": "클론할 수 있습니다", // Ready to clone
+  "clone.defaultBranch": "기본 브랜치", // Default branch
+  "createProject.createdRetry": "폴더는 생성되었지만 프로젝트를 가져오지 못했습니다.", // The folder was created, but the project could not be imported.
+  "createProject.retryImport": "다시 가져오기", // Retry Import
+  "doc.saveTo": "저장 위치", // Save to
+  "doc.saveAsReopen": "저장하려면 문서에서 [다른 이름으로 저장]을 다시 여세요.", // Open Save As again from the document to save it.
+  "clone.cancelClone": "클론 취소", // Cancel Clone
   "conn.reconnecting": "연결이 끊어졌습니다. 다시 연결하는 중…", // Connection lost, reconnecting…
   "conn.reconnectNow": "지금 다시 연결", // Reconnect now
   "conn.retrying": "다시 연결하는 중…", // Reconnecting…
@@ -1725,6 +1807,7 @@ const ko: typeof en = {
   "chat.catalogChecked": (time: string) => `마지막 확인: ${time}`,
   "chat.catalogFailed": "업데이트하지 못했습니다. 기존 목록은 계속 사용할 수 있습니다.",
   "chat.catalogRefresh": "새로 고침",
+  "chat.modelsCliOutdated": "현재 버전의 Claude Code는 모델 목록을 제공하지 않습니다. Claude Code를 업데이트하면 사용 가능한 모든 모델을 볼 수 있습니다.",
   "chat.modelDefault": "기본 모델",
   "chat.mode.default": "매번 확인",
   "chat.mode.agentDefault": "에이전트 기본값",
@@ -1984,6 +2067,9 @@ const ko: typeof en = {
   "chat.tasks.command": "명령",
   "chat.tasks.output": "출력",
   "chat.tasks.noOutput": "아직 출력이 없습니다.",
+  "chat.tasks.conversation": "대화",
+  "chat.tasks.noConversation": "아직 기록된 내용이 없습니다.",
+  "chat.tasks.conversationUnavailable": "이 대화를 표시할 수 없습니다.",
   "chat.tasks.outputTruncated": "최근 출력만 표시합니다.",
   "chat.tasks.phases": "단계",
   "chat.tasks.noProgress": "이 작업은 에이전트별 진행 상황을 보고하지 않습니다.",
@@ -2105,6 +2191,10 @@ const ko: typeof en = {
   "term.runs.logFinished": (code) => `종료되었습니다 (종료 코드 ${code})`,
   "term.runs.logEnded": "종료되었습니다",
   "term.runs.logEmpty": "아직 출력이 없습니다",
+  "chat.antigravity.placeholder": "Antigravity에 메시지를 보내세요. @파일로 파일을 참조할 수 있습니다",
+  "chat.antigravity.textOnly": "Antigravity 대화 보기는 현재 텍스트 메시지만 지원합니다.",
+  "chat.antigravity.permissionsHint": "승인이 필요한 도구는 Antigravity 설정에서 미리 허용하거나 터미널 보기에서 사용해야 합니다.",
+  "chat.antigravity.settingsHint": "모델, 추론 강도 또는 권한은 턴 사이에 변경하세요.",
 };
 
 export default ko;

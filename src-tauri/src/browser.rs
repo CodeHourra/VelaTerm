@@ -245,13 +245,15 @@ pub async fn browser_open(
         })
         .map_err(|e| format!("Failed to configure browser mouse tracking: {e}"))?;
     }
-    window
+    let _webview = window
         .add_child(
             builder,
             LogicalPosition::new(x, y + offset),
             LogicalSize::new(w, h),
         )
         .map_err(|e| format!("Failed to create browser webview: {e}"))?;
+    #[cfg(target_os = "windows")]
+    crate::focus_win::track(&_webview);
 
     if let Ok(mut map) = state.0.lock() {
         map.insert(tab_id, label);
@@ -357,6 +359,10 @@ pub fn browser_set_visible(
 ) {
     let _slow = slow("browser_set_visible");
     if let Some(wv) = webview_of(&app, &state, &tab_id) {
+        #[cfg(target_os = "windows")]
+        if !visible {
+            crate::focus_win::forget(wv.label());
+        }
         let _ = if visible { wv.show() } else { wv.hide() };
     }
 }
@@ -371,6 +377,8 @@ pub fn browser_close(app: AppHandle, state: State<'_, BrowserManager>, tab_id: S
         None
     };
     if let Some(label) = label {
+        #[cfg(target_os = "windows")]
+        crate::focus_win::forget(&label);
         if let Some(wv) = app.get_webview(&label) {
             // Hide before close so occasional macOS delayed child-view removal cannot leave a white remnant.
             let _ = wv.hide();

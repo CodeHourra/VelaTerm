@@ -136,17 +136,13 @@ pub(super) fn bootstrap(
             }
             std::thread::sleep(Duration::from_millis(150));
         }
+        let _callback = proc.callbacks.read().unwrap();
+        if proc.released.load(Ordering::Relaxed) || !app.chat().owns_process(&session_id,&proc) { return; }
         proc.opencode.lock().unwrap().server = Some(server.clone());
 
         let opened = match &resume {
             Some(id) => match server.get(&format!("/session/{id}")) {
                 Ok(session) => Ok(session),
-                // A session OpenCode no longer has cannot be resumed; a fresh one loses nothing that
-                // could be shown anyway.
-                Err(e) if wire::is_not_found(&e) => {
-                    crate::diagnostic_warn!("chat: OpenCode has no session {id}; starting a new one");
-                    server.post("/session", None)
-                }
                 Err(e) => Err(e),
             },
             None => server.post("/session", None),
@@ -168,6 +164,7 @@ pub(super) fn bootstrap(
             fail_start(&app, &session_id, &proc);
             return;
         };
+        if !super::verify_native_identity(&app,&session_id,&proc,&native_id) { return; }
         remember_session(&app, &session_id, &proc, &native_id, &session);
 
         // Establish the subscription before ready can release the first queued prompt.
@@ -334,7 +331,10 @@ fn spawn_event_reader(
                 let Ok(line) = line else { break };
                 let Some(event) = wire::parse_sse_line(&line) else { continue };
                 delivered = true;
-                handle_event(&app, &session_id, &proc, event);
+                let _callback = proc.callbacks.read().unwrap();
+                if !proc.released.load(Ordering::Relaxed) && app.chat().owns_process(&session_id,&proc) {
+                    handle_event(&app, &session_id, &proc, event);
+                }
             }
             if delivered {
                 failures = 0;
@@ -883,6 +883,7 @@ pub(super) fn dispatch(
     let server = server(proc)?;
     let native = root_session(proc)?;
     let message_id = wire::new_message_id();
+    super::super::recovery::provider_id(app,session_id,row_id,&message_id)?;
     {
         let mut state = proc.opencode.lock().unwrap();
         state.user_messages.insert(message_id.clone(), row_id.to_string());
@@ -943,10 +944,11 @@ pub(super) fn dispatch(
 
 /// OpenCode persists asynchronous prompts while its loop is running and reads them at its next step.
 /// Send steering as prose, so shell and slash syntax cannot start a competing command.
-pub(super) fn steer(proc: &Arc<ChatProcess>, row_id: &str, text: &str, images: &[ChatImage]) -> Result<(), String> {
+pub(super) fn steer(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, row_id: &str, text: &str, images: &[ChatImage]) -> Result<(), String> {
     let server = server(proc)?;
     let native = root_session(proc)?;
     let message_id = wire::new_message_id();
+    super::super::recovery::provider_id(app,session_id,row_id,&message_id)?;
     let agent = proc.collaboration_mode.lock().unwrap().clone();
     let model = proc.model.lock().unwrap().clone();
     let variant = proc.effort.lock().unwrap().clone();
@@ -979,6 +981,8 @@ fn run_turn_request(
     let proc = proc.clone();
     std::thread::spawn(move || {
         if let Err(message) = server.post_turn(&path, Some(&body)) {
+            let _callback = proc.callbacks.read().unwrap();
+            if proc.released.load(Ordering::Relaxed) || !app.chat().owns_process(&session_id,&proc) { return; }
             let running = proc.turn.lock().unwrap().running;
             if running {
                 proc.timeline.lock().unwrap().upsert(ChatRow::Error {
@@ -1001,7 +1005,7 @@ pub(super) fn abort(proc: &Arc<ChatProcess>) -> Result<(), String> {
     Ok(())
 }
 
-fn is_local_command(text: &str) -> bool {
+pub(super) fn is_local_command(text: &str) -> bool {
     matches!(text, "/undo" | "/redo" | "/share" | "/unshare")
 }
 

@@ -145,6 +145,7 @@ fn on_state(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, data: &Valu
         .and_then(Value::as_str)
         .filter(|id| !id.is_empty());
     if let Some(id) = session {
+        if !super::verify_native_identity(app,session_id,proc,id) { return; }
         let previous = proc.agent_session_id.lock().unwrap().clone();
         if previous.as_deref() != Some(id) {
             *proc.agent_session_id.lock().unwrap() = Some(id.to_string());

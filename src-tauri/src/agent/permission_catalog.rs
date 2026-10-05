@@ -14,7 +14,7 @@ pub fn modes(kind: SessionKind) -> &'static [&'static str] {
     match kind {
         SessionKind::Claude => CLAUDE_MODES,
         SessionKind::Codex => &["read-only", "auto", "full-access"],
-        SessionKind::Opencode => &["default", "bypassPermissions"],
+        SessionKind::Opencode | SessionKind::Antigravity => &["default", "bypassPermissions"],
         // OMP can ask for approval; its bypass maps to `--approval-mode=yolo`. Pi has no approval step at
         // all, so it exposes no modes and the composer shows no permission control for it.
         SessionKind::Omp => &["default", "bypassPermissions"],
@@ -43,6 +43,7 @@ fn kind(agent: &str) -> Result<SessionKind, String> {
         "codex" => Ok(SessionKind::Codex),
         "opencode" => Ok(SessionKind::Opencode),
         "omp" => Ok(SessionKind::Omp),
+        "antigravity" => Ok(SessionKind::Antigravity),
         _ => Err(format!("Unsupported permission agent: {agent}")),
     }
 }

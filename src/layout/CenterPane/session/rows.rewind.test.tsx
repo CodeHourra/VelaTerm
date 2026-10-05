@@ -11,7 +11,7 @@ import { chatSnapshot } from "../../../ipc/chat";
 import { invoke } from "../../../ipc/transport";
 import { env } from "../../../platform/env";
 import { imageFromNativeClipboard } from "../../../terminal/imageInput";
-import { MAX_IMAGE_BYTES } from "./attachments";
+import { MAX_IMAGE_BYTES, MAX_IMAGES } from "./attachments";
 import { formatTurnDuration, MessageBubble, WorkingRow } from "./rows";
 
 vi.mock("../../../platform/env", () => ({ env: { isTauri: false, isElectron: false, isWeb: true } }));
@@ -125,9 +125,9 @@ describe("editing a previous message", () => {
     paste([png("broken.png")]);
     await waitFor(() => expect(screen.getByRole("status").textContent).toContain("broken.png"));
     read.mockRestore();
-    paste([png("one"), png("two"), png("three"), png("four")]);
-    await waitFor(() => expect(container.querySelectorAll(".sv-attach-item")).toHaveLength(4));
-    expect(screen.getByRole("status").textContent).toMatch(/4/);
+    paste(Array.from({ length: MAX_IMAGES }, (_, i) => png(`s${i}`)));
+    await waitFor(() => expect(container.querySelectorAll(".sv-attach-item")).toHaveLength(MAX_IMAGES));
+    expect(screen.getByRole("status").textContent).toContain(String(MAX_IMAGES));
   });
 
   it("does not add an unfinished paste to a reopened editor", async () => {

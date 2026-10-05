@@ -14,7 +14,7 @@ import { TermScrollbar } from "./TermScrollbar";
 import { RunStrip } from "./RunStrip";
 import { usePtySession } from "../../hooks/usePtySession";
 import { useGitBranch } from "../../hooks/useGitBranch";
-import { IS_PLAIN_BROWSER } from "../../hooks/shortcutRegistry";
+import { IS_PLAIN_BROWSER, labelWithCombo } from "../../hooks/shortcutRegistry";
 import { copyText } from "../../ipc/info";
 import {
   agentInstallRecipe,
@@ -85,6 +85,7 @@ export const TerminalView = memo(function TerminalView({
   const { containerRef, starting, sizeMode, ptyDims, takeoverSize } =
     usePtySession(session, cwd, hidden);
   const paneStyle = useTermStore((s) => s.paneStyle);
+  const shortcutOverrides = useTermStore((s) => s.shortcutOverrides);
   const openSearch = useTermStore((s) => s.openSearch);
   // Agent-default image paste applies only to local desktop (Tauri/Electron). Browser and remote agents do not
   // share the clipboard machine, so they always upload. See Terminal > Image Paste and the design document.
@@ -316,7 +317,7 @@ export const TerminalView = memo(function TerminalView({
               <Icons.restart size={14} />
             </button>
             <button
-              title={t("term.splitRight")}
+              title={labelWithCombo(t("term.splitRight"), "splitRight", shortcutOverrides)}
               onMouseDown={stop}
               onClick={(e) => {
                 stop(e);
@@ -326,7 +327,7 @@ export const TerminalView = memo(function TerminalView({
               <Icons.splitV size={14} />
             </button>
             <button
-              title={t("term.splitDown")}
+              title={labelWithCombo(t("term.splitDown"), "splitDown", shortcutOverrides)}
               onMouseDown={stop}
               onClick={(e) => {
                 stop(e);
@@ -461,7 +462,7 @@ export const TerminalView = memo(function TerminalView({
                 padding: "4px 12px",
                 borderRadius: 6,
                 background: "var(--red, #c0392b)",
-                color: "#fff",
+                color: "var(--bg-0)",
                 fontSize: 12,
                 pointerEvents: "none",
                 maxWidth: "80%",
@@ -510,11 +511,11 @@ export const TerminalView = memo(function TerminalView({
                               : session.kind === "crush"
                                 ? "Crush"
                                 : session.kind === "kimi"
-                                  ? "Kimi Code (K3)"
+                                  ? "Kimi Code"
                                   : session.kind === "kiro"
                                     ? "Kiro"
                                   : session.kind === "grok"
-                                    ? "Grok Build (Grok 4.5)"
+                                    ? "Grok Build"
                                   : session.kind === "zoo"
                                     ? "Zoo Code"
                                 : "Claude",

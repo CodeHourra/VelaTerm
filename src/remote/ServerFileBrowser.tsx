@@ -1,103 +1,42 @@
-//! Shared server file browser for browser and remote windows without native file dialogs. It browses the
-//! server through backend `list_dir` and is shared by SaveAsModal and DirectoryPickerModal, which differ
-//! only in their title and footer actions.
+//! Server folder browser for windows without a native file dialog (plain browser and remote windows). It lists
+//! folders on the server through backend `list_dir` and is shared by FolderPickerModal, SaveAsModal, and the
+//! notebook vault dialogs.
 //!
-//! The UI replaces the old drill-down dialog with:
-//! 1. A lazily loaded expandable tree using shared `.file-row` styles and icons, preserving visible context.
-//! 2. Quick access to Home, project roots, and recent directories.
-//! 3. One path/search field: values beginning with `/` or `~` navigate on Enter; others filter quick entries
-//!    and already loaded tree levels only, never recursively search the server.
-//! 4. Clickable path breadcrumbs that reset the tree root at any level.
-//! 5. Inline folder creation in the current target directory.
-//! 6. An always-visible target directory in the footer.
-//! SaveAsModal alone handles overwrite confirmation.
+//! The layout follows Finder, Explorer, and GTK file choosers (design: folder-picker.css header):
+//! 1. Places on the left: Home, the file-system root or Windows drives, project roots, and recent folders.
+//! 2. The current folder's contents on the right as a flat list. A click selects a folder, a double click or
+//!    Enter opens it; with nothing selected, the current folder is the result (`target`).
+//! 3. An always-editable path bar with folder completion. Enter or Go opens the typed path; an unapplied or
+//!    invalid path blocks confirmation rather than submitting the previous folder.
+//! 4. A separate filter that narrows only the current folder.
+//! Paths use the server's own syntax (POSIX or Windows), see serverPath.ts.
 
+import "./folder-picker.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type React from "react";
 import Icons from "../components/Icons";
+import { ContextMenu, type MenuItem } from "../components/ContextMenu";
 import { useT } from "../i18n";
-import { createDir, listDir, type DirEntry } from "../ipc/info";
-import { invoke } from "../ipc/transport";
+import { createDir, listDir, previewDestination, type DirEntry } from "../ipc/info";
 import { useTermStore } from "../store/termStore";
+import {
+  baseName,
+  expandHome,
+  isAbsolutePath,
+  joinPath,
+  normalizePath,
+  parentPath,
+  rootLabel,
+  samePath,
+  sepOf,
+  serverFs,
+  type ServerFs,
+} from "./serverPath";
+import { writeDialogDraft } from "./dialogNavigation";
 
-/** Join a directory and child name into a full path. */
-export function joinPath(dir: string, name: string): string {
-  const trimmed = dir.replace(/[\\/]+$/, "");
-  const separator = dir.includes("\\") && !dir.includes("/") ? "\\" : "/";
-  return trimmed ? `${trimmed}${separator}${name}` : `${separator}${name}`;
-}
+export { joinPath } from "./serverPath";
 
-/** Return the parent of a POSIX path, with root returning itself. */
-function parentOf(path: string): string {
-  if (path === "/" || path === "") return "/";
-  const trimmed = path.replace(/\/+$/, "");
-  const i = trimmed.lastIndexOf("/");
-  return i <= 0 ? "/" : trimmed.slice(0, i);
-}
-
-/** Use the final path segment as its display name, with root shown as `/`. */
-function baseName(path: string): string {
-  return path.replace(/\/+$/, "").split("/").filter(Boolean).pop() || "/";
-}
-
-interface TreeNode {
-  name: string;
-  path: string;
-  isDir: boolean;
-  isHidden: boolean;
-  badge?: string | null;
-  open?: boolean;
-  /** Whether children have been fetched from the backend. */
-  loaded?: boolean;
-  children?: TreeNode[];
-}
-
-/** Convert a backend DirEntry to a tree node with an absolute path. */
-function toNode(e: DirEntry, parentPath: string): TreeNode {
-  const base = parentPath === "/" ? "" : parentPath;
-  return {
-    name: e.name,
-    path: `${base}/${e.name}`,
-    isDir: e.isDir,
-    isHidden: e.isHidden,
-    badge: e.gitBadge,
-    open: false,
-    loaded: false,
-  };
-}
-
-/** Find a tree node by absolute path, used to refresh a directory after creation. */
-function findNode(nodes: TreeNode[], path: string): TreeNode | null {
-  for (const n of nodes) {
-    if (n.path === path) return n;
-    if (n.children) {
-      const hit = findNode(n.children, path);
-      if (hit) return hit;
-    }
-  }
-  return null;
-}
-
-/**
- * Whether this node or any loaded descendant name matches the query. Because `children` contains only
- * fetched levels, unopened subtrees intentionally remain outside search scope.
- */
-function nodeMatches(node: TreeNode, q: string): boolean {
-  if (node.name.toLowerCase().includes(q)) return true;
-  return (node.children || []).some((c) => nodeMatches(c, q));
-}
-
-/** Split an absolute path into clickable breadcrumbs beginning with `/`. */
-function crumbsOf(path: string): { name: string; path: string }[] {
-  const out = [{ name: "/", path: "/" }];
-  let acc = "";
-  for (const seg of path.split("/").filter(Boolean)) {
-    acc += `/${seg}`;
-    out.push({ name: seg, path: acc });
-  }
-  return out;
-}
-
-/** Recent-directory persistence in localStorage, falling back quietly to empty when unavailable. */
+/** Recent folders in localStorage, newest first, falling back quietly to empty when unavailable. */
 const RECENTS_KEY = "vlxterm.pickerRecents";
 function loadRecents(): string[] {
   try {
@@ -108,195 +47,262 @@ function loadRecents(): string[] {
   }
 }
 
-export interface QuickItem {
-  label: string;
-  path: string;
-  /** Selects a QUICK_ICON and combines with label as the key. */
-  kind: "home" | "project" | "recent";
+/** Record a folder as recently used, deduplicated and moved to the front with a limit of six. */
+export function pushRecentFolder(path: string): string[] {
+  const next = [path, ...loadRecents().filter((x) => x !== path)].slice(0, 6);
+  try {
+    localStorage.setItem(RECENTS_KEY, JSON.stringify(next));
+  } catch {
+    /* Without localStorage the list simply is not remembered. */
+  }
+  return next;
 }
 
 /**
- * Browser-state hook managing root, tree contents, target directory, hidden toggle, quick entries, and
- * recents. When the dialog becomes active, reset the tree root to Home.
+ * Browser state: current folder and its entries, selection, history, filter, hidden toggle, and places data.
+ * Each activation starts at `initialPath` (with `~` expanded) or Home, and falls back to Home when the initial
+ * path cannot be listed.
  */
-export function useServerBrowser(active: boolean) {
+export function useServerBrowser(active: boolean, options: { initialPath?: string; route?: boolean } = {}) {
+  const t = useT();
   const projects = useTermStore((s) => s.projects);
-  const [home, setHome] = useState<string>("");
-  const [rootPath, setRootPath] = useState<string>("");
-  const [roots, setRoots] = useState<TreeNode[] | null>(null); // null means loading.
-  const [treeError, setTreeError] = useState(false);
-  const [selectedDir, setSelectedDir] = useState<string>("");
+  const [fs, setFs] = useState<ServerFs | null>(null);
+  const [cwd, setCwd] = useState("");
+  const [pathDraft, setPathDraftState] = useState("");
+  const [pendingAction, setPendingAction] = useState(false);
+  const [entries, setEntries] = useState<DirEntry[] | null>(null); // null means loading.
+  const [listError, setListError] = useState("");
+  const [selected, setSelected] = useState<string | null>(null);
+  const [back, setBack] = useState<string[]>([]);
+  const [forward, setForward] = useState<string[]>([]);
   const [showHidden, setShowHidden] = useState(false);
-  const [recents, setRecents] = useState<string[]>(() => loadRecents());
-  const [query, setQuery] = useState("");
-  const [error, setError] = useState(""); // Action error written by save/import dialogs.
+  const [filter, setFilter] = useState("");
+  const [recents, setRecents] = useState<string[]>(loadRecents);
+  const [error, setError] = useState(""); // Action error written by the owning dialog.
+  const seq = useRef(0);
+  const cwdRef = useRef("");
+  const flavor = fs?.flavor ?? "posix";
+  const route = options.route ?? false;
+  const setPathDraft = useCallback((next: string) => {
+    setPathDraftState(next);
+    if (route) writeDialogDraft("pickerDraft", next);
+  }, [route]);
+  const setFilterValue = useCallback((next: string) => {
+    setFilter(next);
+    setSelected(null);
+    if (route) { writeDialogDraft("pickerFilter", next); writeDialogDraft("pickerSelected", ""); }
+  }, [route]);
+  const setSelection = useCallback((next: string | null) => {
+    setSelected(next);
+    if (route) writeDialogDraft("pickerSelected", next ?? "");
+  }, [route]);
 
-  /**
-   * Whether the user already chose a directory during this activation. `home_dir` is answered over the
-   * WebSocket for remote clients, where the round trip easily outlasts a pasted path plus Enter; without
-   * this flag the late answer would replace the directory the user just navigated to with Home.
-   */
-  const navigatedRef = useRef(false);
-
-  /** Set a directory as both tree root and current target. */
-  const setRoot = useCallback((target: string) => {
-    navigatedRef.current = true;
-    setRootPath(target);
-    setSelectedDir(target);
-    setQuery("");
+  /** List `path` and make it the current folder; resolves false when it cannot be listed. */
+  const load = useCallback(async (path: string): Promise<boolean> => {
+    const id = ++seq.current;
+    cwdRef.current = path;
+    setCwd(path);
+    setPathDraftState(path);
+    setEntries(null);
+    setListError("");
+    setSelected(null);
+    setFilter("");
+    try {
+      const kids = await listDir(path);
+      if (id !== seq.current) return false;
+      setEntries(kids);
+      return true;
+    } catch (e) {
+      if (id === seq.current) {
+        setEntries([]);
+        setListError(String(e));
+      }
+      return false;
+    }
   }, []);
 
-  // Fetch the first level whenever the tree root changes.
-  useEffect(() => {
-    if (!rootPath) return;
-    let cancelled = false;
-    setRoots(null);
-    setTreeError(false);
-    listDir(rootPath)
-      .then((kids) => {
-        if (!cancelled) setRoots(kids.map((k) => toNode(k, rootPath)));
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setRoots([]);
-          setTreeError(true);
+  /** Open a folder, recording the previous one for Back. */
+  const open = useCallback(
+    (path: string) => {
+      const target = normalizePath(path, flavor);
+      const prev = cwdRef.current;
+      if (prev && prev !== target) {
+        setBack((b) => [...b, prev].slice(-50));
+        setForward([]);
+      }
+      const result = load(target);
+      if (route) {
+        const url = new URL(window.location.href);
+        url.searchParams.set("pickerPath", target);
+        ["pickerDraft", "pickerFilter", "pickerSelected"].forEach(key => url.searchParams.delete(key));
+        if (url.href !== window.location.href) {
+          window.history.pushState(null, "", url);
+          window.dispatchEvent(new PopStateEvent("popstate"));
         }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [rootPath]);
+      }
+      return result;
+    },
+    [flavor, load, route],
+  );
 
-  // Start at Home whenever the dialog opens, unless the user navigated before the answer arrived.
+  const initialPath = options.initialPath;
   useEffect(() => {
     if (!active) return;
     let cancelled = false;
-    navigatedRef.current = false;
+    seq.current++;
+    cwdRef.current = "";
+    setCwd("");
+    setEntries(null);
+    setListError("");
     setError("");
-    setQuery("");
-    invoke<string | null>("home_dir")
-      .then((h) => {
-        if (cancelled) return;
-        const base = h || "/";
-        setHome(base);
-        if (!navigatedRef.current) setRoot(base);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setHome("");
-        if (!navigatedRef.current) setRoot("/");
-      });
+    setBack([]);
+    setForward([]);
+    setShowHidden(false);
+    setRecents(loadRecents());
+    void serverFs().then(async (info) => {
+      if (cancelled) return;
+      setFs(info);
+      const params = new URLSearchParams(window.location.search);
+      const requested = (route ? params.get("pickerPath") : null) || initialPath || info.home;
+      const wanted = normalizePath(expandHome(requested, info.home, info.flavor), info.flavor);
+      if (!isAbsolutePath(wanted, info.flavor)) {
+        setPathDraftState(requested); setEntries([]); setListError(t("location.notAbsolute"));
+        return;
+      }
+      await load(wanted);
+      if (cancelled) return;
+      if (route) {
+        writeDialogDraft("pickerPath", wanted);
+        setPathDraftState(params.get("pickerDraft") || wanted);
+        setFilter(params.get("pickerFilter") || "");
+        setSelected(params.get("pickerSelected"));
+        setShowHidden(params.get("pickerHidden") === "1");
+      }
+    }).catch(() => {
+      if (!cancelled) { setEntries([]); setListError(t("location.hostUnavailable")); }
+    });
     return () => {
       cancelled = true;
     };
-  }, [active, setRoot]);
+  }, [active, initialPath, load, route, t]);
 
-  /** Toggle a directory, fetching children on first expansion and replacing the array to rerender. */
-  const toggleDir = useCallback(async (node: TreeNode) => {
-    if (node.loaded) {
-      node.open = !node.open;
-      setRoots((c) => (c ? [...c] : c));
-      return;
-    }
-    node.open = true;
-    setRoots((c) => (c ? [...c] : c));
-    try {
-      const kids = await listDir(node.path);
-      node.children = kids.map((k) => toNode(k, node.path));
-    } catch {
-      node.children = [];
-    }
-    node.loaded = true;
-    setRoots((c) => (c ? [...c] : c));
-  }, []);
+  useEffect(() => {
+    if (!active || !route || !fs) return;
+    const update = () => {
+      const params = new URLSearchParams(window.location.search);
+      const path = params.get("pickerPath") || fs.home;
+      const restore = () => {
+        setPathDraftState(params.get("pickerDraft") || path);
+        setFilter(params.get("pickerFilter") || ""); setSelected(params.get("pickerSelected"));
+        setShowHidden(params.get("pickerHidden") === "1");
+      };
+      if (path !== cwdRef.current) void load(path).then(restore); else restore();
+    };
+    window.addEventListener("popstate", update);
+    return () => window.removeEventListener("popstate", update);
+  }, [active, route, fs, load]);
 
-  /**
-   * Reload a directory's immediate children after folder creation. Replace roots when it is the current
-   * root; otherwise update the node in place, preserve expansion, and replace the array to rerender.
-   */
-  const refreshDir = useCallback(
-    async (dirPath: string) => {
-      const kids = await listDir(dirPath);
-      if (dirPath === rootPath) {
-        setRoots(kids.map((k) => toNode(k, dirPath)));
-        return;
-      }
-      setRoots((prev) => {
-        if (!prev) return prev;
-        const node = findNode(prev, dirPath);
-        if (!node) return prev;
-        node.children = kids.map((k) => toNode(k, dirPath));
-        node.loaded = true;
-        node.open = true;
-        return [...prev];
-      });
-    },
-    [rootPath],
-  );
+  const goBack = useCallback(() => {
+    const prev = back[back.length - 1];
+    if (prev === undefined) return;
+    setBack((b) => b.slice(0, -1));
+    setForward((f) => [cwdRef.current, ...f]);
+    void load(prev);
+    if (route) { writeDialogDraft("pickerPath", prev); writeDialogDraft("pickerDraft", ""); }
+  }, [back, load, route]);
 
-  /**
-   * Create a folder under the current target, refresh that level, and select the new directory. Propagate
-   * failures so the caller can write `error`.
-   */
+  const goForward = useCallback(() => {
+    const next = forward[0];
+    if (next === undefined) return;
+    setForward((f) => f.slice(1));
+    setBack((b) => [...b, cwdRef.current]);
+    void load(next);
+    if (route) { writeDialogDraft("pickerPath", next); writeDialogDraft("pickerDraft", ""); }
+  }, [forward, load, route]);
+
+  const canUp = !!cwd && parentPath(cwd, flavor) !== cwd;
+  const goUp = useCallback(() => {
+    if (canUp) void open(parentPath(cwdRef.current, flavor));
+  }, [canUp, open, flavor]);
+
+  /** Create a folder in the current folder and select it; failures propagate to the caller. */
   const createFolder = useCallback(
     async (name: string) => {
-      const parent = selectedDir || rootPath;
-      if (!parent) return;
-      const path = joinPath(parent, name);
-      await createDir(path);
-      await refreshDir(parent);
-      setSelectedDir(path);
+      const dir = cwdRef.current;
+      if (!dir) return;
+      const preview = await previewDestination(dir, name);
+      if (preview.problem || preview.existingKind) throw new Error(preview.existingKind ? t("location.exists") : t("location.invalidName"));
+      await createDir(preview.path);
+      await load(dir);
+      setSelected(name);
     },
-    [selectedDir, rootPath, refreshDir],
+    [load, t],
   );
 
-  /** Record a recent directory, deduplicated and moved to the front with a limit of six. */
-  const pushRecent = useCallback((p: string) => {
-    setRecents((prev) => {
-      const next = [p, ...prev.filter((x) => x !== p)].slice(0, 6);
-      try {
-        localStorage.setItem(RECENTS_KEY, JSON.stringify(next));
-      } catch {
-        /* If localStorage is unavailable, retain it only for this session. */
-      }
-      return next;
-    });
-  }, []);
+  const pushRecent = useCallback((p: string) => setRecents(pushRecentFolder(p)), []);
 
-  // Quick entries combine Home, project roots, and recents, deduplicated by path.
-  const quick = useMemo<QuickItem[]>(() => {
-    const items: QuickItem[] = [];
-    const seen = new Set<string>();
-    const add = (it: QuickItem) => {
-      const k = it.path.replace(/\/+$/, "") || "/";
-      if (!seen.has(k)) {
-        seen.add(k);
-        items.push(it);
-      }
-    };
-    if (home) add({ label: "Home", path: home, kind: "home" });
-    for (const p of projects) {
-      if (p.rootPath) add({ label: p.name || baseName(p.rootPath), path: p.rootPath, kind: "project" });
-    }
-    for (const r of recents) add({ label: baseName(r), path: r, kind: "recent" });
-    return items;
-  }, [home, projects, recents]);
+  const visible = useMemo(() => {
+    if (!entries) return null;
+    const q = filter.trim().toLowerCase();
+    return entries.filter((e) => (showHidden || !e.isHidden) && (!q || e.name.toLowerCase().includes(q)));
+  }, [entries, filter, showHidden]);
+
+  const selectedEntry = selected == null ? undefined : entries?.find((e) => e.name === selected);
+  /** Folder the dialog would use now: the selected subfolder, else the current folder, else nothing. */
+  const target =
+    !cwd || listError || entries === null || pathDraft !== cwd || pendingAction ? ""
+      : selectedEntry?.isDir ? joinPath(cwd, selectedEntry.name, flavor) : cwd;
+
+  const projectRoots = useMemo(
+    () =>
+      projects
+        .filter((p) => p.rootPath)
+        .map((p) => ({ label: p.name || baseName(p.rootPath!, flavor), path: p.rootPath! })),
+    [projects, flavor],
+  );
 
   return {
-    rootPath,
-    roots,
-    treeError,
-    selectedDir,
-    setSelectedDir,
-    setRoot,
-    toggleDir,
+    fs,
+    flavor,
+    cwd,
+    pathDraft,
+    setPathDraft,
+    pathPending: pathDraft !== cwd,
+    pendingAction,
+    setPendingAction,
+    entries,
+    visible,
+    listError,
+    selected,
+    setSelected: setSelection,
+    target,
+    /** Alias of `target`, kept for callers written against the previous tree browser. */
+    selectedDir: target,
+    open,
+    goBack,
+    goForward,
+    canBack: back.length > 0,
+    canForward: forward.length > 0,
+    backTarget: back[back.length - 1] ?? "",
+    goUp,
+    canUp,
+    refresh: async () => {
+      const info = await serverFs(true);
+      setFs(info);
+      return open(cwdRef.current || info.home);
+    },
     createFolder,
     showHidden,
-    setShowHidden,
-    quick,
+    setShowHidden: (update: boolean | ((previous: boolean) => boolean)) => {
+      const next = typeof update === "function" ? update(showHidden) : update;
+      setShowHidden(next);
+      if (route) writeDialogDraft("pickerHidden", next ? "1" : "");
+    },
+    filter,
+    setFilter: setFilterValue,
+    projectRoots,
+    recents,
     pushRecent,
-    query,
-    setQuery,
     error,
     setError,
   };
@@ -304,458 +310,494 @@ export function useServerBrowser(active: boolean) {
 
 export type ServerBrowser = ReturnType<typeof useServerBrowser>;
 
-/** One tree row. Directories expand/select; Save As may click files to fill the filename. */
-function Row({
-  node,
-  depth,
-  browser,
-  showHidden,
-  filter,
-  onFileClick,
-  selectedName,
-}: {
-  node: TreeNode;
-  depth: number;
+interface Place {
+  key: string;
+  label: string;
+  path: string;
+  icon: "home" | "drive" | "project" | "clock";
+  caption?: string;
+}
+
+/** Places grouped by section, deduplicated by path so a folder appears only in its first section. */
+function usePlaces(browser: ServerBrowser): { title: string; items: Place[] }[] {
+  const t = useT();
+  const { fs, flavor, projectRoots, recents } = browser;
+  return useMemo(() => {
+    if (!fs) return [];
+    const seen = new Set<string>();
+    const take = (items: Place[]) =>
+      items.filter((p) => {
+        const k = normalizePath(p.path, flavor).toLowerCase();
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+    const win = flavor === "win";
+    const locations: Place[] = [{ key: "home", label: t("dir.placeHome"), path: fs.home, icon: "home" }];
+    if (!win) {
+      locations.push({
+        key: "root",
+        label: fs.os === "macos" ? t("dir.placeComputer") : t("dir.placeFileSystem"),
+        path: "/",
+        icon: "drive",
+        caption: "/",
+      });
+    }
+    const sections = [
+      { title: t("dir.sectionLocations"), items: take(locations) },
+      {
+        title: t("dir.sectionDrives"),
+        items: win ? take(fs.roots.map((r) => ({ key: r, label: rootLabel(r), path: r, icon: "drive" as const }))) : [],
+      },
+      {
+        title: t("dir.sectionProjects"),
+        items: take(projectRoots.map((p) => ({ key: p.path, label: p.label, path: p.path, icon: "project" as const }))),
+      },
+      {
+        title: t("dir.sectionRecent"),
+        items: take(recents.map((r) => ({ key: r, label: baseName(r, flavor), path: r, icon: "clock" as const }))),
+      },
+    ];
+    return sections.filter((s) => s.items.length > 0);
+  }, [fs, flavor, projectRoots, recents, t]);
+}
+
+const PLACE_ICON = { home: Icons.home, drive: Icons.drive, project: Icons.project, clock: Icons.clock } as const;
+
+interface Suggestion {
+  path: string;
+  dir: string;
+  name: string;
+  matched: number;
+}
+
+/** Always-visible path input. A pending draft survives blur and blocks use of the previous directory. */
+function PathBar({ browser, inputRef, onDone }: {
   browser: ServerBrowser;
-  showHidden: boolean;
-  /** Normalized lowercase trimmed query; empty disables filtering. */
-  filter: string;
-  onFileClick?: (name: string) => void;
-  selectedName?: string;
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  onDone: () => void;
 }) {
-  const pad = 8 + depth * 13;
-  if (node.isDir) {
-    const sel = browser.selectedDir === node.path;
-    // A node matching the query itself is shown for its own sake: its whole subtree stays browsable and
-    // keeps normal expand/collapse. A node shown only because a descendant matches is forced open and
-    // pruned to the matching branches. Clearing the query restores plain user expansion state everywhere.
-    const selfMatch = filter !== "" && node.name.toLowerCase().includes(filter);
-    const childFilter = selfMatch ? "" : filter;
-    const open = childFilter ? true : !!node.open;
-    let kids = (node.children || []).filter((c) => showHidden || !c.isHidden);
-    if (childFilter) kids = kids.filter((c) => nodeMatches(c, childFilter));
-    return (
-      <div>
-        <div
-          className={"file-row" + (sel ? " sel" : "") + (node.isHidden ? " hidden-entry" : "")}
-          style={{ paddingLeft: pad }}
-          onClick={() => {
-            browser.setSelectedDir(node.path);
-            void browser.toggleDir(node);
-          }}
-        >
-          <span className="tw">{open ? <Icons.chevD size={13} /> : <Icons.chevR size={13} />}</span>
-          <span className="ic" style={{ color: "var(--text-dim)" }}>
-            {open ? <Icons.folderOpen size={14} /> : <Icons.folder size={14} />}
-          </span>
-          <span className="nm">{node.name}</span>
-          {node.badge && <span className={"gb gb-" + node.badge}>{node.badge}</span>}
-        </div>
-        {open &&
-          kids.map((c) => (
-            <Row
-              key={c.path}
-              node={c}
-              depth={depth + 1}
-              browser={browser}
-              showHidden={showHidden}
-              filter={childFilter}
-              onFileClick={onFileClick}
-              selectedName={selectedName}
-            />
-          ))}
-      </div>
-    );
-  }
-  const selFile =
-    onFileClick != null && selectedName != null && node.name === selectedName && browser.selectedDir === parentOf(node.path);
-  return (
-    <div
-      className={"file-row" + (selFile ? " sel" : "") + (node.isHidden ? " hidden-entry" : "")}
-      style={{ paddingLeft: pad, cursor: onFileClick ? "pointer" : "default" }}
-      onClick={
-        onFileClick
-          ? () => {
-              browser.setSelectedDir(parentOf(node.path));
-              onFileClick(node.name);
-            }
-          : undefined
+  const t = useT();
+  const { fs, flavor, pathDraft: text } = browser;
+  const [bad, setBad] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [highlight, setHighlight] = useState(-1);
+  const cache = useRef(new Map<string, Promise<DirEntry[]>>());
+
+  useEffect(() => {
+    setBad(false); setHighlight(-1);
+  }, [text]);
+
+  useEffect(() => {
+    if (!focused || !fs) { setSuggestions([]); return; }
+    const typed = expandHome(text, fs.home, flavor);
+    const cut = Math.max(typed.lastIndexOf("/"), flavor === "win" ? typed.lastIndexOf("\\") : -1);
+    if (cut < 0 || !isAbsolutePath(typed, flavor)) { setSuggestions([]); return; }
+    const dir = normalizePath(typed.slice(0, cut + 1), flavor);
+    const prefix = typed.slice(cut + 1).toLowerCase();
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      let listing = cache.current.get(dir);
+      if (!listing) {
+        listing = listDir(dir); cache.current.set(dir, listing);
+        listing.catch(() => cache.current.delete(dir));
       }
-    >
-      <span className="tw leaf" />
-      <span className="ic" style={{ color: "var(--text-faint)" }}>
-        <Icons.file size={13} />
-      </span>
-      <span className="nm">{node.name}</span>
-      {node.badge && <span className={"gb gb-" + node.badge}>{node.badge}</span>}
+      listing.then(kids => {
+        if (cancelled) return;
+        const next = kids.filter(k => k.isDir && k.name.toLowerCase().startsWith(prefix)
+          && (browser.showHidden || !k.isHidden || prefix.startsWith("."))).slice(0, 8)
+          .map(k => ({ path: joinPath(dir, k.name, flavor), dir, name: k.name, matched: prefix.length }));
+        setSuggestions(next); setHighlight(h => Math.min(h, next.length - 1));
+      }).catch(() => { if (!cancelled) setSuggestions([]); });
+    }, 120);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [focused, text, fs, flavor, browser.showHidden]);
+
+  const commit = async (raw: string) => {
+    if (!fs || browser.pendingAction) return;
+    const path = expandHome(raw, fs.home, flavor);
+    if (!isAbsolutePath(path, flavor)) {
+      setBad(true); browser.setError(t("location.notAbsolute")); inputRef.current?.focus(); return;
+    }
+    browser.setError("");
+    const ok = await browser.open(path);
+    cache.current.clear();
+    if (ok) { setFocused(false); onDone(); }
+    else { setBad(true); inputRef.current?.focus(); }
+  };
+
+  return (
+    <div className="fp-path-field">
+      <label className="fp-label" htmlFor="server-folder-path">{t("dir.pathLabel")}</label>
+      <div className="fp-path-controls">
+        <div className="fp-pathwrap">
+          <input ref={inputRef} id="server-folder-path" className={"fp-path-input" + (bad ? " bad" : "")}
+            value={text} aria-label={t("dir.pathLabel")} aria-invalid={bad} disabled={browser.pendingAction}
+            aria-describedby={browser.pathPending ? "server-folder-path-pending" : undefined}
+            spellCheck={false} autoCapitalize="off" autoCorrect="off"
+            onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
+            onChange={e => { browser.setPathDraft(e.target.value); browser.setError(""); setHighlight(-1); }}
+            onKeyDown={e => {
+              if (e.key === "ArrowDown" && suggestions.length) {
+                e.preventDefault(); setHighlight(h => (h + 1) % suggestions.length);
+              } else if (e.key === "ArrowUp" && suggestions.length) {
+                e.preventDefault(); setHighlight(h => h <= 0 ? suggestions.length - 1 : h - 1);
+              } else if (e.key === "Tab" && suggestions.length && !e.shiftKey) {
+                e.preventDefault(); browser.setPathDraft(suggestions[Math.max(highlight, 0)].path + sepOf(flavor)); setHighlight(-1);
+              } else if (e.key === "Enter") {
+                e.preventDefault(); e.stopPropagation(); void commit(highlight >= 0 ? suggestions[highlight].path : text);
+              } else if (e.key === "Escape" && (browser.pathPending || suggestions.length)) {
+                e.preventDefault(); e.stopPropagation(); browser.setPathDraft(browser.cwd); browser.setError("");
+                setBad(false); setFocused(false); onDone();
+              }
+            }} />
+          {focused && suggestions.length > 0 && <div className="fp-suggest" role="listbox" aria-label={t("dir.pathLabel")}>
+            {suggestions.map((s, i) => <div key={s.path} role="option" aria-selected={i === highlight}
+              className={"fp-suggest-item" + (i === highlight ? " on" : "")}
+              onMouseDown={e => e.preventDefault()} onClick={() => void commit(s.path)}>
+              <Icons.folder size={15} fill /><span>{s.dir.endsWith(sepOf(flavor)) ? s.dir : s.dir + sepOf(flavor)}<b>{s.name.slice(0, s.matched)}</b>{s.name.slice(s.matched)}</span>
+              {i === Math.max(highlight, 0) && <span className="fp-key">Tab</span>}
+            </div>)}
+          </div>}
+        </div>
+        <button type="button" className="vlx-btn fp-path-go" onClick={() => void commit(text)} disabled={!fs || browser.pendingAction}>{t("dir.go")}</button>
+      </div>
+      {browser.pathPending && <span id="server-folder-path-pending" className="fp-path-pending" role="status">{t("dir.pathPending")}</span>}
     </div>
   );
 }
 
 /**
- * Browser body with navigation input, quick entries, root row, directory tree, and target row. Dialogs
- * supply their own title and footer. With `onFileClick`, files fill a Save As filename; without it they
- * are read-only context for directory selection. `selectedName` highlights a matching target-directory file.
+ * Toolbar, places, and folder list. Dialogs supply their own title and footer (see TargetPath).
+ * - `onSubmit`: Enter in the list with no folder selected, usually the dialog's confirm action.
+ * - `onFileClick` / `onFileActivate`: make files selectable (Save As fills its name; a double click saves).
+ * - `selectedName`: highlight the file matching the Save As name.
  */
 export function ServerBrowserView({
   browser,
+  onSubmit,
   onFileClick,
+  onFileActivate,
   selectedName,
 }: {
   browser: ServerBrowser;
+  onSubmit?: () => void;
   onFileClick?: (name: string) => void;
+  onFileActivate?: (name: string) => void;
   selectedName?: string;
 }) {
   const t = useT();
-  const q = browser.query.trim().toLowerCase();
-  const pathLike = q.includes("/") || q.startsWith("~");
-  // Do not filter while typing a path; hiding quick entries and the tree would impede navigation.
-  const treeFilter = pathLike ? "" : q;
-  const chips = !treeFilter
-    ? browser.quick
-    : browser.quick.filter(
-        (it) => it.label.toLowerCase().includes(treeFilter) || it.path.toLowerCase().includes(treeFilter),
-      );
-
-  // Inline new-folder field at the top of the tree, avoiding nested dialogs.
+  const places = usePlaces(browser);
+  const pathRef = useRef<HTMLInputElement>(null);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
+  const [placesMenu, setPlacesMenu] = useState<{ x: number; y: number } | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const filterRef = useRef<HTMLInputElement>(null);
+  const { cwd, flavor, visible, selected } = browser;
 
-  // After changing root, scroll breadcrumbs right so the current level remains visible.
-  const crumbBoxRef = useRef<HTMLDivElement>(null);
+  // Focus the list once per dialog so arrow keys and Enter work without a click.
+  const focused = useRef(false);
   useEffect(() => {
-    const el = crumbBoxRef.current;
-    if (el) el.scrollLeft = el.scrollWidth;
-  }, [browser.rootPath]);
-
-  const jump = async () => {
-    const raw = browser.query.trim();
-    if (!raw) return;
-    if (raw.includes("/") || raw.startsWith("~")) {
-      let target = raw;
-      if (raw === "~" || raw.startsWith("~/")) {
-        const h = await invoke<string | null>("home_dir").catch(() => null);
-        if (h) target = h + raw.slice(1);
-      }
-      if (target !== "/") target = target.replace(/\/+$/, "");
-      // Pasted paths often point at a file rather than a directory, an image path copied out of the
-      // terminal being the common case. Listing a file fails and would leave an empty tree, so open the
-      // directory holding it. The parent listing also tells file from directory in a single round trip;
-      // when it cannot, the typed path is used unchanged and the tree reports the error itself.
-      const parent = parentOf(target);
-      if (target.startsWith("/") && parent !== target) {
-        const base = baseName(target);
-        const entry = await listDir(parent)
-          .then((kids) => kids.find((k) => k.name === base))
-          .catch(() => undefined);
-        if (entry && !entry.isDir) target = parent;
-      }
-      browser.setRoot(target);
-    } else if (chips[0]) {
-      browser.setRoot(chips[0].path);
+    if (!focused.current && browser.entries) {
+      focused.current = true;
+      listRef.current?.focus({ preventScroll: true });
     }
-  };
+  }, [browser.entries]);
+
+  useEffect(() => {
+    if (!selected) return;
+    const row = listRef.current?.querySelector<HTMLElement>(`[data-name="${CSS.escape(selected)}"]`);
+    row?.scrollIntoView({ block: "nearest" });
+  }, [selected]);
+
+  const selectable = (e: DirEntry) => e.isDir || !!onFileClick;
 
   const startCreate = () => {
     browser.setError("");
     setNewName("");
     setCreating(true);
+    browser.setPendingAction(true);
   };
 
-  // Close the input before asynchronous creation so the following blur sees `creating=false` and does not
-  // interpret the same submission as cancellation.
-  const submitCreate = () => {
+  // Close the input before creating so the blur that follows does not submit the same name twice.
+  const submitCreate = async () => {
     const name = newName.trim();
-    setCreating(false);
     if (!name) return;
-    void browser.createFolder(name).catch((e) => browser.setError(String(e)));
+    try {
+      await browser.createFolder(name);
+      setCreating(false); browser.setPendingAction(false);
+    } catch (e) { browser.setError(String(e)); }
   };
 
-  let visibleRoots = (browser.roots || []).filter((c) => browser.showHidden || !c.isHidden);
-  if (treeFilter) visibleRoots = visibleRoots.filter((c) => nodeMatches(c, treeFilter));
+  const activate = (e: DirEntry) => {
+    if (e.isDir) void browser.open(joinPath(cwd, e.name, flavor));
+    else onFileActivate?.(e.name);
+  };
 
-  const crumbs = crumbsOf(browser.rootPath);
-  const atRoot = !browser.rootPath || browser.rootPath === "/";
+  const onRootKeyDown = (e: React.KeyboardEvent) => {
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "l") {
+      e.preventDefault();
+      e.stopPropagation();
+      pathRef.current?.focus(); pathRef.current?.select();
+    } else if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "f") {
+      e.preventDefault();
+      e.stopPropagation();
+      filterRef.current?.focus();
+    }
+  };
+
+  const onListKeyDown = (e: React.KeyboardEvent) => {
+    const rows = (visible || []).filter(selectable);
+    const index = rows.findIndex((r) => r.name === selected);
+    const current = index >= 0 ? rows[index] : undefined;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      if (e.altKey || e.metaKey) {
+        e.preventDefault();
+        if (e.key === "ArrowUp") browser.goUp();
+        else if (current) activate(current);
+        return;
+      }
+      if (!rows.length) return;
+      e.preventDefault();
+      const next = e.key === "ArrowDown" ? Math.min(index + 1, rows.length - 1) : Math.max(index - 1, 0);
+      browser.setSelected(rows[next].name);
+      if (!rows[next].isDir) onFileClick?.(rows[next].name);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (current?.isDir) activate(current);
+      else if (current && onFileActivate) activate(current);
+      else onSubmit?.();
+    } else if (e.key === "Backspace") {
+      e.preventDefault();
+      browser.goUp();
+    } else if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+      e.preventDefault();
+      if (e.key === "ArrowLeft") browser.goBack();
+      else browser.goForward();
+    } else if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey && e.key !== " ") {
+      // Typing in the list starts filtering the current folder.
+      e.preventDefault();
+      browser.setFilter(browser.filter + e.key);
+      filterRef.current?.focus();
+    }
+  };
+
+  const placeMenuItems: MenuItem[] = places.flatMap((section, i) => [
+    ...(i > 0 ? [{ label: "", separator: true }] : []),
+    ...section.items.map((p) => {
+      const Icon = PLACE_ICON[p.icon];
+      return {
+        label: p.label,
+        icon: <Icon size={13} />,
+        checked: !!cwd && samePath(p.path, cwd, flavor),
+        onClick: () => void browser.open(p.path),
+      };
+    }),
+  ]);
+
+  const emptyText = browser.filter.trim() ? t("dir.noMatch") : t("dir.empty");
 
   return (
-    <>
-      <div style={{ flexShrink: 0, position: "relative", padding: "0 16px 8px" }}>
-        <span
-          style={{
-            position: "absolute",
-            left: 25,
-            top: 8,
-            display: "grid",
-            placeItems: "center",
-            color: "var(--text-faint)",
-            pointerEvents: "none",
-          }}
-        >
-          <Icons.search size={13} />
-        </span>
-        <input
-          value={browser.query}
-          onChange={(e) => browser.setQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") void jump();
-            if (e.key === "Escape" && browser.query) {
-              e.stopPropagation(); // Clear search without letting Escape close the entire dialog.
-              browser.setQuery("");
-            }
-          }}
-          placeholder={t("dir.pathPlaceholder")}
-          spellCheck={false}
-          style={{
-            width: "100%",
-            boxSizing: "border-box",
-            padding: "7px 10px 7px 30px",
-            border: "1px solid var(--border)",
-            borderRadius: 7,
-            background: "var(--bg-0)",
-            fontFamily: "var(--font-mono, monospace)",
-            fontSize: 12,
-            color: "var(--text)",
-            outline: "none",
-          }}
+    <div className="fp-browser" onKeyDown={onRootKeyDown}>
+      <div className="fp-bar">
+        <div className="fp-nav">
+          <button
+            type="button"
+            className="fp-tool fp-places"
+            aria-label={t("dir.places")}
+            title={t("dir.places")}
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              setPlacesMenu({ x: r.left, y: r.bottom + 4 });
+            }}
+          >
+            <Icons.home size={14} />
+            <Icons.chevD size={11} />
+          </button>
+          <button type="button" className="fp-tool fp-hist" disabled={!browser.canBack || browser.pendingAction} onClick={browser.goBack} title={t("dir.back")} aria-label={t("dir.back")}>
+            <Icons.arrowLeft size={14} />
+          </button>
+          <button type="button" className="fp-tool fp-hist" disabled={!browser.canForward || browser.pendingAction} onClick={browser.goForward} title={t("dir.forward")} aria-label={t("dir.forward")}>
+            <Icons.arrowRight size={14} />
+          </button>
+          <button type="button" className="fp-tool" disabled={!browser.canUp || browser.pendingAction} onClick={browser.goUp} title={t("dir.up")} aria-label={t("dir.up")}>
+            <Icons.arrowUp size={14} />
+          </button>
+        </div>
+        <PathBar
+          browser={browser}
+          inputRef={pathRef}
+          onDone={() => requestAnimationFrame(() => listRef.current?.focus({ preventScroll: true }))}
         />
       </div>
 
-      {chips.length > 0 && (
-        <div className="picker-hscroll" style={{ flexShrink: 0, display: "flex", gap: 6, padding: "0 16px 9px" }}>
-          {chips.map((it) => {
-            const active = browser.rootPath === it.path;
-            const Icon = QUICK_ICON[it.kind];
-            return (
-              <button
-                type="button"
-                key={it.kind + it.path}
-                onClick={() => browser.setRoot(it.path)}
-                title={it.path}
-                style={{
-                  flexShrink: 0,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 5,
-                  maxWidth: 160,
-                  height: 26,
-                  padding: "0 10px",
-                  border: `1px solid ${active ? "var(--accent)" : "var(--border)"}`,
-                  borderRadius: 13,
-                  background: active ? "var(--accent-soft)" : "transparent",
-                  color: active ? "var(--text)" : "var(--text-mid)",
-                  fontSize: 12,
-                  cursor: "pointer",
-                }}
-              >
-                <span style={{ display: "grid", placeItems: "center", color: "var(--text-faint)" }}>
-                  <Icon size={12} />
-                </span>
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
+      <div className="fp-body">
+        <nav className="fp-side" aria-label={t("dir.places")}>
+          {places.map((section) => (
+            <div key={section.title} style={{ display: "contents" }}>
+              <div className="fp-side-head">{section.title}</div>
+              {section.items.map((p) => {
+                const Icon = PLACE_ICON[p.icon];
+                const on = !!cwd && samePath(p.path, cwd, flavor);
+                return (
+                  <button
+                    type="button"
+                    key={section.title + p.key}
+                    className={"fp-place" + (on ? " on" : "")}
+                    title={p.path}
+                    aria-current={on ? "location" : undefined}
+                    onClick={() => void browser.open(p.path)}
+                  >
+                    <Icon size={14} />
+                    <span className="fp-nm">{p.label}</span>
+                    {p.caption && <span className="fp-cap">{p.caption}</span>}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </nav>
 
-      <div
-        style={{
-          flexShrink: 0,
-          display: "flex",
-          alignItems: "center",
-          gap: 4,
-          padding: "0 12px 6px",
-        }}
-      >
-        <button
-          type="button"
-          onClick={() => browser.setRoot(parentOf(browser.rootPath))}
-          disabled={atRoot}
-          title={t("dir.up")}
-          style={iconBtn(false, atRoot)}
-        >
-          <Icons.arrowLeft size={13} />
-        </button>
-
-        <div
-          ref={crumbBoxRef}
-          className="picker-hscroll"
-          style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 1 }}
-        >
-          {crumbs.map((c, i) => {
-            const last = i === crumbs.length - 1;
-            return (
-              <span key={c.path} style={{ flexShrink: 0, display: "inline-flex", alignItems: "center" }}>
-                {i > 0 && (
-                  <span style={{ color: "var(--text-faint)", padding: "0 1px" }}>
-                    <Icons.chevR size={11} />
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={() => browser.setRoot(c.path)}
-                  title={c.path}
-                  style={{
-                    padding: "3px 6px",
-                    border: "none",
-                    borderRadius: 5,
-                    background: "transparent",
-                    color: last ? "var(--text)" : "var(--text-dim)",
-                    fontSize: 12.5,
-                    fontWeight: last ? 600 : 400,
-                    whiteSpace: "nowrap",
-                    cursor: "pointer",
-                  }}
-                >
-                  {c.name}
-                </button>
-              </span>
-            );
-          })}
-        </div>
-
-        <button
-          type="button"
-          onClick={startCreate}
-          disabled={!browser.selectedDir}
-          title={t("dir.newFolder")}
-          style={iconBtn(false, !browser.selectedDir)}
-        >
-          <Icons.folderPlus size={14} />
-        </button>
-        <button
-          type="button"
-          onClick={() => browser.setShowHidden((v) => !v)}
-          title={t("dir.showHidden")}
-          aria-pressed={browser.showHidden}
-          style={iconBtn(browser.showHidden, false)}
-        >
-          {browser.showHidden ? <Icons.eye size={14} /> : <Icons.eyeOff size={14} />}
-        </button>
-      </div>
-
-      <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto", paddingBottom: 6 }}>
-        {creating && (
-          <div className="file-row" style={{ paddingLeft: 8, cursor: "default" }}>
-            <span className="tw leaf" />
-            <span className="ic" style={{ color: "var(--text-dim)" }}>
-              <Icons.folder size={14} />
-            </span>
-            <input
-              autoFocus
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onBlur={submitCreate}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") submitCreate();
-                if (e.key === "Escape") {
-                  e.stopPropagation(); // Cancel creation without closing the dialog.
-                  setCreating(false);
-                }
-              }}
-              placeholder={t("dir.newFolderPlaceholder")}
-              spellCheck={false}
-              style={{
-                flex: 1,
-                minWidth: 0,
-                padding: "1px 5px",
-                border: "1px solid var(--accent)",
-                borderRadius: 4,
-                background: "var(--bg-0)",
-                color: "var(--text)",
-                fontSize: 12.5,
-                outline: "none",
-              }}
-            />
+        <div className="fp-content">
+          <div className="fp-content-tools">
+            <label className="fp-filter">
+              <Icons.search size={16} />
+              <input ref={filterRef} value={browser.filter} placeholder={t("dir.filter")} aria-label={t("dir.filter")}
+                spellCheck={false} onChange={e => browser.setFilter(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === "Escape" && browser.filter) {
+                    e.stopPropagation(); browser.setFilter(""); listRef.current?.focus();
+                  } else if (e.key === "ArrowDown" || e.key === "Enter") {
+                    e.preventDefault(); e.stopPropagation();
+                    const first = (visible || []).find(selectable);
+                    if (first) browser.setSelected(first.name);
+                    listRef.current?.focus();
+                  }
+                }} />
+            </label>
+            <button type="button" className="fp-tool" onClick={startCreate} disabled={!cwd || !!browser.listError || browser.pathPending || browser.pendingAction}
+              title={t("dir.newFolder")} aria-label={t("dir.newFolder")}><Icons.folderPlus size={17} /></button>
+            <button type="button" className={"fp-tool" + (browser.showHidden ? " on" : "")}
+              onClick={() => browser.setShowHidden(v => !v)} title={t("dir.showHidden")} aria-label={t("dir.showHidden")}
+              aria-pressed={browser.showHidden}>{browser.showHidden ? <Icons.eye size={17} /> : <Icons.eyeOff size={17} />}</button>
           </div>
-        )}
-
-        {browser.roots == null ? (
-          <div style={emptyHint}>{t("common.loading")}</div>
-        ) : browser.treeError ? (
-          <div style={emptyHint}>{t("panel.cantRead")}</div>
-        ) : visibleRoots.length === 0 ? (
-          <div style={emptyHint}>{treeFilter ? t("dir.noMatch") : t("dir.empty")}</div>
-        ) : (
-          visibleRoots.map((c) => (
-            <Row
-              key={c.path}
-              node={c}
-              depth={0}
-              browser={browser}
-              showHidden={browser.showHidden}
-              filter={treeFilter}
-              onFileClick={onFileClick}
-              selectedName={selectedName}
-            />
-          ))
-        )}
-      </div>
-
-      <div
-        style={{
-          flexShrink: 0,
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          padding: "7px 16px",
-          borderTop: "1px solid var(--border)",
-          fontSize: 11.5,
-        }}
-      >
-        <span style={{ flexShrink: 0, color: "var(--text-dim)" }}>{t("dir.target")}</span>
-        <span
-          title={browser.selectedDir}
-          style={{
-            minWidth: 0,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            direction: "rtl", // Preserve the meaningful final levels and truncate long paths from the start.
-            textAlign: "left",
-            color: "var(--text-mid)",
-            fontFamily: "var(--font-mono, monospace)",
+        <div
+          ref={listRef}
+          className="fp-list"
+          tabIndex={0}
+          role="listbox"
+          aria-label={cwd}
+          onKeyDown={onListKeyDown}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) browser.setSelected(null);
           }}
         >
-          {browser.selectedDir || "—"}
-        </span>
+          {creating && (
+            <div className="fp-row fp-new">
+              <Icons.folder size={14} fill />
+              <input
+                autoFocus
+                value={newName}
+                placeholder={t("dir.newFolderPlaceholder")}
+                spellCheck={false}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => {
+                  e.stopPropagation(); // Keep list shortcuts such as Backspace out of the name field.
+                  if (e.key === "Enter") { e.preventDefault(); void submitCreate(); }
+                  if (e.key === "Escape") { setCreating(false); browser.setPendingAction(false); }
+                }}
+              />
+              <button type="button" className="vlx-btn" onClick={() => void submitCreate()}>{t("dir.newFolder")}</button>
+              <button type="button" className="icon-btn" aria-label={t("common.cancel")}
+                onClick={() => { setCreating(false); browser.setPendingAction(false); }}><Icons.x size={15} /></button>
+            </div>
+          )}
+          {browser.listError ? (
+            <div className="fp-empty">
+              <Icons.warn size={20} />
+              <div className="fp-empty-title">{t("dir.cantOpen")}</div>
+              <div className="fp-empty-path">{cwd}</div>
+              {!browser.fs ? <button type="button" className="vlx-btn" onClick={() => void browser.refresh().catch(e => browser.setError(String(e)))}>{t("common.retry")}</button> : browser.canBack ? (
+                <button type="button" className="vlx-btn" onClick={browser.goBack}>
+                  {t("dir.backTo", browser.backTarget)}
+                </button>
+              ) : (
+                browser.fs && (
+                  <button type="button" className="vlx-btn" onClick={() => void browser.open(browser.fs!.home)}>
+                    {t("dir.goHome")}
+                  </button>
+                )
+              )}
+            </div>
+          ) : visible == null ? (
+            <div className="fp-empty">{t("common.loading")}</div>
+          ) : visible.length === 0 && !creating ? (
+            <div className="fp-empty">{emptyText}</div>
+          ) : (
+            visible.map((e) => {
+              const pickFile = !e.isDir && !!onFileClick;
+              const sel = e.isDir || pickFile ? selected === e.name || (!e.isDir && selectedName === e.name) : false;
+              return (
+                <div
+                  key={e.name}
+                  data-name={e.name}
+                  role="option"
+                  aria-selected={sel}
+                  className={
+                    "fp-row" +
+                    (e.isDir ? " dir" : " file") +
+                    (pickFile ? " pick" : "") +
+                    (sel ? " sel" : "") +
+                    (e.isHidden ? " hidden-entry" : "")
+                  }
+                  onClick={() => {
+                    if (e.isDir) browser.setSelected(e.name);
+                    else if (pickFile) {
+                      browser.setSelected(e.name);
+                      onFileClick!(e.name);
+                    }
+                  }}
+                  onDoubleClick={() => (e.isDir || pickFile) && activate(e)}
+                >
+                  {e.isDir ? <Icons.folder size={14} fill /> : <Icons.file size={13} />}
+                  <span className="fp-nm">{e.name}</span>
+                  {e.isDir && (
+                    <span className="fp-go">
+                      {sel ? <Icons.check size={17} /> : <Icons.chevR size={15} />}
+                    </span>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+        </div>
       </div>
 
-      {browser.error && (
-        <div style={{ flexShrink: 0, padding: "0 16px 8px", fontSize: 11.5, color: "var(--danger, #ff6b6b)" }}>
-          {browser.error}
-        </div>
+      {placesMenu && (
+        <ContextMenu x={placesMenu.x} y={placesMenu.y} items={placeMenuItems} onClose={() => setPlacesMenu(null)} />
       )}
-    </>
+    </div>
   );
 }
 
-/** Quick-entry icon by kind, sharing outline icons with the sidebar/files panel instead of emoji. */
-const QUICK_ICON = {
-  home: Icons.home,
-  project: Icons.project,
-  recent: Icons.clock,
-} as const;
-
-const emptyHint: React.CSSProperties = { padding: 16, color: "var(--text-dim)", fontSize: 12 };
-
-/** Consistently sized square toolbar button for parent, new folder, and hidden-item actions. */
-function iconBtn(active: boolean, disabled: boolean): React.CSSProperties {
-  return {
-    flexShrink: 0,
-    display: "grid",
-    placeItems: "center",
-    width: 26,
-    height: 26,
-    border: `1px solid ${active ? "var(--accent)" : "var(--border)"}`,
-    borderRadius: 6,
-    background: active ? "var(--accent-soft)" : "transparent",
-    color: active ? "var(--text)" : "var(--text-mid)",
-    cursor: disabled ? "default" : "pointer",
-    opacity: disabled ? 0.4 : 1,
-  };
+/** The complete target is visible and wraps; the final parent never disappears behind an ellipsis. */
+export function TargetPath({ label, path }: { label: string; path: string }) {
+  return (
+    <div className="fp-target">
+      <span className="fp-target-label">{label}</span>
+      <span className={"fp-target-value" + (path ? "" : " none")} title={path}>
+        <bdi>{path}</bdi>
+      </span>
+    </div>
+  );
 }
 
-/** Shared responsive dialog-card style that avoids horizontal overflow on mobile and narrow remote views. */
+/** Card style for the notebook vault dialogs, which host the browser inside their own card. */
 export const cardStyle: React.CSSProperties = {
   width: "min(460px, calc(100vw - 24px))",
   maxHeight: "min(80vh, 620px)",
@@ -767,27 +809,3 @@ export const cardStyle: React.CSSProperties = {
   boxShadow: "var(--shadow)",
   overflow: "hidden",
 };
-
-export const ghostBtn: React.CSSProperties = {
-  padding: "7px 14px",
-  border: "1px solid var(--border)",
-  borderRadius: 7,
-  background: "transparent",
-  color: "var(--text-dim)",
-  fontSize: 12.5,
-  cursor: "pointer",
-};
-
-export function primaryBtn(disabled: boolean): React.CSSProperties {
-  return {
-    padding: "7px 16px",
-    border: "none",
-    borderRadius: 7,
-    background: "var(--accent)",
-    color: "var(--bg-0)",
-    fontSize: 12.5,
-    fontWeight: 600,
-    cursor: disabled ? "default" : "pointer",
-    opacity: disabled ? 0.6 : 1,
-  };
-}

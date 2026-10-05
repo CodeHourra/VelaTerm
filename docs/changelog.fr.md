@@ -1,3 +1,49 @@
+## v0.2.7 — 2026-10-05
+
+- 🪐 Antigravity rejoint la vue de conversation à titre expérimental avec le texte, les outils, les messages en attente et la reprise de l’historique natif ; les images, les consignes en cours de réponse, les approbations interactives, les bifurcations et le retour en arrière restent indisponibles, et la validation complète de la récupération sur toutes les plateformes reste à effectuer.
+
+- 🗂️ Les collections peuvent contenir des sous-collections, des projets et des groupes de sessions, se créer ou s’importer depuis l’espace de travail, et leur suppression conserve les projets et les sessions archivées.
+
+- ⚠️ Les versions précédentes ne doivent pas utiliser une base de données dont les dossiers ont été migrés en collections ; revenir à une ancienne version nécessite de restaurer une sauvegarde antérieure à la migration.
+
+- 🏷️ Le renommage intelligent nomme une session d’après sa conversation avec les réglages de l’agent actuel et propose de choisir un agent lorsque ces réglages ne sont pas utilisables.
+
+- 🌱 Les nouvelles sessions utilisent le dernier environnement shell et les agents récemment installés sans redémarrer VelaTerm.
+
+- 💾 Après un redémarrage, la récupération expérimentale des conversations restaure les messages, les images et les entrées en attente enregistrés et suspend le travail interrompu jusqu’à une reprise explicite ; la validation complète en environnement natif et sur toutes les plateformes reste à effectuer.
+
+- 📸 La capture d’écran expérimentale des applications Tauri sur macOS et Windows permet de sélectionner une zone, de l’annoter, de la copier ou d’enregistrer le PNG d’origine ; la validation sur les applications natives reste à effectuer, et Electron, le navigateur et les vues distantes ne sont pas pris en charge.
+
+- 🧵 Les onglets des tâches Claude en arrière-plan affichent leur historique de conversation natif complet, y compris les appels d’outils parallèles.
+
+- 🖼️ Un message de conversation peut contenir jusqu’à 20 images, dans la limite de 5 MiB par image.
+
+- 📍 Les repères de messages permettent de prévisualiser le contenu et d’accéder directement aux messages précédents de l’utilisateur.
+
+- 🧭 Les sélecteurs de répertoires pour les projets, le clonage et Enregistrer sous proposent la saisie des chemins et la complétion des emplacements.
+
+- 🪪 `vself` lit les réglages enregistrés des sessions et leurs relations parent-enfant, tandis que `vflow list` répertorie les workflows de planification et d’exécution associés sans les modifier.
+
+- ⌨️ Tout sélectionner dans le terminal se configure dans les raccourcis, utilise Cmd+A sur macOS et Ctrl+Shift+A ailleurs par défaut, et ne s’applique que lorsque le terminal a le focus.
+
+- 🐚 La complétion Bash gère les chemins commençant par `~`, et les anciennes versions de Bash ouvrent les sessions sans erreur PS0.
+
+- 🛑 Les hooks des tâches enfants ne modifient plus l’état de conversation de leur parent, et fermer un onglet de conversation arrête son processus Chat actif.
+
+- 🪟 Windows rétablit le focus clavier du terminal au retour dans la fenêtre et supprime la ligne bleue pendant la composition de texte chinois.
+
+- 🎨 Le thème sombre classique offre un contraste plus net, les icônes de bureau suivent le thème du système, les icônes de projets sont bleues et les collections n’affichent plus le nombre de projets.
+
+- 📚 Les menus des sessions et des collections utilisent un libellé plus clair pour l’ajout à la base de connaissances.
+
+- 🌐 L’accès à VelaTerm en HTTP simple sur un réseau local ouvre correctement la page.
+
+- 🌍 Les vérifications de mise à jour transmettent la langue de l’interface pour adapter les notes de version, et le service accepte le programme de mise à jour Electron de Linux.
+
+- 🧰 Les noms d’agents Kimi Code et Grok Build ne comportent plus de numéro de version du modèle.
+
+---
+
 ## v0.2.6 — 2026-09-30
 
 - 🐧 La version Linux repose désormais sur Electron. L’AppImage conserve son nom de fichier et vos données, ne nécessite plus WebKitGTK ni libfuse2, et les installations existantes y passent via le système de mise à jour intégré.

@@ -2,7 +2,7 @@
 //! - Cmd/Ctrl+1–9 focuses the numbered open tab and is fixed to tab positions.
 //! - Cmd/Ctrl++/-/0 changes or resets terminal font size and is fixed to those semantics.
 //! - Settings may remap temporary-terminal creation, desktop browser tabs, pane/tab closure, both
-//!   split directions, terminal/global search, and document save. Defaults live in shortcutRegistry
+//!   split directions, terminal/global search, terminal selection, and document save. Defaults live in shortcutRegistry
 //!   and overrides in vlx-settings. Remapping changes only triggers, not contextual behavior.
 //!
 //! Platform defaults use Cmd on macOS and Ctrl+Alt on Windows/Linux (see DEFAULT_BINDINGS). Bare Ctrl
@@ -24,7 +24,7 @@ import { isShareSurface } from "../ipc/shareBase";
 import { env } from "../platform";
 import { useTermStore } from "../store/termStore";
 import { activeAgentLocation, agentPickerUrl, navigateAgentPicker, newAgentPickerRoute, readAgentPickerRoute } from "../layout/NewAgentSession/navigation";
-import { selectAll as selectAllTerminalContent } from "../terminal/registry";
+import { getTerminal, selectAll as selectAllTerminalContent } from "../terminal/registry";
 import {
   DEFAULT_BINDINGS,
   hasMod,
@@ -180,19 +180,21 @@ export function useKeyboardShortcuts() {
         return;
       }
 
-      // Select all terminal content. Runs only when a session tab is focused (document, browser and task
-      // tabs keep the browser's native Select All). Defaults are Cmd+A on macOS and Ctrl+Shift+A elsewhere
-      // so plain Ctrl+A remains free for readline's move-to-beginning-of-line, which every shell and
-      // agent CLI relies on.
+      // Only the focused terminal owns this action; inputs, conversation views and overlays keep their
+      // native selection. Stop handled keys before xterm can turn a rebound Ctrl+A into PTY input.
       if (matchCombo(e, sc("selectAllTerminal"))) {
+        if (e.defaultPrevented || e.isComposing || e.keyCode === 229) return;
         const { activeSessionId, activeTabId, docTabs, browserTabs, taskTabs } = useTermStore.getState();
         const onSessionTab =
           !!activeSessionId &&
           !(activeTabId && (docTabs[activeTabId] || browserTabs[activeTabId] || taskTabs[activeTabId]));
-        if (onSessionTab) {
-          e.preventDefault();
-          selectAllTerminalContent(activeSessionId!);
-        }
+        if (!onSessionTab) return;
+        const terminal = getTerminal(activeSessionId!);
+        if (!(e.target instanceof Node) || !terminal?.element?.contains(e.target)
+          || !terminal.element.contains(document.activeElement)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        selectAllTerminalContent(activeSessionId!);
       }
     };
 

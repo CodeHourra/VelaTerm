@@ -39,6 +39,21 @@ const GROUP: &str = "vlx-term-status";
 /// step 0 in practice; a small budget keeps a long transcript from being read on every hook call.
 const TRANSCRIPT_SCAN_LINES: usize = 32;
 
+/// Resolve only a native conversation identifier, never a path supplied by a client.
+pub fn transcript_path(id: &str) -> Option<PathBuf> {
+    if id.is_empty() || !id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_') {
+        return None;
+    }
+    let path = crate::host::home_dir()?.join(".gemini/antigravity-cli/brain").join(id)
+        .join(".system_generated/logs/transcript_full.jsonl");
+    path.is_file().then_some(path)
+}
+
+pub fn read_transcript(id: &str) -> Result<String, String> {
+    let path = transcript_path(id).ok_or("Antigravity transcript file not found")?;
+    std::fs::read_to_string(path).map_err(|e| format!("Failed to read Antigravity transcript: {e}"))
+}
+
 /// First user message of an Antigravity conversation, read from the transcript a hook payload names.
 ///
 /// Unlike Claude or Cursor, Antigravity hook payloads carry no prompt text: `PreInvocation`,

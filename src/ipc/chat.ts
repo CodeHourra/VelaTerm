@@ -378,6 +378,8 @@ export interface ChatExtras {
   backgroundTasks?: ChatBackgroundTask[];
   fastMode?: boolean;
   apiRetry?: ChatApiRetry;
+  /** Claude: the installed CLI predates live model listing, so the model menu shows the built-in catalogue. */
+  listModelsUnsupported?: boolean;
 }
 
 /**
@@ -440,8 +442,17 @@ export interface PendingPermissionMode {
   next: string;
 }
 
+/** A backend-owned index of top-level user messages, including history outside the loaded window. */
+export interface ChatUserMessage {
+  id: string;
+  text: string;
+  hasImages: boolean;
+}
+
 /** Everything needed to draw a conversation from scratch. */
 export interface ChatSnapshot {
+  userMessages?: ChatUserMessage[];
+  recovery?: { scope: string; items: { id: string; text: string; images: ChatImageValue[]; behavior: SendBehavior; status: "unknown" | "failed" | "sent" }[]; confirmedIds: string[]; interruptedId?: string; queuePaused: boolean; writerBlocked: boolean };
   positions?: Record<string, number>;
   pageKind?: "full" | "recent" | "history" | "delta";
   hasMore?: boolean;
@@ -490,6 +501,7 @@ export interface ChatSnapshot {
   backgroundTasks?: ChatBackgroundTask[];
   fastMode?: boolean;
   apiRetry?: ChatApiRetry;
+  listModelsUnsupported?: boolean;
 }
 
 /** A conversation waiting for its usage limit to reset before it continues on its own. */
@@ -515,19 +527,21 @@ export function extrasOf(snapshot: ChatSnapshot): ChatExtras {
     backgroundTasks: snapshot.backgroundTasks,
     fastMode: snapshot.fastMode,
     apiRetry: snapshot.apiRetry,
+    listModelsUnsupported: snapshot.listModelsUnsupported,
   };
 }
 
 /** What arrives on a session's chat channel. */
 export type ChatEvent =
+  | { type: "recoveryChanged" }
   | { type: "rows"; positions?: Record<string, number>; rows: ChatRow[]; revision?: number; epoch?: number }
   /** A rewind removed rows. Replace rather than merge so every connected view drops the same tail. */
-  | { type: "replaceRows"; positions?: Record<string, number>; rows: ChatRow[]; revision?: number; epoch?: number; hasMore?: boolean }
+  | { type: "replaceRows"; userMessages?: ChatUserMessage[]; positions?: Record<string, number>; rows: ChatRow[]; revision?: number; epoch?: number; hasMore?: boolean }
   /** A new process took over; its restored history replaces the previous timeline atomically. */
-  | { type: "reset"; epoch?: number; revision?: number; rows?: ChatRow[]; positions?: Record<string, number>; hasMore?: boolean }
+  | { type: "reset"; userMessages?: ChatUserMessage[]; epoch?: number; revision?: number; rows?: ChatRow[]; positions?: Record<string, number>; hasMore?: boolean }
   | { type: "permission"; request: ChatPermission }
   /** The whole queue, whenever it changes. A full list rather than one change, so clients cannot drift. */
-  | { type: "queued"; items: QueuedMessage[]; revision?: number; epoch?: number }
+  | { type: "queued"; items: QueuedMessage[]; paused?: boolean; revision?: number; epoch?: number }
   | { type: "permissionResolved"; id: string }
   | { type: "commands"; commands: ChatCommand[] }
   | { type: "configKeys"; keys: ChatConfigKey[] }
@@ -656,6 +670,11 @@ export interface ChatTaskOutput {
 
 export function chatTaskOutput(sessionId: string, taskId: string): Promise<ChatTaskOutput> {
   return invoke("chat_task_output", { sessionId, taskId });
+}
+
+/** What one of Claude's subagents has done so far, as rows of its own conversation. */
+export function chatSubagentRows(sessionId: string, taskId: string): Promise<ChatRow[]> {
+  return invoke("chat_subagent_rows", { sessionId, taskId });
 }
 
 /** Move every foreground task of the running turn to the background. */
@@ -799,7 +818,12 @@ export async function chatSnapshot(sessionId: string, window?: { before?: string
   registerSnapshotImages(cacheOwner, sessionId, snapshot.rows);
   registerToolDetails(sessionId, snapshot.startedAt, snapshot.rows);
   registerSnapshotImages(cacheOwner, sessionId, snapshot.queue);
+  registerSnapshotImages(cacheOwner, sessionId, snapshot.recovery);
   return snapshot;
+}
+
+export function chatRecoveryResume(sessionId: string, interruptedId?: string): Promise<void> {
+  return invoke("chat_recovery_resume", { sessionId, interruptedId });
 }
 
 /** Preview which files Claude would restore, without changing files or conversation state. */

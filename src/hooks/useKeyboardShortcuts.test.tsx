@@ -3,12 +3,18 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
   activeSessionId: "session-1" as string | null,
+  activeTabId: "session-1" as string | null,
+  docTabs: {} as Record<string, unknown>,
+  browserTabs: {} as Record<string, unknown>,
+  taskTabs: {} as Record<string, unknown>,
   shortcutOverrides: {} as Record<string, string>,
   splitNew: vi.fn(),
   newScratchTab: vi.fn(),
   projects: [], groups: [], sessions: [], inspectTarget: null, selection: [],
 }));
 
+const terminalRegistry = vi.hoisted(() => ({ getTerminal: vi.fn(), selectAll: vi.fn() }));
+vi.mock("../terminal/registry", () => terminalRegistry);
 vi.mock("../platform", () => ({ env: { isBrowser: true, isRemoteWindow: false } }));
 vi.mock("../ipc/transport", () => ({ isTauri: false }));
 vi.mock("../store/termStore", () => ({ useTermStore: { getState: () => state } }));
@@ -17,7 +23,12 @@ beforeEach(async () => {
   vi.stubGlobal("navigator", { platform: "MacIntel" });
   vi.resetModules();
   state.activeSessionId = "session-1";
+  state.activeTabId = "session-1";
+  state.docTabs = {};
+  state.browserTabs = {};
+  state.taskTabs = {};
   state.shortcutOverrides = {};
+  terminalRegistry.getTerminal.mockReset();
   window.history.replaceState(null, "", "/");
   const { useKeyboardShortcuts } = await import("./useKeyboardShortcuts");
   renderHook(() => useKeyboardShortcuts());
@@ -25,15 +36,16 @@ beforeEach(async () => {
 
 afterEach(() => {
   cleanup();
+  document.body.replaceChildren();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
 
-function press(key: string, modifiers: KeyboardEventInit) {
+function press(key: string, modifiers: KeyboardEventInit, target: HTMLElement = document.body) {
   const event = new KeyboardEvent("keydown", {
     key, code: `Key${key.toUpperCase()}`, bubbles: true, cancelable: true, ...modifiers,
   });
-  document.body.dispatchEvent(event);
+  target.dispatchEvent(event);
   return event;
 }
 
@@ -43,6 +55,77 @@ it("splits once in each direction and cancels browser defaults on macOS", () => 
   expect(press("D", { metaKey: true, shiftKey: true }).defaultPrevented).toBe(true);
   expect(state.splitNew).toHaveBeenNthCalledWith(2, "vertical", "shortcut");
   expect(state.splitNew).toHaveBeenCalledTimes(2);
+});
+
+function focusedTerminal() {
+  const element = document.createElement("div");
+  const textarea = document.createElement("textarea");
+  element.append(textarea);
+  document.body.append(element);
+  terminalRegistry.getTerminal.mockReturnValue({ element });
+  textarea.focus();
+  return textarea;
+}
+
+it("selects the focused terminal without forwarding the shortcut to its input handler", () => {
+  const textarea = focusedTerminal();
+  const terminalInput = vi.fn();
+  textarea.addEventListener("keydown", terminalInput);
+  expect(press("A", { ctrlKey: true, shiftKey: true }, textarea).defaultPrevented).toBe(true);
+  expect(terminalRegistry.selectAll).toHaveBeenCalledExactlyOnceWith("session-1");
+  expect(terminalInput).not.toHaveBeenCalled();
+
+  // Plain Ctrl+A still belongs to the shell until the user explicitly rebinds it.
+  expect(press("a", { ctrlKey: true }, textarea).defaultPrevented).toBe(false);
+  expect(terminalInput).toHaveBeenCalledOnce();
+  state.shortcutOverrides = { selectAllTerminal: "mod+a" };
+  terminalInput.mockClear();
+  expect(press("a", { ctrlKey: true }, textarea).defaultPrevented).toBe(true);
+  expect(terminalRegistry.selectAll).toHaveBeenCalledTimes(2);
+  expect(terminalInput).not.toHaveBeenCalled();
+});
+
+it.each(["input", "textarea", "contenteditable"])("preserves select all in a focused %s outside the terminal", (kind) => {
+  focusedTerminal();
+  const field = document.createElement(kind === "contenteditable" ? "div" : kind);
+  if (kind === "contenteditable") {
+    field.setAttribute("contenteditable", "true");
+    field.tabIndex = 0;
+  }
+  document.body.append(field);
+  field.focus();
+  state.shortcutOverrides = { selectAllTerminal: "mod+a" };
+  expect(press("a", { ctrlKey: true }, field).defaultPrevented).toBe(false);
+  expect(terminalRegistry.selectAll).not.toHaveBeenCalled();
+});
+
+it("leaves conversation and dormant sessions without a registered terminal alone", () => {
+  const field = document.createElement("textarea");
+  document.body.append(field);
+  field.focus();
+  expect(press("A", { ctrlKey: true, shiftKey: true }, field).defaultPrevented).toBe(false);
+  expect(terminalRegistry.selectAll).not.toHaveBeenCalled();
+});
+
+it.each(["docTabs", "browserTabs", "taskTabs"] as const)("leaves %s selection alone even with a stale active session", (tabs) => {
+  const textarea = focusedTerminal();
+  state.activeTabId = "other-tab";
+  state[tabs] = { "other-tab": {} };
+  expect(press("A", { ctrlKey: true, shiftKey: true }, textarea).defaultPrevented).toBe(false);
+  expect(terminalRegistry.selectAll).not.toHaveBeenCalled();
+});
+
+it("does not select terminal output during composition or after another handler cancels the key", () => {
+  const textarea = focusedTerminal();
+  for (const extra of [{ isComposing: true }, { keyCode: 229 }]) {
+    expect(press("A", { ctrlKey: true, shiftKey: true, ...extra }, textarea).defaultPrevented).toBe(false);
+  }
+  const canceled = new KeyboardEvent("keydown", {
+    key: "A", code: "KeyA", ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true,
+  });
+  canceled.preventDefault();
+  textarea.dispatchEvent(canceled);
+  expect(terminalRegistry.selectAll).not.toHaveBeenCalled();
 });
 
 it("leaves Ctrl+D and unrelated Cmd chords alone while retaining other browser bindings", () => {

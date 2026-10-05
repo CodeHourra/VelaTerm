@@ -57,6 +57,13 @@ const EXT: Record<string, FileIconSpec> = {
   md: { icon: "docLines", color: BLUE }, mdx: { icon: "docLines", color: BLUE }, markdown: { icon: "docLines", color: BLUE },
   txt: { icon: "docLines", color: FAINT }, text: { icon: "docLines", color: FAINT }, log: { icon: "docLines", color: FAINT },
   // ── Media ──
+  pdf: { icon: "docLines", color: RED },
+  doc: { icon: "docLines", color: BLUE }, docx: { icon: "docLines", color: BLUE }, odt: { icon: "docLines", color: BLUE }, rtf: { icon: "docLines", color: BLUE },
+  xls: { icon: "spreadsheet", color: GREEN }, xlsx: { icon: "spreadsheet", color: GREEN }, csv: { icon: "spreadsheet", color: GREEN }, ods: { icon: "spreadsheet", color: GREEN },
+  ppt: { icon: "presentation", color: RED }, pptx: { icon: "presentation", color: RED }, odp: { icon: "presentation", color: RED },
+  mp3: { icon: "music", color: MAG }, wav: { icon: "music", color: MAG }, flac: { icon: "music", color: MAG }, m4a: { icon: "music", color: MAG }, ogg: { icon: "music", color: MAG },
+  mp4: { icon: "video", color: MAG }, mov: { icon: "video", color: MAG }, webm: { icon: "video", color: MAG }, mkv: { icon: "video", color: MAG }, avi: { icon: "video", color: MAG },
+  tif: { icon: "image", color: GREEN }, tiff: { icon: "image", color: GREEN }, heic: { icon: "image", color: GREEN },
   svg: { icon: "image", color: GREEN },
   png: { icon: "image", color: GREEN }, jpg: { icon: "image", color: GREEN }, jpeg: { icon: "image", color: GREEN },
   gif: { icon: "image", color: GREEN }, webp: { icon: "image", color: GREEN }, bmp: { icon: "image", color: GREEN },

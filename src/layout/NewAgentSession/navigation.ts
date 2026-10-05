@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { genId } from "../../genId";
 import type { Group, Project, Session } from "../../types";
 
 export type AgentPlacement = "sibling" | "child";
@@ -52,7 +53,7 @@ export function agentPickerUrl(route: AgentPickerRoute | null): string {
 }
 
 export function newAgentPickerRoute(location: AgentPickerLocation): AgentPickerRoute {
-  return { ...location, requestId: crypto.randomUUID(), search: "", choice: "" };
+  return { ...location, requestId: genId(), search: "", choice: "" };
 }
 export function navigateAgentPicker(url: string, replace = false) {
   window.history[replace ? "replaceState" : "pushState"](null, "", url);

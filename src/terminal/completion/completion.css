@@ -1,11 +1,11 @@
 /* Match vlx-sql's Monaco suggest widget, with content-sized width for short shell candidates. */
 .terminal-completion {
-  --suggest-bg: #252526;
-  --suggest-border: #454545;
-  --suggest-text: #d4d4d4;
-  --suggest-selected: #04395e;
-  --suggest-match: #2aaaff;
-  --suggest-selected-match: #2aaaff;
+  --suggest-bg: var(--bg-2);
+  --suggest-border: var(--border-strong);
+  --suggest-text: var(--text);
+  --suggest-selected: color-mix(in srgb, var(--accent) 20%, var(--bg-2));
+  --suggest-match: var(--cyan);
+  --suggest-selected-match: var(--cyan);
   position: fixed;
   z-index: 1000;
   display: flex;
@@ -19,6 +19,14 @@
   box-shadow: 0 2px 5px #00000014;
   font-size: 13px;
   line-height: 20px;
+}
+[data-theme="dark"][data-dark-style="classic"] .terminal-completion {
+  --suggest-bg: #252526;
+  --suggest-border: #454545;
+  --suggest-text: #d4d4d4;
+  --suggest-selected: #04395e;
+  --suggest-match: #2aaaff;
+  --suggest-selected-match: #2aaaff;
 }
 [data-theme="light"] .terminal-completion {
   --suggest-bg: #f3f3f3;

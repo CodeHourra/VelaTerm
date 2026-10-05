@@ -20,7 +20,6 @@ pub fn list(app: &crate::host::AppCtx, session_id: &str, bin: &str, cwd: Option<
     let port = opencode_protocol::configured_port(app, &format!("catalog.{session_id}"))?;
     let password = opencode_protocol::random_password();
     let mut command = crate::host::command(bin);
-    crate::agent::executable::prepare_command(&mut command, bin);
     command
         .arg("serve")
         .arg("--port")
@@ -36,6 +35,8 @@ pub fn list(app: &crate::host::AppCtx, session_id: &str, bin: &str, cwd: Option<
     if let Some(cwd) = cwd {
         command.current_dir(cwd);
     }
+    crate::login_env::refresh_command(&mut command);
+    crate::agent::executable::prepare_command(&mut command, bin);
     for key in crate::pty::manager::AGENT_HARNESS_MARKERS {
         command.env_remove(key);
     }

@@ -36,20 +36,22 @@ export function reconcileChat(snapshot: ChatSnapshot, current: ChatRow[], events
     const epoch = event.epoch ?? result.startedAt;
     if (epoch !== undefined && result.startedAt !== undefined && epoch < result.startedAt) continue;
     if (epoch !== undefined && epoch !== result.startedAt) {
-      result = { ...result, auth: undefined, startedAt: epoch, rows: [], queue: [], rowsRevision: 0, queueRevision: 0, hasMore: false };
+      result = { ...result, userMessages: [], auth: undefined, startedAt: epoch, rows: [], queue: [], rowsRevision: 0, queueRevision: 0, hasMore: false };
     }
     if (event.type === "reset") {
       result = { ...result, auth: undefined };
       if (event.rows && (event.revision === undefined || event.revision > (result.rowsRevision ?? -1))) {
-        result = { ...result, rows: event.rows, rowsRevision: event.revision, hasMore: event.hasMore ?? false };
+        result = { ...result, userMessages: event.userMessages ?? [], rows: event.rows, rowsRevision: event.revision, hasMore: event.hasMore ?? false };
       }
       continue;
     }
     if (event.type === "queued") {
       if (event.revision === undefined || event.revision > (result.queueRevision ?? -1)) {
-        result = { ...result, queue: event.items, queueRevision: event.revision };
+        result = { ...result, queue: event.items, queueRevision: event.revision,
+          recovery: result.recovery && event.paused !== undefined ? { ...result.recovery, queuePaused: event.paused } : result.recovery };
       }
     } else if (event.revision === undefined || event.revision > (result.rowsRevision ?? -1)) {
+      if (event.type === "replaceRows") result = { ...result, userMessages: event.userMessages ?? [] };
       result = { ...result, rows: event.type === "rows" ? mergeRows(result.rows, event.rows, result.hasMore ?? false) : event.rows, rowsRevision: event.revision, hasMore: event.type === "replaceRows" ? (event.hasMore ?? false) : result.hasMore };
     }
   }

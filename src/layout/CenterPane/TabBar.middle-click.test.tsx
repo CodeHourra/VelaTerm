@@ -53,7 +53,7 @@ vi.mock("../sessionMenu", () => ({
   }),
 }));
 vi.mock("../sessionViewers/sessionMeta", () => ({ SessionKindIcon: () => null }));
-vi.mock("../../ipc/transport", () => ({ isTauri: false }));
+vi.mock("../../ipc/transport", () => ({ isTauri: false, isElectronShell: false, isRemoteWindow: false, isMac: false }));
 vi.mock("../../platform", () => ({ env: { isElectron: false } }));
 vi.mock("../../hooks/shortcutRegistry", () => ({ labelWithCombo: (label: string) => label }));
 vi.mock("../../hooks/useKeyboardShortcuts", () => ({ DOC_EXPORT_PDF_EVENT: "doc-export-pdf" }));

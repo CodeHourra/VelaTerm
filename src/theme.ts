@@ -15,6 +15,8 @@ export type ThemeMode = "system" | "dark" | "light";
 export type ResolvedTheme = "dark" | "light";
 /** Legacy store name, equivalent to ThemeMode. */
 export type Theme = ThemeMode;
+/** Retained settings field for compatibility with saved dark-style preferences. */
+export type DarkStyle = "classic";
 
 /** Accent color: 'auto' follows the scheme (dark→green, light→blue); other choices are fixed. */
 export type AccentName = "green" | "blue" | "amber" | "violet";
@@ -32,6 +34,7 @@ export type InspectorTab = "files" | "info" | "git" | "knowledge";
 
 /** Vlinx visual settings: design tokens beyond the color scheme. */
 export interface VisualSettings {
+  darkStyle: DarkStyle;
   accent: AccentChoice;
   density: Density;
   paneStyle: PaneStyle;
@@ -165,9 +168,9 @@ export const XTERM_THEME: Record<ResolvedTheme, ITheme> = {
     background: "oklch(0.175 0.006 260)", foreground: "#e9eaeb", cursor: "#e9eaeb",
     cursorAccent: "#212327",
     selectionBackground: "#3a4f6e", selectionInactiveBackground: "#323c4e",
-    black: "#41454c", red: "#f0726b", green: "#4fc08d", yellow: "#e3c46a",
+    black: "#9c9ea2", red: "#f0726b", green: "#4fc08d", yellow: "#e3c46a",
     blue: "#6aa0f7", magenta: "#d98fd0", cyan: "#5ec8d8", white: "#c9ccd1",
-    brightBlack: "#6b7079", brightRed: "#ff8a82", brightGreen: "#62d6a0",
+    brightBlack: "#bbbec2", brightRed: "#ff8a82", brightGreen: "#62d6a0",
     brightYellow: "#f2d585", brightBlue: "#86b4ff", brightMagenta: "#eaa6e0",
     brightCyan: "#79dcea", brightWhite: "#f3f4f5",
   },
@@ -183,6 +186,11 @@ export const XTERM_THEME: Record<ResolvedTheme, ITheme> = {
     brightCyan: "#2f96a3", brightWhite: "#1c1e22",
   },
 };
+
+/** Use the same palette for live terminals, newly mounted panes, and recording playback. */
+export function xtermTheme(mode: ThemeMode): ITheme {
+  return XTERM_THEME[resolveTheme(mode)];
+}
 
 const STORAGE_KEY = "vlx-theme";
 const SYSTEM_QUERY = "(prefers-color-scheme: dark)";
@@ -232,16 +240,17 @@ function syncNativeChrome(mode: ThemeMode) {
 }
 
 /** Apply a scheme: resolve it, write data-theme and color-scheme, persist the mode, and synchronize xterm colors. */
-export function applyTheme(mode: ThemeMode) {
+export function applyTheme(mode: ThemeMode, darkStyle: DarkStyle = "classic") {
   const resolved = resolveTheme(mode);
   document.documentElement.dataset.theme = resolved;
+  document.documentElement.dataset.darkStyle = darkStyle;
   // color-scheme drives how the user agent renders native in-page controls: checkboxes, radios, selects,
   // scrollbars, and form fields. index.html only seeds it from prefers-color-scheme, so without this line it
   // keeps following the OS for the window's lifetime and an explicit dark theme still draws light checkboxes
   // on a light-mode system. 'system' mode stays live because the media-query watcher re-runs applyTheme.
   document.documentElement.style.colorScheme = resolved;
   localStorage.setItem(STORAGE_KEY, mode);
-  setXtermTheme(XTERM_THEME[resolved]);
+  setXtermTheme(xtermTheme(mode));
   syncNativeChrome(mode);
 }
 
@@ -252,6 +261,7 @@ export function applyTheme(mode: ThemeMode) {
 export function applyVisual(s: VisualSettings) {
   const root = document.documentElement;
   const resolved = (root.dataset.theme as ResolvedTheme) || resolveTheme("system");
+  root.dataset.darkStyle = s.darkStyle;
   root.dataset.accent = effectiveAccent(s.accent, resolved);
   root.dataset.density = s.density;
   root.dataset.pane = s.paneStyle;

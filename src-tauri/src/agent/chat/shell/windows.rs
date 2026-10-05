@@ -8,7 +8,7 @@ use windows::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Th
 use windows::Win32::System::JobObjects::{AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE};
 use windows::Win32::System::Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME};
 
-pub(super) struct Job(OwnedHandle);
+pub(crate) struct Job(OwnedHandle);
 
 fn owned(handle: HANDLE) -> OwnedHandle {
     // Every caller transfers a newly created, non-null handle exactly once.

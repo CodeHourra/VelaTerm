@@ -33,7 +33,7 @@ pub fn list_dir(path: &str) -> Result<Vec<DirEntryInfo>, String> {
         if name == ".git" {
             continue;
         }
-        let is_hidden = name.starts_with('.');
+        let is_hidden = name.starts_with('.') || has_hidden_attribute(&ent);
         let is_dir = match ent.file_type() {
             // DirEntry::file_type does not follow symlinks. Path::is_dir lets directory links remain expandable and
             // selectable while file links and broken links remain non-directories.
@@ -166,6 +166,135 @@ pub fn create_file(path: &str) -> Result<(), String> {
         }
         Err(e) => Err(format!("Failed to create file: {e}")),
     }
+}
+
+/// Windows marks entries such as `AppData` and `NTUSER.DAT` hidden by attribute rather than by a leading dot.
+#[cfg(windows)]
+fn has_hidden_attribute(ent: &std::fs::DirEntry) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+    ent.metadata().map(|m| m.file_attributes() & FILE_ATTRIBUTE_HIDDEN != 0).unwrap_or(false)
+}
+
+#[cfg(not(windows))]
+fn has_hidden_attribute(_ent: &std::fs::DirEntry) -> bool {
+    false
+}
+
+/// File-system roots offered by the server folder picker, with the host OS so the client can choose path
+/// syntax and labels: mounted drive roots such as `C:\` on Windows, `/` everywhere else.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FsRoots {
+    pub os: &'static str,
+    pub host_name: Option<String>,
+    pub home: Option<String>,
+    pub roots: Vec<String>,
+}
+
+pub fn list_roots() -> FsRoots {
+    #[cfg(windows)]
+    let roots = (b'A'..=b'Z')
+        .map(|letter| format!("{}:\\", letter as char))
+        .filter(|root| std::path::Path::new(root).is_dir())
+        .collect();
+    #[cfg(not(windows))]
+    let roots = vec!["/".to_string()];
+    FsRoots {
+        os: std::env::consts::OS,
+        host_name: sysinfo::System::host_name(),
+        home: crate::host::home_dir().map(|p| p.to_string_lossy().to_string()),
+        roots,
+    }
+}
+
+/// Validate a single child name on the executing host; UI checks never replace this rule.
+pub fn validate_child_name(name: &str) -> Result<(), String> {
+    if name.is_empty() || name == "." || name == ".." || name.contains('/') || name.contains('\\')
+        || name.chars().any(|c| c == '\0' || c.is_control()) {
+        return Err("Enter a single file or folder name without path separators".to_string());
+    }
+    #[cfg(windows)]
+    {
+        let stem = name.split('.').next().unwrap_or(name).to_ascii_uppercase();
+        let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+            || (stem.len() == 4 && (stem.starts_with("COM") || stem.starts_with("LPT"))
+                && matches!(stem.as_bytes()[3], b'1'..=b'9'));
+        if reserved || name.ends_with('.') || name.ends_with(' ')
+            || name.chars().any(|c| matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*')) {
+            return Err("This name is not valid on Windows".to_string());
+        }
+    }
+    Ok(())
+}
+
+/// Read-only preview for project forms and Save As. Paths and default names come from this host.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DestinationPreview {
+    pub parent: String,
+    pub name: String,
+    pub path: String,
+    pub problem: Option<&'static str>,
+    pub field: Option<&'static str>,
+    pub existing_kind: Option<&'static str>,
+}
+
+pub fn preview_destination(parent: &str, name: Option<&str>, repository: Option<&str>) -> DestinationPreview {
+    let name = name.map(str::trim).map(str::to_string)
+        .unwrap_or_else(|| repository.and_then(crate::git::derive_clone_dir_name).unwrap_or_default());
+    let input = parent.trim();
+    let expanded = if input == "~" || input.starts_with("~/") || input.starts_with("~\\") {
+        crate::host::home_dir().map(|home| if input == "~" { home } else { home.join(&input[2..]) })
+            .unwrap_or_else(|| std::path::PathBuf::from(input))
+    } else {
+        std::path::PathBuf::from(input)
+    };
+    let mut result = DestinationPreview {
+        parent: expanded.to_string_lossy().to_string(), name,
+        path: String::new(), problem: None, field: None, existing_kind: None,
+    };
+    let fail = |result: &mut DestinationPreview, problem, field| {
+        result.problem = Some(problem);
+        result.field = Some(field);
+    };
+    if input.is_empty() {
+        fail(&mut result, "emptyParent", "location");
+        return result;
+    }
+    if !expanded.is_absolute() {
+        fail(&mut result, "notAbsolute", "location");
+        return result;
+    }
+    if result.name.is_empty() {
+        fail(&mut result, "emptyName", "name");
+        return result;
+    }
+    if validate_child_name(&result.name).is_err() {
+        fail(&mut result, "invalidName", "name");
+        return result;
+    }
+    // Canonicalization resolves `..` and symlinks before displaying the exact path that will be submitted.
+    let canonical = match std::fs::canonicalize(&expanded) {
+        Ok(path) if path.is_dir() && std::fs::read_dir(&path).is_ok() => path,
+        _ => {
+            fail(&mut result, "missingParent", "location");
+            return result;
+        }
+    };
+    let display = canonical.to_string_lossy().to_string();
+    #[cfg(windows)]
+    let display = display.strip_prefix("\\\\?\\UNC\\").map(|p| format!("\\\\{p}"))
+        .or_else(|| display.strip_prefix("\\\\?\\").map(str::to_string)).unwrap_or(display);
+    result.parent = display;
+    let target = std::path::Path::new(&result.parent).join(&result.name);
+    result.path = target.to_string_lossy().to_string();
+    match std::fs::symlink_metadata(&target) {
+        Ok(_) => result.existing_kind = Some(if target.is_dir() { "directory" } else { "file" }),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+        Err(_) => fail(&mut result, "unavailable", "location"),
+    }
+    result
 }
 
 /// Creates one directory level at an absolute path; errors if it exists or its parent is missing.

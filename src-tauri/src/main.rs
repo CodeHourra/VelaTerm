@@ -93,9 +93,8 @@ fn main() {
     raise_fd_limit();
     // Dock and desktop launches inherit a minimal environment: no login-shell PATH, no variables a
     // startup file exports. Both are needed by the GUI and by the headless server's chat engine, so
-    // recover them before anything spawns a child process. Terminal launches already carry the shell
-    // environment and skip this.
-    #[cfg(unix)]
+    // recover them before anything spawns a child process. Also remember the original launch baseline
+    // on every platform so new sessions can refresh exports without inheriting stale hydrated values.
     velaterm_lib::login_env::hydrate();
     // Headless server mode starts browser remote access (HTTPS, login, WebSocket, and PTY) from the CLI
     // without creating a window or requiring a display server.

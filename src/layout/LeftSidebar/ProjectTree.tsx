@@ -21,7 +21,6 @@ import {
   type Group,
   type NodeKind,
   type Project,
-  type ProjectFolder,
   type Session,
 } from "../../types";
 import { MARK_LABEL_KEYS, type NodeMark, normalizeMark } from "../../marks";
@@ -30,9 +29,11 @@ import { SESSION_DRAG_MIME, SESSION_MULTI_DRAG_MIME } from "../CenterPane/paneDr
 import { DEFAULT_BINDINGS, formatCombo } from "../../hooks/shortcutRegistry";
 import { useGitBranch } from "../../hooks/useGitBranch";
 import { stripControlChars, useCtrlCharGuard } from "../../hooks/textInputGuards";
-import { setProjectFolder, toggleProjectFolderCollapsed } from "../../store/projectFolders";
-import { arrangeProjectsInFolders } from "./projectFolderLayout";
-import { hasProjectDrag, PROJECT_DRAG_MIME, resolveProjectDrop } from "./projectFolderDrop";
+import { setProjectCollection } from "../../store/projectCollections";
+import { arrangeProjectsInCollections } from "./projectCollectionLayout";
+import { collectionDialogUrl } from "./collectionNavigation";
+import { newGroupDialogUrl } from "./groupNavigation";
+import { hasProjectDrag, PROJECT_DRAG_MIME, resolveProjectDrop } from "./projectCollectionDrop";
 
 /** Reference to a node targeted by a context menu or operation. */
 export interface TreeNodeRef {
@@ -59,24 +60,26 @@ export interface TreeHandlers {
   /** Only the primary projection consumes global reveal requests. */
   isPrimary: boolean;
   onContext: (node: TreeNodeRef, x: number, y: number) => void;
-  /** Right-click on a folder row; folders are not tree nodes, so they get their own menu callback. */
-  onFolderContext: (folder: ProjectFolder, x: number, y: number) => void;
   /** Current context-menu target, highlighted temporarily without changing persistent selection. */
   contextId: string | null;
   renamingId: string | null;
   renameVal: string;
+  /** Why the current rename value cannot be saved, shown on the input; null when it is valid. */
+  renameError: string | null;
   setRenameVal: (v: string) => void;
-  commitRename: () => void;
+  /** `fromBlur` discards an invalid value instead of keeping the input open. */
+  commitRename: (fromBlur?: boolean) => void;
   cancelRename: () => void;
   onAddSession: (node: TreeNodeRef, x: number, y: number) => void;
   onAddGroup: (node: TreeNodeRef) => void;
+  /** Opens the new-collection dialog; offered by the empty state next to the project entry points. */
+  onNewCollection: () => void;
 }
 
 /** One-dimensional virtualized row model flattening the project/group/session recursion. useVirtualizer renders only
  *  visible rows and reuses nodes while scrolling. This is separate from `flat`, which contains only persistent nodes
  *  for Shift-range selection. */
 type TreeRow =
-  | { kind: "folder"; id: string; folder: ProjectFolder; projectCount: number; expanded: boolean }
   | { kind: "project"; id: string; project: Project; expanded: boolean; indent: number }
   | { kind: "group"; id: string; group: Group; depth: number; expanded: boolean }
   | {
@@ -280,11 +283,13 @@ export function ProjectTree(h: TreeHandlers) {
     contextId,
     renamingId,
     renameVal,
+    renameError,
     setRenameVal,
     commitRename,
     cancelRename,
     onAddSession,
     onAddGroup,
+    onNewCollection,
     view,
     isPrimary,
   } = h;
@@ -306,7 +311,6 @@ export function ProjectTree(h: TreeHandlers) {
   const openProjectCombo =
     useTermStore((s) => s.shortcutOverrides.openProject) || DEFAULT_BINDINGS.openProject;
   const groups = useTermStore((s) => s.groups);
-  const projectFolders = useTermStore((s) => s.projectFolders);
   const sessions = useTermStore((s) => s.sessions);
   const ephemeralSessions = useTermStore((s) => s.ephemeralSessions);
   const toggleCollapsed = useTermStore((s) => s.toggleCollapsed);
@@ -369,16 +373,6 @@ export function ProjectTree(h: TreeHandlers) {
   const statusFiltering = statusFilter !== null;
   const markFiltering = markFilter !== null;
   const filtering = filter.length > 0 || statusFiltering || markFiltering;
-
-  // Folders follow the same shared-vs-per-pane collapse split as projects; a filter keeps them open.
-  const toggleFolder = (folder: ProjectFolder) => {
-    if (filtering) return;
-    if (!collapsedOverrides) {
-      void toggleProjectFolderCollapsed(folder.id);
-      return;
-    }
-    setViewCollapsed(view.id, folder.id, !nodeCollapsed(folder.id, folder.collapsed));
-  };
 
   // Marker filtering compares live values rather than a snapshot: a marker changes only when the user picks one,
   // so no row can disappear while it is being clicked.
@@ -464,6 +458,24 @@ export function ProjectTree(h: TreeHandlers) {
         groups.some((g) => g.projectId === p.id && visG.has(g.id));
       if (vis) visP.add(p.id);
     }
+    // A collection match exposes member projects; a descendant match exposes its entire collection ancestry.
+    const revealChildren = (id: string, seen = new Set<string>()) => {
+      if (seen.has(id)) return;
+      seen.add(id);
+      for (const child of projects.filter(p => p.collectionId === id)) {
+        visP.add(child.id);
+        revealChildren(child.id, seen);
+      }
+    };
+    for (const p of projects) if (isVirtualProject(p) && nodeSelfMatch(p.name, p.mark)) revealChildren(p.id);
+    for (const id of [...visP]) {
+      let parent = projects.find(p => p.id === id)?.collectionId;
+      const seen = new Set<string>();
+      while (parent && !seen.has(parent)) {
+        seen.add(parent); visP.add(parent);
+        parent = projects.find(p => p.id === parent)?.collectionId;
+      }
+    }
     return { visGroups: visG, visProjects: visP };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filtering, filter, statusFiltering, statusFilterIds, markFilter, groups, sessions, projects]);
@@ -471,13 +483,8 @@ export function ProjectTree(h: TreeHandlers) {
   const projectEntries = useMemo(() => {
     const visible =
       filtering && visProjects ? projects.filter((p) => visProjects.has(p.id)) : projects;
-    return arrangeProjectsInFolders(
-      visible,
-      projectFolders,
-      (folder) => filtering || !nodeCollapsed(folder.id, folder.collapsed),
-      filtering,
-    );
-  }, [projects, projectFolders, filtering, visProjects, collapsedOverrides]);
+    return arrangeProjectsInCollections(visible, p => filtering || !nodeCollapsed(p.id, p.collapsed));
+  }, [projects, filtering, visProjects, collapsedOverrides]);
 
   // A name match propagates visibility downward so a matching node's complete subtree remains expandable even when
   // descendants lack the term. Marker propagation is added only for projects/groups below: a marked session keeps
@@ -486,6 +493,17 @@ export function ProjectTree(h: TreeHandlers) {
     !statusFiltering && filter.length > 0 && name.toLowerCase().includes(filter);
   const containerHit = (name: string, mark?: string | null) =>
     nameHit(name) || markHit(mark);
+
+  const projectContainerHit = (project: Project) => {
+    let current: Project | undefined = project;
+    const seen = new Set<string>();
+    while (current && !seen.has(current.id)) {
+      if (containerHit(current.name, current.mark)) return true;
+      seen.add(current.id);
+      current = projects.find(p => p.id === current?.collectionId);
+    }
+    return false;
+  };
 
   const sessionMatch = (s: Session) =>
     (!filter || s.name.toLowerCase().includes(filter)) && attributeMatch(s);
@@ -536,11 +554,10 @@ export function ProjectTree(h: TreeHandlers) {
       for (const s of childSessions) sessionWalk(s, ancestorMatched);
     };
     for (const entry of projectEntries) {
-      if (entry.kind !== "project") continue;
       const p = entry.project;
       out.push({ id: p.id, kind: "project" });
       const expanded = filtering ? true : !nodeCollapsed(p.id, p.collapsed);
-      if (expanded) walk(p.id, null, containerHit(p.name, p.mark));
+      if (expanded) walk(p.id, null, projectContainerHit(p));
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -600,20 +617,10 @@ export function ProjectTree(h: TreeHandlers) {
     };
 
     for (const entry of projectEntries) {
-      if (entry.kind === "folder") {
-        out.push({
-          kind: "folder",
-          id: entry.folder.id,
-          folder: entry.folder,
-          projectCount: entry.projectCount,
-          expanded: entry.expanded,
-        });
-        continue;
-      }
       const p = entry.project;
       const expanded = filtering ? true : !nodeCollapsed(p.id, p.collapsed);
       out.push({ kind: "project", id: p.id, project: p, expanded, indent: entry.indent });
-      if (expanded) walkChildren(p.id, null, 1 + entry.indent, containerHit(p.name, p.mark));
+      if (expanded) walkChildren(p.id, null, 1 + entry.indent, projectContainerHit(p));
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -648,14 +655,19 @@ export function ProjectTree(h: TreeHandlers) {
     if (!isPrimary || !revealProjectId) return;
     const index = rows.findIndex((row) => row.kind === "project" && row.id === revealProjectId);
     if (index < 0) {
-      const folderId = projects.find((p) => p.id === revealProjectId)?.folderId;
-      const folder = folderId ? projectFolders.find((f) => f.id === folderId) : undefined;
-      if (folder?.collapsed && !filtering) void toggleProjectFolderCollapsed(folder.id);
+      let parentId = projects.find(p => p.id === revealProjectId)?.collectionId;
+      const seen = new Set<string>();
+      while (parentId && !seen.has(parentId)) {
+        seen.add(parentId);
+        const parent = projects.find(p => p.id === parentId);
+        if (parent?.collapsed && !filtering) void toggleCollapsed("project", parent.id);
+        parentId = parent?.collectionId;
+      }
       return;
     }
     virtualizer.scrollToIndex(index, { align: "auto" });
     setRevealProject(null);
-  }, [isPrimary, revealProjectId, rows, setRevealProject, virtualizer, projects, projectFolders, filtering]);
+  }, [isPrimary, revealProjectId, rows, setRevealProject, virtualizer, projects, filtering, toggleCollapsed]);
 
   // Autoscroll near list edges so virtualized offscreen drop targets enter the viewport. Listen during capture because
   // row onDragOver stops propagation.
@@ -783,10 +795,13 @@ export function ProjectTree(h: TreeHandlers) {
       void toggleCollapsed("project", proj.id);
       changed = true;
     }
-    const folder = proj?.folderId ? projectFolders.find((f) => f.id === proj.folderId) : undefined;
-    if (folder?.collapsed) {
-      void toggleProjectFolderCollapsed(folder.id);
-      changed = true;
+    let parentId = proj?.collectionId;
+    const seen = new Set<string>();
+    while (parentId && !seen.has(parentId)) {
+      seen.add(parentId);
+      const parent = projects.find(p => p.id === parentId);
+      if (parent?.collapsed) { void toggleCollapsed("project", parent.id); changed = true; }
+      parentId = parent?.collectionId;
     }
     // If all ancestors are expanded and the row is still absent, clear pending state defensively.
     if (!changed) revealPendingRef.current = null;
@@ -876,7 +891,7 @@ export function ProjectTree(h: TreeHandlers) {
       badge.textContent = String(batchCount);
       badge.style.cssText =
         "position:absolute;right:6px;top:50%;transform:translateY(-50%);min-width:16px;" +
-        "height:16px;padding:0 4px;border-radius:9px;background:var(--accent);color:#fff;" +
+        "height:16px;padding:0 4px;border-radius:9px;background:var(--accent);color:var(--text-on-accent);" +
         "font-size:10px;line-height:16px;text-align:center;font-weight:600;";
       clone.appendChild(badge);
     }
@@ -958,7 +973,7 @@ export function ProjectTree(h: TreeHandlers) {
       prev?.id === id && prev.zone === zone ? prev : { id, zone },
     );
   };
-  // Project drops only change folder membership, so they always highlight the whole row, never an edge.
+  // Project drops only change collection membership, so they always highlight the whole row, never an edge.
   const allowProjectDrop = (e: React.DragEvent, id: string) => {
     if (!hasProjectDrag(e.dataTransfer.types)) return;
     e.preventDefault();
@@ -1034,9 +1049,9 @@ export function ProjectTree(h: TreeHandlers) {
     if (!p) return;
 
     if (p.kind === "project") {
-      const move = resolveProjectDrop(p, { kind: "project", project: target }, projects, projectFolders);
-      // A rejection means the folder vanished elsewhere; setProjectFolder has already reloaded the tree.
-      if (move) void setProjectFolder(move.projectId, move.folderId).catch(() => {});
+      const move = resolveProjectDrop(p, target, projects);
+      // Failed moves recover the backend tree and retain a visible error.
+      if (move) void setProjectCollection(move.projectId, move.collectionId).catch(() => {});
       return;
     }
 
@@ -1062,15 +1077,6 @@ export function ProjectTree(h: TreeHandlers) {
       if (p.projectId !== projectId) return;
       void moveNode("group", p.id, projectId, null, null, Date.now());
     }
-  };
-  const dropOnFolder = (folder: ProjectFolder) => (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragOver(null);
-    const p = readPayload(e);
-    if (!p) return;
-    const move = resolveProjectDrop(p, { kind: "folder", folderId: folder.id }, projects, projectFolders);
-    if (move) void setProjectFolder(move.projectId, move.folderId).catch(() => {});
   };
   const dropOnSession = (target: Session) => (e: React.DragEvent) => {
     e.preventDefault();
@@ -1189,25 +1195,27 @@ export function ProjectTree(h: TreeHandlers) {
   const renameInput = (
     <input
       ref={ctrlCharGuard}
-      className="rename-input"
+      className={"rename-input" + (renameError ? " invalid" : "")}
       autoFocus
       value={renameVal}
+      aria-invalid={renameError ? true : undefined}
+      title={renameError ?? undefined}
       onClick={(e) => e.stopPropagation()}
       onChange={(e) => setRenameVal(stripControlChars(e.target.value))}
       onKeyDown={(e) => {
         if (e.key === "Enter") commitRename();
         if (e.key === "Escape") cancelRename();
       }}
-      onBlur={commitRename}
+      onBlur={() => commitRename(true)}
     />
   );
 
   // Hover create controls: session/group for projects and groups, child session for sessions.
-  const metaButtons = (ref: TreeNodeRef, canAddGroup: boolean) => (
+  const metaButtons = (ref: TreeNodeRef, canAddGroup: boolean, collection = false) => (
     <span className="meta">
       <span
         className="add"
-        title={ref.kind === "session" ? t("tree.newChildSession") : t("tree.newSession")}
+        title={collection ? t("common.create") : ref.kind === "session" ? t("tree.newChildSession") : t("tree.newSession")}
         onClick={(e) => {
           e.stopPropagation();
           onAddSession(ref, e.clientX, e.clientY);
@@ -1216,16 +1224,19 @@ export function ProjectTree(h: TreeHandlers) {
         <Icons.plus size={12} />
       </span>
       {canAddGroup && (
-        <span
+        <a
           className="add"
+          href={newGroupDialogUrl(ref.projectId, ref.kind === "group" ? ref.id : null)}
           title={t("tree.newGroup")}
           onClick={(e) => {
             e.stopPropagation();
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+            e.preventDefault();
             onAddGroup(ref);
           }}
         >
           <Icons.newGroup size={12} />
-        </span>
+        </a>
       )}
     </span>
   );
@@ -1233,36 +1244,6 @@ export function ProjectTree(h: TreeHandlers) {
   // Render one flattened row by kind, centralizing JSX formerly spread across three recursive render paths.
   const renderRow = (row: TreeRow): React.ReactNode => {
     switch (row.kind) {
-      case "folder": {
-        const f = row.folder;
-        return (
-          <div
-            className={"row project-folder" + (contextId === f.id ? " context" : "")}
-            style={{ paddingLeft: 6, ...dragStyle(f.id) }}
-            onDragOver={(e) => allowProjectDrop(e, f.id)}
-            onDragLeave={() => setDragOver((d) => (d?.id === f.id ? null : d))}
-            onDrop={dropOnFolder(f)}
-            onMouseDown={preventModifierSelect}
-            onClick={() => toggleFolder(f)}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              if (!isShareSurface) h.onFolderContext(f, e.clientX, e.clientY);
-            }}
-          >
-            <span className="tw">
-              <Chevron open={row.expanded} />
-            </span>
-            <span className="ic" style={{ color: "var(--text-dim)" }}>
-              {row.expanded ? <Icons.folderOpen size={15} /> : <Icons.folder size={15} />}
-            </span>
-            <span className="nm">{f.name}</span>
-            <span className="folder-count" title={t("folder.projectCount", row.projectCount)}>
-              {row.projectCount}
-            </span>
-          </div>
-        );
-      }
       case "project": {
         const p = row.project;
         const renaming = renamingId === p.id;
@@ -1276,7 +1257,7 @@ export function ProjectTree(h: TreeHandlers) {
         return (
           <div
             className={
-              "row project" +
+              "row project" + (isVirtualProject(p) ? " collection" : "") +
               (selectedIds.has(p.id) ? " sel" : "") +
               (contextId === p.id ? " context" : "")
             }
@@ -1317,7 +1298,7 @@ export function ProjectTree(h: TreeHandlers) {
                 <span className="nm">{p.name}</span>
               </>
             )}
-            {metaButtons(ref, true)}
+            {metaButtons(ref, true, isVirtualProject(p))}
           </div>
         );
       }
@@ -1437,7 +1418,8 @@ export function ProjectTree(h: TreeHandlers) {
     );
   }
 
-  // Show all three project entry points when no projects exist; draft terminals appear only in center tabs.
+  // Show the three project entry points plus collection creation when the tree is empty; draft terminals
+  // appear only in center tabs.
   if (projects.length === 0) {
     return (
       <div
@@ -1456,17 +1438,24 @@ export function ProjectTree(h: TreeHandlers) {
           {t("tree.noProjectsPost")}
         </div>
         <button className="empty-action" onClick={() => setCreateProjectModalOpen(true)}>
-          <Icons.folderPlus size={14} />
+          <Icons.projectPlus size={14} />
           {t("tree.createProject")}
         </button>
         <button className="empty-action" onClick={() => void importProject()}>
-          <Icons.folderOpen size={14} />
+          <Icons.projectOpen size={14} />
           {t("tree.openProject")}
         </button>
         <button className="empty-action" onClick={() => setCloneModalOpen(true)}>
           <Icons.git size={14} />
           {t("tree.cloneProject")}
         </button>
+        <a className="empty-action" href={collectionDialogUrl("create")} onClick={event => {
+          if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          event.preventDefault(); onNewCollection();
+        }}>
+          <Icons.layers size={14} />
+          {t("tree.newCollection")}
+        </a>
       </div>
     );
   }

@@ -96,7 +96,7 @@ Settings ▸ Advanced ▸ "Terminal renderer" offers DOM (default) and WebGL. DO
 
 ## 10. Common shortcuts
 
-The table lists the defaults of the macOS desktop app. The Windows and Linux apps use Ctrl+Alt instead of ⌘ for most actions (split down is Ctrl+Alt+E, search all sessions is Ctrl+Alt+G, and save stays Ctrl+S). Browser clients use Ctrl-based defaults that avoid the browser's own shortcuts. Settings ▸ Shortcuts shows the exact bindings on your system, and every action except tab switching and font size can be changed there.
+The table lists the defaults of the macOS desktop app. The Windows and Linux apps use Ctrl+Alt instead of ⌘ for most actions (split down is Ctrl+Alt+E, search all sessions is Ctrl+Alt+G, select all is Ctrl+Shift+A, and save stays Ctrl+S). Browser clients use Ctrl-based defaults that avoid the browser's own shortcuts. Settings ▸ Shortcuts shows the exact bindings on your system, and every action except tab switching and font size can be changed there.
 
 | Action | Shortcut |
 |--------|----------|
@@ -108,6 +108,7 @@ The table lists the defaults of the macOS desktop app. The Windows and Linux app
 | Split right / split down | ⌘D / ⌘⇧D |
 | Find in terminal | ⌘F |
 | Search all sessions | ⌘⇧F |
+| Select all in the focused terminal | ⌘A |
 | Save document | ⌘S |
 | Go to tab N | ⌘1–9 (fixed; Ctrl+1–9 outside the macOS desktop app) |
 | Terminal font larger / smaller / reset | ⌘+ / ⌘- / ⌘0 (fixed; Ctrl+ / Ctrl- / Ctrl+0 outside the macOS desktop app) |

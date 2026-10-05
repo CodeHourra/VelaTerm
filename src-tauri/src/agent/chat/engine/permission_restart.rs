@@ -97,17 +97,15 @@ impl ChatManager {
         extra_args.push("--permission-mode".into());
         extra_args.push(old_mode.clone());
 
+        let callbacks=previous.callbacks.write().unwrap();
         previous.released.store(true, Ordering::Relaxed);
         {
             let mut child = previous.child.lock().unwrap();
-            if let Err(error) = child.kill() {
-                if child.try_wait().ok().flatten().is_none() {
-                    previous.released.store(false, Ordering::Relaxed);
-                    return Err(format!("Failed to stop the agent: {error}"));
-                }
-            }
+            terminate_owned(&mut child);
             child.wait().map_err(|error| format!("Failed to wait for the agent: {error}"))?;
         }
+        if let Some(owner)=previous.owner.lock().unwrap().take() { owner.retire(app,session_id); }
+        drop(callbacks);
         *previous.stdin.lock().unwrap() = None;
         previous.alive.store(false, Ordering::Relaxed);
         {
@@ -152,7 +150,7 @@ impl ChatManager {
             retained.alive.store(false, Ordering::Relaxed);
             {
                 let mut child = retained.child.lock().unwrap();
-                let _ = child.kill();
+                terminate_owned(&mut child);
                 let _ = child.wait();
             }
             *retained.mode.lock().unwrap() = old_mode.clone();
@@ -202,6 +200,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("vlx-permission-{tag}-{}-{}", std::process::id(), now_ms()));
         std::fs::create_dir_all(&dir).unwrap();
         let bin = dir.join("claude-fixture");
+        let native = format!("native-history-{}",uuid::Uuid::new_v4());
         std::fs::write(&bin, r#"#!/usr/bin/env python3
 import sys, json
 for line in sys.stdin:
@@ -221,15 +220,15 @@ for line in sys.stdin:
     if error:
         response['error'] = error
     print(json.dumps({'type': 'control_response', 'response': response}), flush=True)
-"#).unwrap();
+"#.replace("native-history",&native)).unwrap();
         std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o700)).unwrap();
         {
             let conn = app.db().conn.lock().unwrap();
             conn.execute("INSERT INTO projects(id,name,root_path,created_at) VALUES ('p','test',?1,0)", [dir.to_str().unwrap()]).unwrap();
-            conn.execute("INSERT INTO sessions(id,project_id,name,kind,engine,permission_mode,agent_path,agent_session_id,created_at) VALUES ('s','p','test','claude','chat','default',?1,'native-history',0)", [bin.to_str().unwrap()]).unwrap();
+            conn.execute("INSERT INTO sessions(id,project_id,name,kind,engine,permission_mode,agent_path,agent_session_id,created_at) VALUES ('s','p','test','claude','chat','default',?1,?2,0)", [bin.to_str().unwrap(),native.as_str()]).unwrap();
         }
         app.chat().start(&app, "s", SessionKind::Claude, dir.to_str(), bin.to_str().unwrap(),
-            Some("native-history"), None, None, Some("default"), None, extra_args, false).unwrap();
+            Some(&native), None, None, Some("default"), None, extra_args, false).unwrap();
         let proc = app.chat().get("s").unwrap();
         proc.timeline.lock().unwrap().upsert(ChatRow::User {
             id: "preserved".into(), text: "Keep this conversation".into(), images: vec![], at: None,
@@ -265,7 +264,7 @@ for line in sys.stdin:
         let applied = serde_json::to_value(crate::agent::permission_state::read(&app, "s").unwrap()).unwrap();
         assert_eq!(applied["activation"], "applied");
         assert!(applied["pending"].is_null());
-        assert_eq!(next.agent_session_id.lock().unwrap().as_deref(), Some("native-history"));
+        assert_eq!(*next.agent_session_id.lock().unwrap(),*previous.agent_session_id.lock().unwrap());
         assert!(next.timeline.lock().unwrap().get("preserved").is_some());
         assert!(matches!(next.timeline.lock().unwrap().get("partial"), Some(ChatRow::Assistant { streaming: false, text, .. }) if text == "Partial answer"));
         assert!(!next.turn.lock().unwrap().running);

@@ -18,7 +18,7 @@ import type { ChatImage, ChatImageValue } from "../../../ipc/chat";
  * large is refused before it is read, and refused in words the reader can act on rather than as a failure
  * coming back from the backend.
  */
-export const MAX_IMAGES = 4;
+export const MAX_IMAGES = 20;
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 /**

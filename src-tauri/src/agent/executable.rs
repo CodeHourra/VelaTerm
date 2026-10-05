@@ -171,54 +171,185 @@ fn find_in_shell(bin: &str) -> Option<String> {
     }
     #[cfg(not(windows))]
     {
-        use std::process::Stdio;
-        use std::time::{Duration, Instant};
         let shell = crate::appimage::clean_var("SHELL")
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| "/bin/sh".into());
-        let mut child = crate::host::command(shell)
-            .args(["-lic", &format!("command -v {bin}")])
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .ok()?;
-        let deadline = Instant::now() + Duration::from_secs(3);
-        loop {
-            match child.try_wait() {
-                Ok(Some(_)) => break,
-                Ok(None) if Instant::now() < deadline => {
-                    std::thread::sleep(Duration::from_millis(20))
-                }
-                _ => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return None;
+        for mode in shell_probe_modes(&shell) {
+            let Some(output) = shell_probe_output(&shell, mode, &format!("command -v {bin}")) else {
+                continue;
+            };
+            if let Some(path) = String::from_utf8_lossy(&output)
+                .lines().rev().map(str::trim)
+                .find(|p| Path::new(p).is_absolute() && is_executable_file(Path::new(p)))
+            {
+                return Some(path.to_string());
+            }
+        }
+        None
+    }
+}
+
+/// Bash's interactive login shell can omit .bashrc. Probe its ordinary interactive environment too;
+/// Zsh and Fish already load their interactive configuration in a login shell.
+#[cfg(unix)]
+pub(crate) fn shell_probe_modes(shell: &str) -> &'static [&'static str] {
+    if Path::new(shell).file_stem().is_some_and(|name| name == "bash") {
+        &["-lic", "-ic"]
+    } else {
+        &["-lic"]
+    }
+}
+
+/// A profile may prompt or leave stdout open in a background process. Both execution and output are bounded.
+#[cfg(unix)]
+pub(crate) fn shell_probe_output(shell: &str, mode: &str, script: &str) -> Option<Vec<u8>> {
+    shell_probe_output_limited(shell, mode, script, 65536)
+}
+
+#[cfg(unix)]
+pub(crate) fn shell_probe_output_limited(shell: &str, mode: &str, script: &str, limit: usize) -> Option<Vec<u8>> {
+    shell_probe_output_in(shell, mode, script, limit, None)
+}
+
+#[cfg(unix)]
+pub(crate) fn shell_probe_output_in(shell: &str, mode: &str, script: &str, limit: usize, cwd: Option<&Path>) -> Option<Vec<u8>> {
+    use std::io::Read;
+    use std::os::fd::AsRawFd;
+    use std::os::unix::process::CommandExt;
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+    let mut command = crate::host::command(shell);
+    crate::login_env::probe_environment(&mut command);
+    if let Some(cwd) = cwd { command.current_dir(cwd); }
+    let mut child = command.args([mode, script])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .process_group(0)
+        .spawn()
+        .ok()?;
+    let mut stdout = child.stdout.take()?;
+    let fd = stdout.as_raw_fd();
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+        let _ = child.kill();
+        let _ = child.wait();
+        return None;
+    }
+    let mut output = Vec::new();
+    let drain = |stdout: &mut std::process::ChildStdout, output: &mut Vec<u8>| {
+        let mut buffer = [0u8; 4096];
+        // Keep the final bounded capture while draining banners too, so a full pipe cannot stall the shell.
+        for _ in 0..32 {
+            let Ok(count) = stdout.read(&mut buffer) else { break; };
+            if count == 0 { break; }
+            output.extend_from_slice(&buffer[..count]);
+            if output.len() > limit { output.drain(..output.len() - limit); }
+        }
+    };
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        drain(&mut stdout, &mut output);
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(20))
+            }
+            _ => {
+                // The probe owns its process group. A stalled npm or background profile job must not survive it.
+                unsafe { libc::kill(-(child.id() as i32), libc::SIGKILL); }
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+    if !child.wait().ok()?.success() {
+        return None;
+    }
+    // Read buffered output without waiting for a background job that still owns the pipe.
+    drain(&mut stdout, &mut output);
+    Some(output)
+}
+
+/// Discover all supported installations once per terminal launch, sharing npm prefix probes across agents.
+/// Include valid user defaults and presets without allowing them to replace an explicit session launch path.
+pub(crate) fn terminal_environment(app: &AppCtx, shell: &str, cwd: Option<&Path>, agent: bool) -> (Vec<String>, Option<crate::login_env::SessionEnvironment>) {
+    let mut binaries = Vec::new();
+    if let Ok(conn) = app.db().conn.lock() {
+        if let Ok(settings) = crate::db::repo::get_app_settings(&conn) {
+            let settings: serde_json::Value = settings.get("vlx-settings")
+                .and_then(|s| serde_json::from_str(s).ok()).unwrap_or_default();
+            if let Some(defaults) = settings.get("agentDefaults").and_then(|v| v.as_object()) {
+                for option in super::launch_options::catalog() {
+                    if let Some(path) = configured_path(defaults.get(option.id.as_str())
+                        .and_then(|v| v.get("path")).and_then(|v| v.as_str()))
+                    {
+                        binaries.push(path);
+                    }
                 }
             }
         }
-        if !child.wait().ok()?.success() {
-            return None;
+        if let Ok(presets) = crate::db::repo::list_agent_presets(&conn) {
+            binaries.extend(presets.into_iter().filter_map(|preset| configured_path(preset.exec_path.as_deref())));
         }
-        // A shell startup file can leave a background process holding stdout open. Read only
-        // buffered output after shell exit so that process cannot extend the probe deadline.
-        use std::io::Read;
-        use std::os::fd::AsRawFd;
-        let stdout = child.stdout.take()?;
-        let fd = stdout.as_raw_fd();
-        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-        if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
-            return None;
-        }
-        let mut output = Vec::new();
-        let _ = stdout.take(65536).read_to_end(&mut output);
-        String::from_utf8_lossy(&output)
-            .lines()
-            .rev()
-            .map(str::trim)
-            .find(|p| Path::new(p).is_absolute() && is_executable_file(Path::new(p)))
-            .map(str::to_owned)
     }
+    let (installed, path) = super::install::locate_installed_bins(shell, cwd, agent);
+    binaries.extend(installed);
+    (binaries, path)
+}
+
+/// Only real executable files contribute directories; stale settings and partial installs add nothing.
+pub(crate) fn binary_dirs(binaries: &[String]) -> Vec<std::path::PathBuf> {
+    let mut dirs = Vec::new();
+    for bin in binaries {
+        let path = Path::new(bin);
+        if !path.is_absolute() || !is_executable_file(path) { continue; }
+        if let Some(parent) = path.parent() {
+            if !dirs.iter().any(|dir| dir == parent) { dirs.push(parent.to_path_buf()); }
+        }
+    }
+    dirs
+}
+
+/// Preserve the shell's inherited command precedence while exposing newly installed agents to every shell.
+pub(crate) fn prepare_pty(command: &mut portable_pty::CommandBuilder, dirs: &[std::path::PathBuf]) {
+    let existing = command.get_env("PATH").map(|path| path.to_os_string())
+        .or_else(|| crate::appimage::clean_var("PATH").map(Into::into)).unwrap_or_default();
+    let mut paths: Vec<_> = std::env::split_paths(&existing).collect();
+    for dir in dirs {
+        if !paths.contains(dir) { paths.push(dir.clone()); }
+    }
+    if let Ok(path) = std::env::join_paths(paths) { command.env("PATH", path); }
+}
+
+/// Reapply directories after a POSIX shell's profiles have rebuilt PATH, keeping its existing order.
+/// Only quoted configuration and backend-validated directory literals enter this startup script.
+pub(crate) fn path_startup_script(dirs: &[std::path::PathBuf]) -> String {
+    if dirs.is_empty() { return String::new(); }
+    let dirs = dirs.iter().map(|dir| {
+        let path = dir.to_string_lossy();
+        #[cfg(windows)]
+        let path = posix_windows_path(&path);
+        format!("'{}'", path.replace('\'', "'\\''"))
+    })
+        .collect::<Vec<_>>().join(" ");
+    format!(
+        "for _vlx_path_bin in {dirs}; do case \":${{PATH-}}:\" in \
+         *\":$_vlx_path_bin:\"*) ;; *) export PATH=\"${{PATH:+$PATH:}}$_vlx_path_bin\" ;; \
+         esac; done; unset _vlx_path_bin;\n"
+    )
+}
+
+#[cfg(any(windows, test))]
+fn posix_windows_path(path: &str) -> String {
+    let path = path.strip_prefix(r"\\?\").unwrap_or(path).replace('\\', "/");
+    if let Some(rest) = path.strip_prefix("UNC/") { return format!("//{rest}"); }
+    let bytes = path.as_bytes();
+    if bytes.len() > 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/' {
+        return format!("/{}{}", (bytes[0] as char).to_ascii_lowercase(), &path[2..]);
+    }
+    path
 }
 
 /// First executable of this name on PATH.
@@ -226,8 +357,16 @@ fn find_in_shell(bin: &str) -> Option<String> {
 /// The agent may have been installed by a package manager none of the fixed-location probes know about,
 /// so PATH is the last word before declaring it absent.
 pub(crate) fn find_on_path(bin: &str) -> Option<String> {
+    #[cfg(windows)]
+    if let Some(path) = crate::login_env::latest_path() {
+        if let Some(found) = find_on_path_in(bin, &path) { return Some(found); }
+    }
     let path = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path) {
+    find_on_path_in(bin, &path)
+}
+
+pub(crate) fn find_on_path_in(bin: &str, path: &std::ffi::OsStr) -> Option<String> {
+    for dir in std::env::split_paths(path) {
         for name in exe_names(bin) {
             let candidate = dir.join(&name);
             if is_executable_file(&candidate) {
@@ -398,6 +537,78 @@ pub(crate) fn shim_payload_exe(path: &Path) -> Option<std::path::PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn shell_probe_drains_large_banners_and_keeps_the_final_capture() {
+        let output = shell_probe_output("/bin/bash", "-c", "printf '%70000s' ''; printf '\\nFINAL_CAPTURE\\n'").unwrap();
+        assert!(output.len() <= 65536);
+        assert!(output.ends_with(b"\nFINAL_CAPTURE\n"));
+    }
+
+    #[test]
+    fn gitbash_path_entries_use_posix_drive_and_unc_syntax() {
+        assert_eq!(posix_windows_path(r"C:\Users\用户\new tool"), "/c/Users/用户/new tool");
+        assert_eq!(posix_windows_path(r"\\?\D:\tools\bin"), "/d/tools/bin");
+        assert_eq!(posix_windows_path(r"\\?\UNC\host\share\bin"), "//host/share/bin");
+        assert_eq!(posix_windows_path(r"\\host\share\bin"), "//host/share/bin");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminal_paths_include_all_agent_defaults_and_valid_presets() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("vlx-configured-paths-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let app = AppCtx::Headless(std::sync::Arc::new(crate::host::HeadlessHost::new(
+            dir.clone(), crate::db::Db::open(&dir.join("test.db")).unwrap(),
+        )));
+        let mut defaults = serde_json::Map::new();
+        let mut expected = Vec::new();
+        for option in super::super::launch_options::catalog() {
+            if matches!(option.id, SessionKind::Terminal | SessionKind::Browser) { continue; }
+            let parent = dir.join(option.id.as_str());
+            std::fs::create_dir_all(&parent).unwrap();
+            let bin = parent.join(command_name(option.id));
+            std::fs::write(&bin, "#!/bin/sh\nexit 0\n").unwrap();
+            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+            defaults.insert(option.id.as_str().into(), serde_json::json!({"path":bin}));
+            expected.push(parent);
+        }
+        assert_eq!(expected.len(), 14);
+        let preset_dir = dir.join("preset");
+        std::fs::create_dir_all(&preset_dir).unwrap();
+        let preset_bin = preset_dir.join("custom-agent");
+        std::fs::write(&preset_bin, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&preset_bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let missing = dir.join("missing/bin/claude");
+        {
+            let conn = app.db().conn.lock().unwrap();
+            crate::db::repo::set_app_settings(&conn, &std::collections::HashMap::from([
+                ("vlx-settings".into(), serde_json::json!({"agentDefaults":defaults}).to_string()),
+            ])).unwrap();
+            crate::db::repo::create_agent_preset(&conn, "Valid", SessionKind::Claude,
+                preset_bin.to_str(), None, None, None).unwrap();
+            crate::db::repo::create_agent_preset(&conn, "Missing", SessionKind::Claude,
+                missing.to_str(), None, None, None).unwrap();
+        }
+        expected.push(preset_dir);
+        let dirs = binary_dirs(&terminal_environment(&app, &super::super::install::probe_shell(), None, false).0);
+        for parent in &expected { assert!(dirs.contains(parent), "missing {}", parent.display()); }
+        assert!(!dirs.contains(&missing.parent().unwrap().to_path_buf()));
+        let mut command = portable_pty::CommandBuilder::new("/bin/bash");
+        command.env("PATH", "/usr/bin:/bin");
+        prepare_pty(&mut command, &dirs);
+        prepare_pty(&mut command, &dirs);
+        let paths: Vec<_> = std::env::split_paths(command.get_env("PATH").unwrap()).collect();
+        assert_eq!(&paths[..2], &[std::path::PathBuf::from("/usr/bin"), std::path::PathBuf::from("/bin")]);
+        for parent in &expected { assert_eq!(paths.iter().filter(|path| *path == parent).count(), 1); }
+        // The terminal fallback must never change explicit-path authority for a typed session.
+        assert_eq!(resolve_binary(&app, SessionKind::Claude, missing.to_str()).unwrap(),
+            LaunchBinary::Path(missing.to_string_lossy().into_owned()));
+        drop(app);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn terminal_and_chat_read_the_same_registered_path_and_updates() {

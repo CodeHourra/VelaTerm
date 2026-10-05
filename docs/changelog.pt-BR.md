@@ -1,3 +1,49 @@
+## v0.2.7 — 2026-10-05
+
+- 🪐 Antigravity chega à visualização de conversa como agente experimental com texto, ferramentas, mensagens na fila e histórico nativo; imagens, instruções durante uma resposta, aprovações interativas, bifurcação e retrocesso continuam indisponíveis, e a validação completa da recuperação em todas as plataformas ainda está pendente.
+
+- 🗂️ As coleções podem conter subcoleções, projetos e grupos de sessões, ser criadas ou importadas no espaço de trabalho e preservar seus projetos e sessões arquivadas quando são excluídas.
+
+- ⚠️ Versões anteriores não devem usar um banco de dados cujas pastas foram migradas para coleções; para voltar a uma versão anterior, é necessário restaurar um backup feito antes da migração.
+
+- 🏷️ A renomeação inteligente nomeia a sessão com base na conversa usando as configurações do agente atual e permite escolher um agente quando essas configurações não podem ser usadas.
+
+- 🌱 Novas sessões usam o ambiente shell atualizado e os agentes recém-instalados sem reiniciar o VelaTerm.
+
+- 💾 Após uma reinicialização, a recuperação experimental de conversas restaura mensagens, imagens e entradas na fila salvas anteriormente e pausa o trabalho interrompido até a retomada explícita; a validação completa em ambientes nativos e em todas as plataformas ainda está pendente.
+
+- 📸 A captura de tela experimental nos aplicativos Tauri para macOS e Windows permite selecionar uma área, fazer anotações, copiá-la ou salvar o PNG original; a validação dos aplicativos nativos ainda está pendente, e Electron, navegador e visualizações remotas não são compatíveis.
+
+- 🧵 As abas de tarefas do Claude em segundo plano exibem todo o histórico nativo da conversa, incluindo chamadas de ferramentas em paralelo.
+
+- 🖼️ Cada mensagem de conversa pode conter até 20 imagens, com limite de 5 MiB por imagem.
+
+- 📍 Os marcadores de mensagens permitem visualizar uma prévia e ir diretamente para mensagens anteriores do usuário.
+
+- 🧭 Os seletores de diretório para projetos, clonagem e Salvar como oferecem edição de caminhos e preenchimento automático de locais de forma uniforme.
+
+- 🪪 `vself` lê as configurações salvas das sessões e as relações entre sessões pai e filhas, enquanto `vflow list` lista os fluxos de planejamento e execução relacionados sem alterá-los.
+
+- ⌨️ Selecionar tudo no terminal pode ser configurado nos atalhos, usa Cmd+A no macOS e Ctrl+Shift+A nas demais plataformas por padrão e só se aplica quando o terminal está em foco.
+
+- 🐚 O preenchimento automático do Bash aceita caminhos que começam com `~`, e versões antigas do Bash abrem sessões sem erros de PS0.
+
+- 🛑 Os hooks das tarefas filhas não alteram mais o estado da conversa da sessão pai, e fechar uma aba de conversa interrompe seu processo Chat ativo.
+
+- 🪟 O Windows restaura o foco do teclado do terminal ao voltar à janela e remove a linha azul durante a composição de texto em chinês.
+
+- 🎨 O tema escuro clássico tem contraste mais nítido, os ícones do desktop acompanham o tema do sistema, os ícones de projetos são azuis e as coleções não exibem mais a quantidade de projetos.
+
+- 📚 Os menus de sessões e coleções usam um rótulo mais claro para adicionar conteúdo à base de conhecimento.
+
+- 🌐 O acesso ao VelaTerm por HTTP sem criptografia em uma rede local abre a página corretamente.
+
+- 🌍 As verificações de atualização incluem o idioma da interface para exibir as notas de versão correspondentes, e o serviço aceita o atualizador Electron do Linux.
+
+- 🧰 Os nomes dos agentes Kimi Code e Grok Build não incluem mais os números de versão do modelo.
+
+---
+
 ## v0.2.6 — 2026-09-30
 
 - 🐧 A versão para Linux agora é baseada em Electron. O AppImage mantém o nome do arquivo e seus dados, não exige mais WebKitGTK nem libfuse2, e as instalações existentes são atualizadas para ela pelo atualizador integrado.

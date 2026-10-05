@@ -17,6 +17,7 @@ vi.mock("../i18n", () => ({
 vi.mock("./reqLog", () => ({ recordRequestError: vi.fn() }));
 
 import { bytesToB64, wsClient } from "./wsClient";
+import type { PtySpawnArgs, PtySpawnResult } from "./transport";
 
 // The handler and its state are private by TypeScript convention only; the tests reach through on
 // purpose to drive the real code path without a live WebSocket server.
@@ -47,6 +48,31 @@ afterEach(() => {
   internals.sharedKey = null;
   internals.e2eeReady = false;
   internals.pending.clear();
+  vi.unstubAllGlobals();
+});
+
+it("reattaches a terminal with a fresh request ID when HTTP hides randomUUID", async () => {
+  vi.stubGlobal("crypto", { getRandomValues: globalThis.crypto.getRandomValues.bind(globalThis.crypto) });
+  const client = wsClient as unknown as {
+    request: (message: object) => Promise<unknown>;
+    sendPtySpawn: (sid: string, args: PtySpawnArgs, attachOnly: boolean) => Promise<PtySpawnResult>;
+    subIds: Map<string, number>;
+  };
+  const sid = "http-reattach-test";
+  const request = vi.spyOn(client, "request").mockResolvedValue({
+    pid: 1, launch: null, subId: 7, attached: true, cols: 80, rows: 24, owner: "ws-1",
+  });
+  try {
+    const args: PtySpawnArgs = { sessionId: sid, kind: "terminal", cols: 80, rows: 24, diagnosticRequestId: "previous-request" };
+    expect((await client.sendPtySpawn(sid, args, true)).attached).toBe(true);
+    expect(request).toHaveBeenCalledWith({
+      t: "pty-spawn", sid, attachOnly: true,
+      args: { ...args, diagnosticRequestId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/), diagnosticOperationId: undefined },
+    });
+  } finally {
+    request.mockRestore();
+    client.subIds.delete(sid);
+  }
 });
 
 describe("wsClient E2EE handshake failure wiring", () => {

@@ -34,13 +34,23 @@ fn idle(proc: &ChatProcess) -> Result<(), String> {
     if !proc.alive.load(Ordering::Relaxed) {
         return Err("Claude has stopped. Please try again.".into());
     }
+    // Once the credentials have been rejected, background tasks can no longer reach the model, and
+    // waiting for them (a shell loop, or a task whose final frame never arrived) would leave no way out.
+    let expired = proc.extras.lock().unwrap().auth.as_ref().is_some_and(|s| s.status == "required");
     let turn = proc.turn.lock().unwrap();
-    if turn.running
-        || !turn.active_tasks.is_empty()
-        || !turn.background_tasks.is_empty()
-        || !proc.permissions.lock().unwrap().is_empty()
-    {
-        return Err("Wait for Claude's current turn and background tasks to finish before changing accounts.".into());
+    if turn.running {
+        return Err("Wait for Claude's current turn to finish before changing accounts.".into());
+    }
+    if !expired && (!turn.active_tasks.is_empty() || !turn.background_tasks.is_empty()) {
+        let blocking = engine::blocking_task_names(proc, &turn);
+        return Err(format!(
+            "Wait for background tasks to finish or stop them before changing accounts: {}",
+            blocking.join(", ")
+        ));
+    }
+    drop(turn);
+    if !proc.permissions.lock().unwrap().is_empty() {
+        return Err("Answer the pending permission request before changing accounts.".into());
     }
     Ok(())
 }
@@ -90,6 +100,8 @@ pub(in crate::agent::chat::engine) fn start(
         if !proc.alive.load(Ordering::Relaxed) || now_ms().saturating_sub(state.started_at) >= limit
         {
             let _action = proc.action.lock().unwrap();
+            let _callback = proc.callbacks.read().unwrap();
+            if !app.chat().owns_process(&session_id,&proc) || proc.released.load(Ordering::Relaxed) { break; }
             if proc
                 .extras
                 .lock()
@@ -321,6 +333,8 @@ fn cancel_callback(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, stat
             .call();
         if matches!(sent, Err(ureq::Error::Transport(_))) {
             let _action = proc.action.lock().unwrap();
+            let _callback = proc.callbacks.read().unwrap();
+            if !app.chat().owns_process(&session_id,&proc) || proc.released.load(Ordering::Relaxed) { return; }
             if proc
                 .extras
                 .lock()
@@ -420,6 +434,8 @@ pub(in crate::agent::chat::engine) fn exited(
 ) {
     if proc.kind == SessionKind::Claude && active(proc) {
         let _action = proc.action.lock().unwrap();
+        let _callback = proc.callbacks.read().unwrap();
+        if proc.released.load(Ordering::Relaxed) || !app.chat().owns_process(session_id,proc) { return; }
         if active(proc) {
             finish(app, session_id, proc, "failed");
         }

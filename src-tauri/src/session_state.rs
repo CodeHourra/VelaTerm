@@ -135,6 +135,13 @@ pub fn snapshot() -> HashMap<String, SessionState> {
     hub().lock().unwrap().states.clone()
 }
 
+/// Chat owns lifecycle facts until another engine declares its source, even after its process stops.
+/// Descendant CLIs inherit the session's command environment; their terminal hooks cannot own it.
+pub fn has_chat_source(session_id: &str) -> bool {
+    hub().lock().unwrap().states.get(session_id)
+        .is_some_and(|record| record.state_source.as_deref() == Some("chat"))
+}
+
 /// Drop a session's record, called when the session itself is deleted.
 ///
 /// Records are deliberately kept when a *process* exits — an agent that finished its work and left an
@@ -289,6 +296,17 @@ pub fn set_stopped(ctx: &AppCtx, session_id: &str) -> bool {
         record.alive = false;
         record.agent_state = Some("waiting".to_string());
     })
+}
+
+/// A restarted host explicitly declares dormant chat sessions instead of retaining a client's old work state.
+pub fn restore_stopped_chat(ctx: &AppCtx, session_id: &str, kind: &str) {
+    update_with(ctx,session_id,false,|record| {
+        record.alive=false;
+        record.agent=Some(kind.to_string());
+        record.agent_state=Some("waiting".into());
+        record.state_source=Some("chat".into());
+        record.authoritative=true;
+    });
 }
 
 /// Agent states that mean "a human should look at this". `background` counts: its turn has a reply to

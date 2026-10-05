@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { genId } from "../genId";
 import type { PlanExecuteContext } from "../ipc/launch";
 
 export interface PlanExecuteMenuRoute { requestId: string; context: PlanExecuteContext }
@@ -7,7 +8,7 @@ export function planExecuteUrl(context: PlanExecuteContext | null): string {
   const url = new URL(window.location.href);
   for (const key of ["planExecute", "planProject", "planGroup", "planParent"]) url.searchParams.delete(key);
   if (context) {
-    url.searchParams.set("planExecute", crypto.randomUUID());
+    url.searchParams.set("planExecute", genId());
     url.searchParams.set("planProject", context.projectId);
     if (context.groupId) url.searchParams.set("planGroup", context.groupId);
     if (context.parentSessionId) url.searchParams.set("planParent", context.parentSessionId);

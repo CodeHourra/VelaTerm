@@ -1,0 +1,25 @@
+//! Keyboard-reachable collection membership commands use the same targets as project drag-and-drop.
+
+import type { MenuItem } from "../../components/ContextMenu";
+import type { t as translate } from "../../i18n";
+import { isVirtualProject, type Project } from "../../types";
+import { resolveProjectDrop } from "./projectCollectionDrop";
+
+export function moveToCollectionItem(t: typeof translate, project: Project | undefined, projects: Project[], onMove: (id: string | null) => void): MenuItem | null {
+  if (!project) return null;
+  const collections = projects.filter(isVirtualProject);
+  if (!collections.length && !project.collectionId) return null;
+  const current = collections.find(p => p.id === project.collectionId)?.id ?? null;
+  return {
+    label: t("collection.moveTo"),
+    submenu: [
+      ...collections.map(p => ({
+        label: p.name,
+        disabled: !resolveProjectDrop({ kind: "project", id: project.id }, p, projects),
+        onClick: () => onMove(p.id),
+      })),
+      { label: "", separator: true },
+      { label: t("collection.none"), disabled: current === null, onClick: () => onMove(null) },
+    ],
+  };
+}

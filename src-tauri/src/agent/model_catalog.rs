@@ -62,13 +62,18 @@ pub fn list_models(app: &crate::host::AppCtx, agent: &str) -> Result<Vec<String>
     if agent == "kimi" {
         return Ok(["k3", "k3-256k", "kimi-for-coding", "kimi-for-coding-highspeed"].into_iter().map(str::to_string).collect());
     }
-    let Some(args) = list_args(agent) else {
-        return Ok(Vec::new());
-    };
+    if list_args(agent).is_none() { return Ok(Vec::new()); }
     let kind = crate::models::SessionKind::from_db(agent);
     let bin = super::executable::resolve(app, kind, None)
         .unwrap_or_else(|| super::executable::command_name(kind).to_string());
-    let mut cmd = crate::host::command(&bin);
+    list_models_at(agent, &bin)
+}
+
+/// Use the session's selected executable for both model discovery and conversation launches.
+pub fn list_models_at(agent: &str, bin: &str) -> Result<Vec<String>, String> {
+    let Some(args) = list_args(agent) else { return Ok(Vec::new()); };
+    let mut cmd = crate::host::command(bin);
+    crate::login_env::refresh_command(&mut cmd);
     super::executable::prepare_command(&mut cmd, &bin);
     cmd.args(args);
     // Several CLIs render a decorated tree when they detect a terminal and one plain identifier per

@@ -46,6 +46,17 @@ export default defineConfig(async () => ({
     __DEV_BUILD__: JSON.stringify(process.env.VLX_DEV_BUILD === "1"),
   },
 
+  // Two pages: the application and the screenshot overlay window, which loads its own small entry
+  // instead of the whole application (see src-tauri/src/screenshot.rs).
+  build: {
+    rollupOptions: {
+      input: {
+        main: "index.html",
+        screenshot: "screenshot.html",
+      },
+    },
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors

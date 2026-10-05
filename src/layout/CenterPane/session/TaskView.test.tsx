@@ -323,6 +323,34 @@ it("shows a shell task's command and output, and keeps reading the output while 
   expect(screen.getByText("Only the most recent output is shown.")).toBeTruthy();
 });
 
+it("shows a subagent's own conversation and keeps reading it while it runs", async () => {
+  vi.useFakeTimers();
+  const agent: ChatBackgroundTask = { task_id: "a1", task_type: "local_agent", description: "Map pipeline", status: "running", finished: false, can_stop: true, elapsed_ms: 1000 };
+  snapshotTasks = [agent];
+  let reads = 0;
+  vi.mocked(invoke).mockImplementation((command, args) => {
+    if (command === "chat_snapshot") {
+      return Promise.resolve({ running: true, rows: [], queue: [], permissions: [], commands: [], configKeys: [], backgroundTasks: snapshotTasks }) as Promise<never>;
+    }
+    if (command === "chat_subagent_rows") {
+      expect(args).toEqual({ sessionId: "s", taskId: "a1" });
+      reads++;
+      return Promise.resolve([
+        { kind: "user", id: "u", text: "Map the release pipeline" },
+        { kind: "assistant", id: "a", text: `finding ${reads}`, streaming: false },
+      ]) as Promise<never>;
+    }
+    return Promise.resolve(undefined) as Promise<never>;
+  });
+  await mount({ taskId: "a1", taskType: "local_agent", seed: agent, title: "Map pipeline" });
+  expect(screen.getByText("Conversation")).toBeTruthy();
+  expect(screen.getByText("Map the release pipeline")).toBeTruthy();
+  expect(screen.getByText("finding 1")).toBeTruthy();
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  expect(screen.getByText("finding 2")).toBeTruthy();
+  expect(vi.mocked(invoke).mock.calls.some(([command]) => command === "chat_task_output")).toBe(false);
+});
+
 it("does not read output for tasks that are not shell commands", async () => {
   await mount();
   expect(vi.mocked(invoke).mock.calls.some(([command]) => command === "chat_task_output")).toBe(false);

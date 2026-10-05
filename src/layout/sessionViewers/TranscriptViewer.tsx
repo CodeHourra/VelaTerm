@@ -11,13 +11,15 @@
 //! conversation reads like the live one. The text stays plain rather than Markdown so search literals
 //! can be marked exactly as the index matched them.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import Icons from "../../components/Icons";
 import { dateLocale, useT } from "../../i18n";
 import type { TranscriptMessage } from "../../ipc/commands";
 import type { Session } from "../../types";
 import { MessageBubble } from "../CenterPane/session/rows";
+import { UserMessageRail } from "../CenterPane/session/UserMessageRail";
+import { userMessagePreview } from "../CenterPane/session/userMessageRailItems";
 import { highlightMatches } from "./highlight";
 import { kindIconEl } from "./sessionMeta";
 import "../CenterPane/session/session-view.css";
@@ -34,9 +36,9 @@ export function assistantLabel(kind: Session["kind"]): string {
   if (kind === "pi") return "Pi";
   if (kind === "omp") return "OMP";
   if (kind === "crush") return "Crush";
-  if (kind === "kimi") return "Kimi Code (K3)";
+  if (kind === "kimi") return "Kimi Code";
   if (kind === "kiro") return "Kiro";
-  if (kind === "grok") return "Grok Build (Grok 4.5)";
+  if (kind === "grok") return "Grok Build";
   if (kind === "zoo") return "Zoo Code";
   return "Claude";
 }
@@ -68,6 +70,8 @@ export function TranscriptViewer({
   const label = assistantLabel(session.kind);
   const isLocate = scrollToMessageIndex != null;
   const targetRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [messageTarget, setMessageTarget] = useState<string | null>(null);
 
   // Internal query for browsing mode; locate mode is controlled by highlightTerms/initialQuery.
   const [browseQuery, setBrowseQuery] = useState(initialQuery ?? "");
@@ -84,6 +88,21 @@ export function TranscriptViewer({
     if (!ql) return all;
     return all.filter(({ m }) => m.text.toLowerCase().includes(ql));
   }, [messages, browseQuery, isLocate]);
+  const messageOrder = useMemo(() => messages.map((_, idx) => `transcript-${idx}`), [messages]);
+  const railItems = useMemo(() => {
+    const indices = new Map(messageOrder.map((id, index) => [id, index]));
+    return messages.flatMap((message, idx) => message.role === "user" ? [{
+      id: `transcript-${idx}`, text: userMessagePreview(message.text), hasImages: false,
+      index: indices.get(`transcript-${idx}`) ?? null,
+    }] : []);
+  }, [messages, messageOrder]);
+  useLayoutEffect(() => {
+    if (!messageTarget) return;
+    const scroll = scrollRef.current;
+    const target = scroll?.querySelector<HTMLElement>(`[data-message-id="${messageTarget}"]`);
+    if (target && scroll) scroll.scrollTop += target.getBoundingClientRect().top - scroll.getBoundingClientRect().top - 12;
+    setMessageTarget(null);
+  }, [messageTarget, visible]);
 
   // Center the target message after mounting or changing the locate target.
   useEffect(() => {
@@ -112,7 +131,8 @@ export function TranscriptViewer({
         </div>
       )}
 
-      <div className="sv-scroll">
+      <div className="sv-scroll-wrap">
+      <div className="sv-scroll" ref={scrollRef}>
         {visible.map(({ m, idx }) => {
           const isUser = m.role === "user";
           const isTarget = isLocate && idx === scrollToMessageIndex;
@@ -123,7 +143,7 @@ export function TranscriptViewer({
               : t("archive.you")
             : label;
           return (
-            <div key={idx} ref={isTarget ? targetRef : undefined} className={isTarget ? "tv-target" : undefined}>
+            <div key={idx} ref={isTarget ? targetRef : undefined} data-message-id={`transcript-${idx}`} className={isTarget ? "tv-target" : undefined}>
               <MessageBubble
                 who={who}
                 icon={isUser ? (origin ? kindIconEl(origin.agent, 14) : undefined) : kindIconEl(session.kind, 14)}
@@ -145,6 +165,8 @@ export function TranscriptViewer({
             {browseQuery.trim() ? t("archive.noMatch") : t("archive.emptyTranscript")}
           </div>
         )}
+      </div>
+      <UserMessageRail key={session.id} items={railItems} order={messageOrder} scrollRef={scrollRef} onSelect={id => { setBrowseQuery(""); setMessageTarget(id); }} />
       </div>
     </div>
   );

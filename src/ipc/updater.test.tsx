@@ -4,6 +4,7 @@
 
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { LOCALES } from "../i18n";
 
 const { check, message, relaunch, invoke } = vi.hoisted(() => ({
   check: vi.fn(),
@@ -111,13 +112,19 @@ describe("update-check telemetry", () => {
   // Each case needs a fresh module instance: the installation identifier is cached for the life of the
   // process, so a cache warmed by an earlier test would hide both the first read and a read failure.
   let mod: typeof import("./updater");
+  let i18n: typeof import("../i18n");
 
   beforeEach(async () => {
     vi.resetModules();
     mod = await import("./updater");
+    i18n = await import("../i18n");
+    i18n.setLang("en");
   });
 
-  afterEach(() => mod.dismissUpdate());
+  afterEach(() => {
+    mod.dismissUpdate();
+    vi.restoreAllMocks();
+  });
 
   it("sends the installation identifier as a header and reads it only once per process", async () => {
     check.mockResolvedValue(null);
@@ -126,19 +133,62 @@ describe("update-check telemetry", () => {
     await act(() => mod.checkForUpdates({ manual: false }));
 
     expect(check).toHaveBeenCalledWith({
-      headers: { "X-Install-Id": "11111111-2222-3333-4444-555555555555" },
+      headers: {
+        "X-Install-Id": "11111111-2222-3333-4444-555555555555",
+        "X-App-Language": "en",
+      },
     });
     // The identifier never changes, so it is cached rather than re-read on every check.
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 
-  it("still checks when the identifier is unavailable, just without the header", async () => {
+  it("still reports the language when the installation identifier is unavailable", async () => {
     invoke.mockRejectedValue(new Error("no database"));
     check.mockResolvedValue(null);
 
     await act(() => mod.checkForUpdates({ manual: false }));
 
-    expect(check).toHaveBeenCalledWith(undefined);
+    expect(check).toHaveBeenCalledWith({ headers: { "X-App-Language": "en" } });
+  });
+
+  it.each(LOCALES)("reports the effective UI language %s", async (locale) => {
+    i18n.setLang(locale);
+    check.mockResolvedValue(null);
+
+    await act(() => mod.checkForUpdates());
+
+    expect(check).toHaveBeenCalledWith({
+      headers: {
+        "X-Install-Id": "11111111-2222-3333-4444-555555555555",
+        "X-App-Language": locale,
+      },
+    });
+  });
+
+  it("reports the new language on the next check without re-reading the installation identifier", async () => {
+    check.mockResolvedValue(null);
+    i18n.setLang("zh-CN");
+    await act(() => mod.checkForUpdates());
+    i18n.setLang("ja");
+    await act(() => mod.checkForUpdates({ manual: true }));
+
+    expect(check.mock.calls.map(([options]) => options.headers["X-App-Language"])).toEqual(["zh-CN", "ja"]);
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports the resolved system language when the language choice is auto", async () => {
+    vi.spyOn(navigator, "languages", "get").mockReturnValue(["zh-Hant-HK"]);
+    i18n.setLang("auto");
+    check.mockResolvedValue(null);
+
+    await act(() => mod.checkForUpdates());
+
+    expect(check).toHaveBeenCalledWith({
+      headers: {
+        "X-Install-Id": "11111111-2222-3333-4444-555555555555",
+        "X-App-Language": "zh-TW",
+      },
+    });
   });
 
   it("keeps reporting while a prompt is pending, releasing the duplicate handle", async () => {

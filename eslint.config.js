@@ -1,10 +1,10 @@
-// ESLint flat config with one critical architectural rule:
+// ESLint flat config with architectural and browser-compatibility rules:
 //   Application code must not import platform APIs (@tauri-apps/* or electron) directly. All platform
 //   differences must go through the src/platform/ adapter layer. See §2 and §3.1 of the overall Electron
 //   migration plan under docs/optimize/plans.
 //
 // Deliberately **do not enable any recommended rule set**. The project did not previously use ESLint, so this
-// configuration adds only the rule needed to protect the dual-platform foundation without surfacing unrelated
+// configuration protects the dual-platform foundation and plain-HTTP browser access without surfacing unrelated
 // legacy style issues. The adapter layer and the low-level transport/notification modules (src/platform,
 // src/ipc, and src/notify.ts) are where platform differences converge, so they are exempt.
 
@@ -89,6 +89,17 @@ export default [
     rules: {
       "no-restricted-imports": "off",
       "no-restricted-syntax": "off",
+    },
+  },
+  {
+    // Keep this separate from platform exemptions: IPC also runs over plain HTTP on the LAN.
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["src/genId.ts", "src/**/*.test.{ts,tsx}"],
+    rules: {
+      "no-restricted-properties": ["error", {
+        property: "randomUUID",
+        message: "Use genId() from src/genId.ts; crypto.randomUUID() is unavailable over plain HTTP LAN access.",
+      }],
     },
   },
 ];

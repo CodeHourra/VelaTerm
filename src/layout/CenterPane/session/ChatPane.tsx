@@ -12,10 +12,13 @@
 import { useAgentPermissions, savePermissionDefault } from "../../../hooks/useAgentPermissions";
 import { useSessionPermissionState } from "../../../hooks/useSessionPermissionState";
 import { currentPermissionLabel, PermissionStateDetails } from "../../../components/PermissionStateDetails";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { measureElement, observeElementOffset, useVirtualizer } from "@tanstack/react-virtual";
 
 import Icons from "../../../components/Icons";
+import { UserMessageRail } from "./UserMessageRail";
+import { userMessageItems, type UserMessageItem } from "./userMessageRailItems";
+import { useUserMessageJump } from "./useUserMessageJump";
 import { ComposerOptionsButton, useComposerOptions } from "./ComposerOptions";
 import { ComposerToolbar } from "./ComposerToolbar";
 import { setComposerHeight, startComposerResize, useComposerHeight } from "./composerHeight";
@@ -54,6 +57,7 @@ import {
   chatDetach,
   chatRunShell,
   chatSnapshot,
+  chatRecoveryResume,
   chatCommands,
   chatStart,
   isTaskFinished,
@@ -66,12 +70,12 @@ import {
   type ChatCollaborationMode,
   type ChatConfigKey,
   type ChatModel,
-  type ChatImageValue,
   type ChatPermission,
   type PendingPermissionMode,
   type ChatRewindPreview,
   type ChatRewindScope,
   type ChatRow,
+  type ChatSnapshot,
   type QueuedMessage,
   type SendBehavior,
 } from "../../../ipc/chat";
@@ -80,7 +84,7 @@ import { attachChatInputGuard } from "./inputGuard";
 import { buildSuggestions, findFileMention, mentionDir, type Suggestion } from "./completion";
 import { env } from "../../../platform/env";
 import { imageFromNativeClipboard, imagesFromClipboard, imagesFromDrop } from "../../../terminal/imageInput";
-import { IS_MAC, IS_PLAIN_BROWSER } from "../../../hooks/shortcutRegistry";
+import { IS_MAC, IS_PLAIN_BROWSER, labelWithCombo } from "../../../hooks/shortcutRegistry";
 import { useMentionFiles } from "./fileMentions";
 import { ControlChip, LevelBar, type ChipOption } from "./controls";
 import { AutoContinueBar, FastModeChip, McpChip, NotificationBar, RetryLine, TasksChip, UsageMeter } from "./extras";
@@ -99,43 +103,25 @@ import { effectivePermissionMode } from "../../../store/settings";
 import { effectiveStatus, supportsPermissionToggle, type Session } from "../../../types";
 import { kindIconEl } from "../../sessionViewers/sessionMeta";
 import { assistantLabel } from "../../sessionViewers/TranscriptViewer";
-import {
-  CompactionRow,
-  ChatImageView,
-  CommandRow,
-  ShellRow,
-  ErrorRow,
-  MessageBubble,
-  NoticeRow,
-  ReasoningRow,
-  ToolCard,
-  ToolRunCard,
-  TurnHead,
-  WorkingRow,
-} from "./rows";
+import { ChatImageView, ErrorRow, WorkingRow } from "./rows";
 import {
   estimateRowHeight,
   foldAgentTurns,
   groupToolRuns,
   markAgentTurns,
   mountedStart,
-  type DisplayRow,
   type TurnFold,
 } from "./toolRuns";
 import "./session-view.css";
-import { onTransportReconnect } from "../../../ipc/transport";
-import { useOutbox, emptySubmissions, acknowledgeSubmissions, createSubmission, deliverSubmission, retrySubmission, submissionsFor, ChatVersions } from "./outbox";
+import { onTransportReconnect, onTransportDisconnect } from "../../../ipc/transport";
+import { useOutbox, emptySubmissions, acknowledgeSubmissions, createSubmission, deliverSubmission, retrySubmission, restoreSubmissions, submissionsFor, ChatVersions } from "./outbox";
 import { cachedChat, cacheChat, mergeRows, reconcileChat, chatSyncMetrics } from "./chatCache";
 import { ChatSearch } from "./ChatSearch";
 import { QueuedMessageText } from "./QueuedMessageText";
-import { MessageSender, messageSenderName } from "./MessageSender";
+import { MessageSender } from "./MessageSender";
 import { parseShellSubmission, shellErrorKey, shellSubmissionFor, acknowledgeShellSubmission } from "./shellMode";
 import { SessionLinkDirectory } from "./links";
-
-interface MessageReplacement {
-  text: string;
-  images: ChatImageValue[];
-}
+import { Entry, type MessageReplacement } from "./ConversationRows";
 
 /** Distance from the bottom still counted as "at the bottom", in pixels. */
 const PIN_SLACK = 40;
@@ -196,9 +182,9 @@ function modeLabelKey(mode: Mode): I18nKey {
   return `chat.mode.${mode}` as I18nKey;
 }
 
-/** OMP's `default` defers to its own approval configuration, which reads differently from OpenCode's. */
+/** OMP and Antigravity defer to their own approval settings in `default` mode. */
 function modeLabelKeyFor(kind: Session["kind"], mode: Mode): I18nKey {
-  return kind === "omp" && mode === "default" ? "chat.mode.agentDefault" : modeLabelKey(mode);
+  return (kind === "omp" || kind === "antigravity") && mode === "default" ? "chat.mode.agentDefault" : modeLabelKey(mode);
 }
 
 /** A Codex mode (`default`, `plan`) or an OpenCode agent name; the backend validates it against the catalogue. */
@@ -257,6 +243,7 @@ export function ChatPane({
   const t = useT();
   const composerOptions = useComposerOptions(mobile);
   const paneStyle = useTermStore((s) => s.paneStyle);
+  const shortcutOverrides = useTermStore((s) => s.shortcutOverrides);
   const composerInlineChips = useTermStore((s) => s.composerInlineChips);
   const composerHeight = useComposerHeight();
   const status = useTermStore((s) => effectiveStatus(s.runtimes[session.id]));
@@ -273,6 +260,7 @@ export function ChatPane({
   const { switchTo, confirm: engineConfirm } = useEngineSwitch(session);
 
   const [rows, setRows] = useState<ChatRow[]>(() => cachedChat(session.id)?.rows ?? []);
+  const [userMessages, setUserMessages] = useState(() => cachedChat(session.id)?.userMessages ?? []);
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
   const snapshotRef = useRef(cachedChat(session.id));
@@ -282,9 +270,13 @@ export function ChatPane({
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const historyBusy = useRef(false);
+  const historyRequest = useRef<Promise<ChatSnapshot | undefined> | null>(null);
   const historyGeneration = useRef(0);
   const refreshRef = useRef<() => Promise<void>>(async () => {});
   const prependScroll = useRef<{ height: number; top: number; anchor?: { id: string; offset: number } } | null>(null);
+  const readingRestore = useRef<(() => void) | undefined>(undefined);
+  const [recovery, setRecovery] = useState<ChatSnapshot["recovery"]>();
+  const [recovering, setRecovering] = useState(false);
   const [submissionReceipts, setSubmissionReceipts] = useState<boolean | null>(null);
   const pendingSubmissions = useOutbox(state => state.sessions[session.id] ?? emptySubmissions);
   // Messages typed while the agent was busy. They belong to the backend, not to this pane: a second view
@@ -468,6 +460,9 @@ export function ChatPane({
     const handleEvent = (event: ChatEvent) => {
       if (disposed) return;
       switch (event.type) {
+        case "recoveryChanged":
+          void refresh();
+          break;
         case "rows":
           if (!versions.accept("rows", event.revision, event.epoch)) break;
           acknowledgeSubmissions(session.id, event.rows.map(row => row.id));
@@ -479,6 +474,7 @@ export function ChatPane({
           setHistoryError(null);
           prependScroll.current = null;
           if (!versions.accept("rows", event.revision, event.epoch)) break;
+          setUserMessages(event.userMessages ?? []);
           acknowledgeSubmissions(session.id, event.rows.map(row => row.id));
           setRows(event.rows);
           setHasMore(event.hasMore ?? false);
@@ -493,6 +489,7 @@ export function ChatPane({
           setHistoryError(null);
           prependScroll.current = null;
           if (!versions.accept("rows", event.revision ?? (event.epoch === undefined ? undefined : 0), event.epoch)) break;
+          setUserMessages(event.userMessages ?? []);
           versions.queue = 0;
           setRows(event.rows ?? []);
           acknowledgeSubmissions(session.id, (event.rows ?? []).map(row => row.id));
@@ -511,7 +508,7 @@ export function ChatPane({
           if (!versions.accept("queue", event.revision, event.epoch)) break;
           acknowledgeSubmissions(session.id, event.items.map(item => item.id));
           setQueue(event.items);
-
+          if (event.paused !== undefined) setRecovery((prev) => prev && ({ ...prev, queuePaused: event.paused! }));
           break;
         case "permission":
           setPermissions((prev) =>
@@ -560,6 +557,7 @@ export function ChatPane({
         // in this pane: without them it shows "—" for started, uptime, and this session's CPU.
         case "process":
           setEngineRunning(true);
+          setRecovery((prev) => prev && ({ ...prev, writerBlocked: false }));
           setRewindScopes(event.rewindScopes ?? []);
           useTermStore.getState().setRuntime(session.id, {
             // A session that has never run has no runtime record at all, and `status` is the one field
@@ -571,6 +569,7 @@ export function ChatPane({
           break;
         case "turnStarted":
           setActionFeedback("");
+          setRecovery((prev) => prev && ({ ...prev, interruptedId: undefined }));
           setTurnStartedAt(event.startedAt);
           break;
         case "steerAccepted":
@@ -589,6 +588,7 @@ export function ChatPane({
           setActionFeedback("");
           setEngineRunning(false);
           setTurnStartedAt(undefined);
+          void refresh();
           // A process the application let go — its view closed here or on another device — is not
           // the agent failing; the next message simply starts it again. An agent that failed its
           // handshake has already said why. That message is the one worth keeping; the exit that
@@ -649,9 +649,16 @@ export function ChatPane({
         if (disposed) return;
         const pendingEvents = buffered ?? [];
         const snapshot = reconcileChat(response, rowsRef.current, pendingEvents);
+        if (snapshot.recovery) {
+          await restoreSubmissions(session.id, snapshot.recovery.scope, snapshot.recovery.items.map(item => ({ ...item, recovered: true })));
+          if (disposed) return;
+          acknowledgeSubmissions(session.id, snapshot.recovery.confirmedIds, true);
+          setRecovery(snapshot.recovery);
+        }
         buffered = null;
         if (snapshot.startedAt === undefined || snapshot.startedAt >= versions.epoch) {
           setRows(snapshot.rows);
+          setUserMessages(snapshot.userMessages ?? []);
           setQueue(snapshot.queue);
           versions.epoch = snapshot.startedAt ?? versions.epoch;
           versions.rows = snapshot.rowsRevision ?? versions.rows;
@@ -703,6 +710,7 @@ export function ChatPane({
           });
         }
         if (!snapshot.running) {
+          if (!snapshot.recovery?.writerBlocked) useTermStore.getState().setRuntime(session.id, { status: "idle", pid: undefined, startedAt: undefined });
           // A conversation opens on the pair last chosen by hand: the model, and the effort that was
           // picked for that model. The snapshot of a process already running wins over both, because
           // whatever it was started with is what is actually answering.
@@ -737,10 +745,15 @@ export function ChatPane({
     };
     refreshRef.current = refresh;
     void refresh();
+    const disconnect = onTransportDisconnect(() => {
+      setSyncState("failed");
+      setTurnStartedAt(undefined);
+      setPermissions([]);
+    });
     const reconnect = onTransportReconnect(() => {
       void refresh().then(() => {
         if (!disposed && receiptsAvailable) for (const item of submissionsFor(session.id)) {
-          if (item.status === "unknown") void retrySubmission(session.id, item);
+          if (item.status === "unknown" && !item.recovered) void retrySubmission(session.id, item);
         }
       });
     });
@@ -748,42 +761,56 @@ export function ChatPane({
       disposed = true;
       historyGeneration.current += 1;
       reconnect();
+      disconnect();
       void un?.then((f) => f()).catch(() => {});
     };
   }, [session.id, session.kind, applyRows, t]);
 
   useEffect(() => {
     if (snapshotRef.current) {
-      snapshotRef.current = { ...snapshotRef.current, auth: extras.auth, rows, queue, hasMore, rowsRevision: liveVersions.current.rows, queueRevision: liveVersions.current.queue };
+      snapshotRef.current = { ...snapshotRef.current, userMessages, auth: extras.auth, rows, queue, hasMore, rowsRevision: liveVersions.current.rows, queueRevision: liveVersions.current.queue };
       cacheChat(session.id, snapshotRef.current);
     }
-  }, [session.id, rows, queue, hasMore, extras.auth]);
+  }, [session.id, rows, userMessages, queue, hasMore, extras.auth]);
 
   const loadHistory = async (before = rows[0]?.id) => {
+    if (historyRequest.current) return historyRequest.current;
     if (historyBusy.current || !hasMore || syncState !== "ready" || !before) return;
+    const rememberPosition = () => {
+      const scroll = scrollRef.current;
+      if (!scroll || pinnedRef.current) return;
+      const viewport = scroll.getBoundingClientRect();
+      // Match the rail's probe beyond the jump inset instead of anchoring a sliver of the preceding row.
+      const top = viewport.top + 16;
+      const anchor = Array.from(scroll.querySelectorAll<HTMLElement>(".sv-item[data-search-id]"))
+        .find(element => element.getBoundingClientRect().bottom > top && element.getBoundingClientRect().top < viewport.bottom);
+      prependScroll.current = {
+        height: scroll.scrollHeight, top: scroll.scrollTop,
+        anchor: anchor ? { id: anchor.dataset.searchId!, offset: anchor.getBoundingClientRect().top - viewport.top } : undefined,
+      };
+    };
+    // Showing or clearing the history error must preserve the same reading anchor as a prepend.
+    if (historyError) rememberPosition();
     historyBusy.current = true;
     setHistoryLoading(true);
     setHistoryError(null);
     const generation = historyGeneration.current;
-    try {
-      const page = await chatSnapshot(session.id, { before, epoch: snapshotRef.current?.startedAt });
-      if (generation !== historyGeneration.current) return;
-      if (page.pageKind !== "history") { await refreshRef.current(); return; }
-      const scroll = scrollRef.current;
-      if (scroll && !pinnedRef.current) {
-        const viewport = scroll.getBoundingClientRect();
-        const anchor = Array.from(scroll.querySelectorAll<HTMLElement>(".sv-item[data-search-id]"))
-          .find(element => element.getBoundingClientRect().bottom > viewport.top && element.getBoundingClientRect().top < viewport.bottom);
-        prependScroll.current = {
-          height: scroll.scrollHeight, top: scroll.scrollTop,
-          anchor: anchor ? { id: anchor.dataset.searchId!, offset: anchor.getBoundingClientRect().top - viewport.top } : undefined,
-        };
+    const request = (async () => {
+      try {
+        const page = await chatSnapshot(session.id, { before, epoch: snapshotRef.current?.startedAt ?? (liveVersions.current.epoch || undefined) });
+        if (generation !== historyGeneration.current) return;
+        if (page.pageKind !== "history") { await refreshRef.current(); return; }
+        rememberPosition();
+        setRows(current => mergeRows(page.rows, current));
+        setHasMore(page.hasMore ?? false);
+        return page;
+      } catch (error) {
+        if (generation === historyGeneration.current) { rememberPosition(); setHistoryError(String(error)); }
       }
-      setRows(current => mergeRows(page.rows, current));
-      setHasMore(page.hasMore ?? false);
-      return page;
-    } catch (error) { if (generation === historyGeneration.current) setHistoryError(String(error)); }
-    finally { historyBusy.current = false; setHistoryLoading(false); }
+      finally { historyBusy.current = false; historyRequest.current = null; setHistoryLoading(false); }
+    })();
+    historyRequest.current = request;
+    return request;
   };
 
   const recallInput = (direction: "ArrowUp" | "ArrowDown") => {
@@ -897,6 +924,20 @@ export function ChatPane({
     [turnEntries, foldOverrides, foldAll],
   );
   const display = folded.rows;
+  const messageOrderRef = useRef<string[]>([]);
+  const messageOrder = useMemo(() => {
+    const next = display.map(entry => entry.id);
+    const previous = messageOrderRef.current;
+    if (next.length === previous.length && next.every((id, i) => id === previous[i])) return previous;
+    messageOrderRef.current = next;
+    return next;
+  }, [display]);
+  const railItemsRef = useRef<UserMessageItem[]>([]);
+  const railItems = useMemo(() => {
+    const next = userMessageItems(rows, userMessages, messageOrder, railItemsRef.current);
+    railItemsRef.current = next;
+    return next;
+  }, [rows, userMessages, messageOrder]);
   const allTurnsCollapsed = folded.turns.length > 0 && folded.turns.every((turn) => turn.collapsed);
   // Everything before this index is virtualized; the tail after it stays really mounted, because those
   // are the rows still growing as text arrives, and a row that changes height while a virtualizer is
@@ -950,28 +991,60 @@ export function ChatPane({
     const scroll = scrollRef.current;
     if (!previous || !scroll) return;
     prependScroll.current = null;
-    // Keep the visible message at its original pixel offset. Total-height differences also include
-    // new tail output and estimated heights, neither of which belongs to the reader's anchor.
     const anchor = previous.anchor;
-    const element = anchor && Array.from(scroll.querySelectorAll<HTMLElement>(".sv-item[data-search-id]"))
-      .find(item => item.dataset.searchId === anchor.id);
-    if (element && anchor) {
-      scroll.scrollTop += element.getBoundingClientRect().top - scroll.getBoundingClientRect().top - anchor.offset;
-    } else {
-      const index = anchor ? virtualRows.findIndex(row => row.id === anchor.id) : -1;
-      const offset = index >= 0 ? virtualizer.getOffsetForIndex(index, "start")?.[0] : undefined;
-      const container = scroll.querySelector<HTMLElement>(".sv-virtual");
-      if (offset !== undefined && container && anchor) {
-        const start = container.getBoundingClientRect().top - scroll.getBoundingClientRect().top + scroll.scrollTop;
-        scroll.scrollTop = start + offset - anchor.offset;
+    let frame: number | undefined;
+    let stopped = false;
+    let frames = 0;
+    let stable = 0;
+    const stop = () => {
+      stopped = true;
+      if (frame !== undefined) cancelAnimationFrame(frame);
+      if (readingRestore.current === stop) readingRestore.current = undefined;
+      scroll.removeEventListener("wheel", stop);
+      scroll.removeEventListener("touchstart", stop);
+      scroll.removeEventListener("pointerdown", stop);
+      scroll.removeEventListener("keydown", onKey);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"].includes(event.key)) stop();
+    };
+    // Preserve the anchor until deferred virtual measurements settle, including after a canceled jump.
+    const restore = () => {
+      if (stopped || pinnedRef.current || !scroll.clientHeight) { stop(); return; }
+      const element = anchor && Array.from(scroll.querySelectorAll<HTMLElement>(".sv-item[data-search-id]"))
+        .find(item => item.dataset.searchId === anchor.id);
+      const top = scroll.scrollTop;
+      if (element && anchor) {
+        scroll.scrollTop += element.getBoundingClientRect().top - scroll.getBoundingClientRect().top - anchor.offset;
       } else {
-        scroll.scrollTop = previous.top + scroll.scrollHeight - previous.height;
+        const index = anchor ? virtualRows.findIndex(row => row.id === anchor.id) : -1;
+        const offset = index >= 0 ? virtualizer.getOffsetForIndex(index, "start")?.[0] : undefined;
+        const container = scroll.querySelector<HTMLElement>(".sv-virtual");
+        if (offset !== undefined && container && anchor) {
+          const start = container.getBoundingClientRect().top - scroll.getBoundingClientRect().top + scroll.scrollTop;
+          scroll.scrollTop = start + offset - anchor.offset;
+        } else {
+          scroll.scrollTop = previous.top + scroll.scrollHeight - previous.height;
+        }
       }
-    }
-  }, [rows, virtualRows, virtualizer]);
+      readerTop.current = scroll.scrollTop;
+      syncVirtualOffset.current?.();
+      stable = Math.abs(scroll.scrollTop - top) < 1 ? stable + 1 : 0;
+      if (++frames >= 60 || (frames >= 3 && stable >= 2)) { stop(); return; }
+      frame = requestAnimationFrame(restore);
+    };
+    scroll.addEventListener("wheel", stop, { passive: true });
+    scroll.addEventListener("touchstart", stop, { passive: true });
+    scroll.addEventListener("pointerdown", stop);
+    scroll.addEventListener("keydown", onKey);
+    readingRestore.current = stop;
+    restore();
+    return stop;
+  }, [rows, historyError, virtualRows, virtualizer]);
 
   /** Scroll a drawn entry to the middle of the view; false when the entry is not in the list. */
   const scrollToEntry = useCallback((id: string) => {
+    readingRestore.current?.();
     const index = display.findIndex(entry => entry.id === id);
     if (index < 0) return false;
     if (index < split) virtualizer.scrollToIndex(index, { align: "center" });
@@ -981,10 +1054,49 @@ export function ChatPane({
     });
     return true;
   }, [display, split, virtualizer]);
+  const locateUserMessage = useCallback((id: string, signal: AbortSignal) => new Promise<boolean>(resolve => {
+    const index = display.findIndex(entry => entry.id === id);
+    if (index < 0 || signal.aborted) { resolve(false); return; }
+    readingRestore.current?.();
+    pinnedRef.current = false;
+    setAway(true);
+    if (index < split) virtualizer.scrollToIndex(index, { align: "start" });
+    let frames = 0;
+    let stable = 0;
+    const settle = () => {
+      const scroll = scrollRef.current;
+      if (signal.aborted || !scroll?.clientHeight) { resolve(false); return; }
+      const element = Array.from(scroll.querySelectorAll<HTMLElement>(".sv-item[data-message-id]"))
+        .find(element => element.dataset.messageId === id);
+      if (element) {
+        const delta = element.getBoundingClientRect().top - scroll.getBoundingClientRect().top - 12;
+        const previous = scroll.scrollTop;
+        scroll.scrollTop += delta;
+        // The last message can reach the scroll limit before it reaches the top.
+        stable = Math.abs(delta) < 1 || scroll.scrollTop === previous ? stable + 1 : 0;
+        readerTop.current = scroll.scrollTop;
+        syncVirtualOffset.current?.();
+        if (stable >= 2) { resolve(true); return; }
+      }
+      if (++frames >= 60) { resolve(Boolean(element)); return; }
+      requestAnimationFrame(settle);
+    };
+    requestAnimationFrame(settle);
+  }), [display, split, virtualizer]);
+  const railJump = useUserMessageJump({
+    items: railItems, sessionKey: `${session.id}:${historyGeneration.current}`, enabled: syncState === "ready" && !hidden && !(searchOpen && focused),
+    hasMore, failed: t("chat.rail.failed"), unavailable: t("chat.rail.unavailable"), locate: locateUserMessage,
+    loadEarlier: async () => {
+      const before = rows[0]?.id;
+      const page = await loadHistory();
+      return Boolean(page?.rows.length && page.rows[0].id !== before);
+    },
+  });
   /** A search match inside a collapsed turn, waiting for the opened turn to be drawn. */
   const pendingLocate = useRef<string | null>(null);
 
   const locateSearch = useCallback((index: number) => {
+    railJump.cancel();
     const entry = turnEntries[index];
     setSearchTarget(entry?.id ?? null);
     if (!entry) return;
@@ -999,7 +1111,7 @@ export function ChatPane({
     }
     pendingLocate.current = null;
     scrollToEntry(entry.id);
-  }, [turnEntries, folded, scrollToEntry]);
+  }, [turnEntries, folded, scrollToEntry, railJump.cancel]);
   useEffect(() => {
     const id = pendingLocate.current;
     if (id && scrollToEntry(id)) pendingLocate.current = null;
@@ -1058,6 +1170,7 @@ export function ChatPane({
 
   /** Put the view back at the end of the conversation and follow it again. */
   const toEnd = useCallback(() => {
+    railJump.cancel();
     pinnedRef.current = true;
     setAway(false);
     const el = scrollRef.current;
@@ -1065,7 +1178,7 @@ export function ChatPane({
       el.scrollTop = el.scrollHeight;
       scrollGeometry.current = { height: el.scrollHeight, viewport: el.clientHeight };
     }
-  }, []);
+  }, [railJump.cancel]);
 
   // Keep observers alive while the pane is visible. Draft/caret updates do not change the
   // transcript geometry; only viewport or row resizing and added/removed rows need a follow.
@@ -1241,7 +1354,7 @@ export function ChatPane({
    * stop what you are doing and read this instead.
    */
   const send = (behavior: SendBehavior = "queue") => {
-    if (sending || shellSubmission.current?.pending) return;
+    if (sending || shellSubmission.current?.pending || syncState !== "ready") return;
     const text = draft.trim();
     // A picture on its own is a message: dropping a screenshot in and pressing send says enough.
     if (rewinding || pendingRewind) return;
@@ -1391,6 +1504,10 @@ export function ChatPane({
    * a screenshot silently disappearing is worse than one that says why it did.
    */
   const addFiles = async (files: File[]) => {
+    if (session.kind === "antigravity") {
+      setAttachNote(t("chat.antigravity.textOnly"));
+      return;
+    }
     const { attachments: next, rejected } = await attachImages(attachments, files);
     setAttachments(next);
     const first = rejected[0];
@@ -1442,6 +1559,7 @@ export function ChatPane({
       setQueue((items) => items.filter((item) => item.id !== id));
     } catch (err) {
       setError(String(err));
+      void refreshRef.current();
     } finally {
       steeringQueueRef.current = false;
       setSteeringQueue(false);
@@ -1713,7 +1831,7 @@ export function ChatPane({
    *  With no turn running there is nothing to steer or interrupt, so the modifiers fall back to a
    *  normal send instead of an error. */
   const behaviorOf = (e: React.KeyboardEvent): SendBehavior =>
-    !busy ? "queue" : e.metaKey || e.ctrlKey ? "interrupt" : e.altKey ? "steer" : "queue";
+    !busy ? "queue" : e.metaKey || e.ctrlKey ? "interrupt" : e.altKey && session.kind !== "antigravity" ? "steer" : "queue";
 
   const label = assistantLabel(session.kind);
   // The agent's own mark, drawn in the margin beside each of its answers.
@@ -1847,11 +1965,20 @@ export function ChatPane({
     if (!item) return null;
     return <div className="sv-submission-status" role="status">
       {t(`chat.submission.${item.status}`)}
-      {(item.status === "failed" || item.status === "unknown") && <button disabled={submissionReceipts !== true} onClick={() => void retrySubmission(session.id, item, item.status === "failed" && !engineRunning ? startAgent : undefined)}>
+      {!readOnly && (item.status === "failed" || item.status === "unknown") && <button disabled={submissionReceipts !== true} onClick={() => item.recovered && item.status === "unknown" ? void refreshRef.current?.() : void retrySubmission(session.id, item, item.status === "failed" && !engineRunning ? startAgent : undefined)}>
         {t(item.status === "unknown" ? "chat.submission.check" : "common.retry")}
       </button>}
       {item.error && !isAgentNotInstalledError(item.error) && <ErrorRow message={item.error} />}
     </div>;
+  };
+
+  const resumeRecovery = async (interruptedId?: string) => {
+    setRecovering(true);
+    try {
+      await chatRecoveryResume(session.id, interruptedId);
+      await refreshRef.current?.();
+    } catch (err) { setError(String(err)); }
+    finally { setRecovering(false); }
   };
 
   // Every chip that exists for this session, in the toolbar's traditional order. The toolbar applies the
@@ -1861,11 +1988,13 @@ export function ChatPane({
     <ControlChip
       glyph={kindIconEl(session.kind, 14)}
       label={modelLabel}
-      title={t("chat.modelTooltip")}
+      title={session.kind === "antigravity" ? t("chat.antigravity.settingsHint") : t("chat.modelTooltip")}
+      disabled={session.kind === "antigravity" && busy}
       value={model ?? ""}
       options={modelOptions}
       defaultValue={defaultModel || undefined}
       defaultLabel={t("chat.savedModelDefault")}
+      footer={session.kind === "claude" && extras.listModelsUnsupported ? <div className="sv-model-cli-outdated" role="note">{t("chat.modelsCliOutdated")}</div> : undefined}
       advancedFooter={session.kind === "claude" ? <ModelCatalogStatus onChanged={() => setCatalogueVersion(v => v + 1)} /> : undefined}
       onPick={pickModel}
       keepLabel={t("chat.keepChoice")}
@@ -1878,7 +2007,8 @@ export function ChatPane({
     <ControlChip
       glyph={<Icons.cpu size={14} />}
       label={effort ? effortLabel(effort) : t("chat.effortDefault")}
-      title={t("chat.effortTooltip")}
+      title={session.kind === "antigravity" ? t("chat.antigravity.settingsHint") : t("chat.effortTooltip")}
+      disabled={session.kind === "antigravity" && busy}
       value={effort}
       options={effortOptions}
       defaultValue={defaultEffort}
@@ -1915,7 +2045,7 @@ export function ChatPane({
               : t("chat.modeTooltip")}
         value={mode}
         options={modeOptions}
-        disabled={!permissionCatalog?.catalog}
+        disabled={!permissionCatalog?.catalog || (session.kind === "antigravity" && busy)}
         defaultValue={defaultMode}
         onPick={(next, keep) => { if (isMode(next)) pickMode(next, keep); }}
         keepLabel={t("chat.keepChoice")}
@@ -2004,12 +2134,12 @@ export function ChatPane({
   ) : (
     <button
       className="sv-send"
-      disabled={sending || clientCommandRunning || (!draft.trim() && attachments.length === 0)}
+      disabled={sending || clientCommandRunning || syncState !== "ready" || (!draft.trim() && attachments.length === 0)}
       onPointerDown={mobile ? (event) => event.preventDefault() : undefined}
       onClick={() => send()}
       title={
         busy
-          ? `${t("chat.queueTooltip", interruptCombo)} · ${t("chat.steerTooltip", steerCombo)}`
+          ? `${t("chat.queueTooltip", interruptCombo)}${session.kind === "antigravity" ? "" : ` · ${t("chat.steerTooltip", steerCombo)}`}`
           : t("session.send")
       }
     >
@@ -2068,10 +2198,10 @@ export function ChatPane({
             </button>
             {/* The same control the terminal view carries, in the same place, pointing the other way. */}
             <ConversationViewHint enabled={!mobile && !isShareSurface && focused && !hidden} onSwitch={() => switchTo("tui")} />
-            <button title={t("term.splitRight")} onClick={() => paneId && onSplit(paneId, session.id, "horizontal")}>
+            <button title={labelWithCombo(t("term.splitRight"), "splitRight", shortcutOverrides)} onClick={() => paneId && onSplit(paneId, session.id, "horizontal")}>
               <Icons.splitV size={14} />
             </button>
-            <button title={t("term.splitDown")} onClick={() => paneId && onSplit(paneId, session.id, "vertical")}>
+            <button title={labelWithCombo(t("term.splitDown"), "splitDown", shortcutOverrides)} onClick={() => paneId && onSplit(paneId, session.id, "vertical")}>
               <Icons.splitH size={14} />
             </button>
             <button
@@ -2091,6 +2221,10 @@ export function ChatPane({
             <div
               className="sv-scroll"
               ref={scrollRef}
+              onWheel={railJump.cancel}
+              onTouchStart={railJump.cancel}
+              onPointerDown={railJump.cancel}
+              onKeyDown={event => { if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"].includes(event.key)) railJump.cancel(); }}
               onScroll={(e) => {
                 const el = e.currentTarget;
                 // An event that arrives after the pane was hidden reads a scroller with no layout: offset,
@@ -2141,6 +2275,7 @@ export function ChatPane({
                         key={item.key}
                         className={"sv-item sv-item-virtual" + (searchOpen && focused && searchTarget === entry.id ? " sv-search-match" : "")}
                         data-search-id={entry.id}
+                        data-message-id={entry.id}
                         data-index={item.index}
                         ref={virtualizer.measureElement}
                         style={{ transform: `translateY(${item.start}px)` }}
@@ -2167,7 +2302,7 @@ export function ChatPane({
                 </div>
               )}
               {mountedRows.map((entry) => (
-                <div key={entry.id} data-search-id={entry.id} className={"sv-item" + (searchOpen && focused && searchTarget === entry.id ? " sv-search-match" : "")}>
+                <div key={entry.id} data-search-id={entry.id} data-message-id={entry.id} className={"sv-item" + (searchOpen && focused && searchTarget === entry.id ? " sv-search-match" : "")}>
                   <Entry
                     entry={entry}
                     label={label}
@@ -2186,8 +2321,19 @@ export function ChatPane({
                   {submissionFeedback(entry.id)}
                 </div>
               ))}
+              {!readOnly && recovery && (recovery.interruptedId || recovery.queuePaused || recovery.writerBlocked) && (
+                <div className="sv-item"><div className="sv-recovery" role="status">
+                  <div>{t(recovery.writerBlocked ? "chat.recovery.writerBlocked" : recovery.interruptedId ? "chat.recovery.interrupted" : "chat.recovery.paused")}</div>
+                  {!recovery.writerBlocked && recovery.interruptedId && recovery.queuePaused && <div>{t("chat.recovery.paused")}</div>}
+                  <div className="sv-recovery-actions">
+                    {recovery.queuePaused && <button type="button" className="vlx-btn" disabled={recovering || recovery.writerBlocked} onClick={() => void resumeRecovery()}>{t("chat.recovery.resumeQueue")}</button>}
+                    {recovery.interruptedId && !recovery.queuePaused && <button type="button" className="vlx-btn" disabled={recovering || recovery.writerBlocked} onClick={() => void resumeRecovery(recovery.interruptedId)}>{t("chat.recovery.continue")}</button>}
+                  </div>
+                </div></div>
+              )}
               {pendingSubmissions.filter(item => !rows.some(row => row.id === item.id) && !queue.some(queued => queued.id === item.id)).map(item => (
                 <div className="sv-item sv-submission" key={item.id} data-submission-id={item.id}>
+                  {item.recovered && item.status === "sent" && <div className="sv-submission-status">{t("chat.recovery.savedSubmission")}</div>}
                   <Entry entry={{ kind: "row", id: item.id, row: { kind: "user", id: item.id, text: item.text, images: item.images } }}
                     label={label} icon={kindIcon} cwd={cwd} openRuns={openRuns} onToggleRun={toggleRun}
                     rewindScopes={[]} rewindRequest={null} onRewindRequestHandled={finishRewindRequest} />
@@ -2210,6 +2356,13 @@ export function ChatPane({
               {catalogueError && <div className="sv-item"><ErrorRow message={catalogueError} /></div>}
               {(session.kind === "codex" || session.kind === "claude") && !readOnly && <AgentAuth provider={session.kind === "claude" ? "Claude" : "Codex"} sessionId={session.id} state={extras.auth} busy={turnStartedAt !== undefined} />}
             </div>
+            <UserMessageRail key={session.id} items={railItems} order={messageOrder} scrollRef={scrollRef} enabled={syncState === "ready" && !hidden && !(searchOpen && focused)}
+              pendingId={railJump.pendingId} error={railJump.error} onCancel={railJump.cancel} onSelect={id => {
+                pinnedRef.current = false;
+                setAway(true);
+                closeSearch();
+                railJump.select(id);
+              }} />
             {away && (
               <button className="sv-to-end" onClick={toEnd} title={t("chat.backToEnd")}>
                 <Icons.chevD size={14} />
@@ -2363,7 +2516,7 @@ export function ChatPane({
                             <QueuedMessageText
                               text={queuedShellCommand(item) ?? item.text}
                               origin={item.origin}
-                              disabled={steeringQueue || queuedShellCommand(item) !== null}
+                              disabled={steeringQueue || recovery?.writerBlocked || queuedShellCommand(item) !== null}
                               onEdit={() => setEditing({ id: item.id, text: item.text })}
                             />
                           )}
@@ -2381,16 +2534,16 @@ export function ChatPane({
                           ))}
                         </span>
                       )}
-                      <button
+                      {session.kind !== "antigravity" && <button
                         className="sv-queue-steer"
                         disabled={!busy || stopping.current || steeringQueue || editing !== null}
                         onClick={() => void steerQueued(item.id)}
                       >
                         {t("chat.steer")}
-                      </button>
+                      </button>}
                       <button
                         className="sv-queue-drop"
-                        disabled={steeringQueue}
+                        disabled={steeringQueue || recovery?.writerBlocked}
                         title={t("chat.queue.remove")}
                         aria-label={t("chat.queue.remove")}
                         onClick={() => removeQueued(item.id)}
@@ -2401,6 +2554,9 @@ export function ChatPane({
                   ))}
                 </div>
               </div>
+            )}
+            {session.kind === "antigravity" && mode !== "bypassPermissions" && (
+              <div className="sv-attach-note" role="note">{t("chat.antigravity.permissionsHint")}</div>
             )}
             {attachNote && <div className="sv-attach-note">{attachNote}</div>}
             {attachments.length > 0 && (
@@ -2440,6 +2596,8 @@ export function ChatPane({
                     ? t("chat.placeholderBusy")
                     : session.kind === "opencode"
                       ? t("chat.placeholderOpencode")
+                      : session.kind === "antigravity"
+                        ? t("chat.antigravity.placeholder")
                       : t("chat.placeholder")
                 }
                 onChange={(e) => {
@@ -2504,16 +2662,16 @@ export function ChatPane({
               {(busy || actionFeedback) && (
                 <div className="sv-action-feedback" role="status" aria-live="polite">
                   {actionFeedback && <span>{actionFeedback}</span>}
-                  {busy && <span>{t("chat.interruptTooltip")} · {t("chat.steerTooltip", steerCombo)}</span>}
+                  {busy && <span>{t("chat.interruptTooltip")}{session.kind !== "antigravity" && <> · {t("chat.steerTooltip", steerCombo)}</>}</span>}
                 </div>
               )}
               <ComposerToolbar mobile={mobile} chips={composerChips} inline={composerInlineChips}
                 actions={<>
                   {(session.kind === "claude" || session.kind === "codex") && <UsageMeter extras={extras} />}
-                  {busy && (
+                  {busy && session.kind !== "antigravity" && (
                     <button
                       className="sv-steer"
-                      disabled={sending || clientCommandRunning || (!draft.trim() && attachments.length === 0)}
+                      disabled={sending || clientCommandRunning || syncState !== "ready" || (!draft.trim() && attachments.length === 0)}
                       onClick={() => send("steer")}
                       title={t("chat.steerTooltip", steerCombo)}
                     >
@@ -2542,84 +2700,6 @@ export function ChatPane({
   );
 }
 
-/** One entry of the list: a single row, or a folded run of tool calls. */
-const Entry = memo(function Entry({
-  entry,
-  label,
-  icon,
-  cwd,
-  openRuns,
-  onToggleRun,
-  onToggleFold,
-  onRewind,
-  rewindDisabledReason,
-  rewindScopes,
-  rewindRequest,
-  onRewindRequestHandled,
-  onCancelShell,
-}: {
-  entry: DisplayRow;
-  label: string;
-  icon: ReactNode;
-  cwd?: string;
-  openRuns: ReadonlySet<string>;
-  onToggleRun: (id: string) => void;
-  onToggleFold?: (fold: TurnFold) => void;
-  onRewind?: (rowId: string, scope: ChatRewindScope, replacement?: MessageReplacement) => void;
-  rewindDisabledReason?: string;
-  rewindScopes: ChatRewindScope[];
-  rewindRequest: { rowId: string; token: number } | null;
-  onRewindRequestHandled: (token: number) => void;
-  onCancelShell?: (rowId: string) => void;
-}) {
-  // The author line the pass in `toolRuns` placed on the first entry of an agent turn. Everything the
-  // agent did in that turn sits under it, so reasoning and tool calls read as the agent's.
-  const head = entry.head ? (
-    <TurnHead
-      who={entry.head.who ?? label}
-      icon={icon}
-      at={entry.head.at}
-      durationMs={entry.head.durationMs}
-      fold={entry.head.fold}
-      onToggleFold={onToggleFold}
-    />
-  ) : null;
-  if (entry.kind === "fold") return head;
-  if (entry.kind === "run") {
-    return (
-      <>
-        {head}
-        <ToolRunCard
-          calls={entry.calls}
-          renderCall={row => <Row row={row} label={label} icon={icon} cwd={cwd} />}
-          running={entry.running}
-          open={openRuns.has(entry.id)}
-          onToggle={() => onToggleRun(entry.id)}
-          cwd={cwd}
-        />
-      </>
-    );
-  }
-  return (
-    <>
-      {head}
-      <Row
-        row={entry.row}
-        label={label}
-        icon={icon}
-        cwd={cwd}
-        headless
-        onRewind={onRewind}
-        rewindDisabledReason={rewindDisabledReason}
-        rewindScopes={rewindScopes}
-        rewindRequest={rewindRequest}
-        onRewindRequestHandled={onRewindRequestHandled}
-        onCancelShell={onCancelShell}
-      />
-    </>
-  );
-});
-
 /** How a queued shell-mode context message reads in the queue: the command as it was typed. */
 function queuedShellCommand(item: QueuedMessage): string | null {
   return item.shellCommand === undefined ? null : `! ${item.shellCommand}`;
@@ -2629,111 +2709,4 @@ function queuedShellCommand(item: QueuedMessage): string | null {
 function withoutNamePrefix(description: string, label: string): string {
   const prefix = `${label} \u00B7 `;
   return description.startsWith(prefix) ? description.slice(prefix.length) : description;
-}
-
-/** One row of the live conversation. */
-function Row({
-  row,
-  label,
-  icon,
-  cwd,
-  headless = false,
-  onRewind,
-  rewindDisabledReason,
-  rewindScopes,
-  rewindRequest,
-  onRewindRequestHandled,
-  onCancelShell,
-}: {
-  row: ChatRow;
-  label: string;
-  icon: ReactNode;
-  cwd?: string;
-  /** True when the turn's author line already stands above this row; subagent rows keep their own. */
-  headless?: boolean;
-  onRewind?: (rowId: string, scope: ChatRewindScope, replacement?: MessageReplacement) => void;
-  rewindDisabledReason?: string;
-  rewindScopes?: ChatRewindScope[];
-  rewindRequest?: { rowId: string; token: number } | null;
-  onRewindRequestHandled?: (token: number) => void;
-  /** Stop a running shell command; the row knows only its own id. */
-  onCancelShell?: (rowId: string) => void;
-}) {
-  const t = useT();
-  switch (row.kind) {
-    case "tool": {
-      // A subagent's own work, drawn with the same components as the conversation: it is the same kind
-      // of thing, only reported under the call that started it.
-      const steps = row.children?.length ? (
-        <div className="sv-subagent">
-          {row.children.map((child) => (
-            <Row key={child.id} row={child} label={label} icon={icon} cwd={cwd} />
-          ))}
-        </div>
-      ) : undefined;
-      return (
-        <ToolCard
-          source={row}
-          renderChildren={children => <div className="sv-subagent">{children.map(child => <Row key={child.id} row={child} label={label} icon={icon} cwd={cwd} />)}</div>}
-          name={row.name}
-          input={row.input}
-          output={row.output}
-          isError={row.isError}
-          running={row.status === "running"}
-          cwd={cwd}
-          steps={steps}
-          stepCount={row.childCount ?? row.children?.length}
-          subagent={row.subagent}
-        />
-      );
-    }
-    case "reasoning":
-      return <ReasoningRow text={row.text} />;
-    case "error":
-      return <ErrorRow message={row.message} />;
-    case "command":
-      return <CommandRow text={row.text} />;
-    case "shell":
-      return <ShellRow row={row} onCancel={onCancelShell} />;
-    case "notice":
-      return <NoticeRow message={row.message} />;
-    case "compaction":
-      return (
-        <CompactionRow
-          done={row.status === "completed"}
-          trigger={row.trigger}
-          preTokens={row.preTokens}
-        />
-      );
-    case "user":
-      return (
-        <MessageBubble
-          who={row.origin ? messageSenderName(row.origin, t) : t("archive.you")}
-          icon={row.origin ? kindIconEl(row.origin.agent, 14) : undefined}
-          isUser
-          text={row.text}
-          images={row.images}
-          at={row.at}
-          onRewind={onRewind ? (scope) => onRewind(row.id, scope) : undefined}
-          onEditSend={onRewind ? (text, images) => onRewind(row.id, "conversation", { text, images }) : undefined}
-          rewindDisabledReason={rewindDisabledReason || (rewindScopes?.length ? undefined : t("chat.rewind.unsupported"))}
-          editDisabledReason={rewindDisabledReason || (rewindScopes?.includes("conversation") ? undefined : t("chat.rewind.unsupported"))}
-          rewindScopes={rewindScopes}
-          openRewindToken={rewindRequest?.rowId === row.id ? rewindRequest.token : undefined}
-          onRewindMenuOpened={onRewindRequestHandled}
-        />
-      );
-    default:
-      return (
-        <MessageBubble
-          who={row.model ?? label}
-          isUser={false}
-          icon={icon}
-          text={row.text}
-          at={row.at}
-          durationMs={row.durationMs}
-          showHead={!headless}
-        />
-      );
-  }
 }

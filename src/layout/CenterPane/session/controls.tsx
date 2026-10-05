@@ -88,6 +88,7 @@ export function ControlChip<T extends string>({
   filterPlaceholder,
   defaultValue,
   defaultLabel = "Default",
+  footer,
   advancedFooter,
 }: {
   glyph: ReactNode;
@@ -114,6 +115,8 @@ export function ControlChip<T extends string>({
   /** Saved default, independent of the current conversation's selection. */
   defaultValue?: T;
   defaultLabel?: string;
+  /** A note under the list, always shown. */
+  footer?: ReactNode;
   /** Diagnostic details under the list, revealed only when the menu is opened with Option held. */
   advancedFooter?: ReactNode;
 }) {
@@ -295,6 +298,7 @@ export function ControlChip<T extends string>({
               </div>
             ))}
           </div>
+          {footer}
           {advanced && advancedFooter}
           {keepLabel ? (
             <label

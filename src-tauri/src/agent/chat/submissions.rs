@@ -19,11 +19,17 @@ pub fn claim(conn: &Connection, session: &str, id: &str, payload: &[u8]) -> Resu
         return Err("Invalid message identifier".into());
     }
     let fingerprint = format!("{:x}", Sha256::digest(payload));
-    let inserted = conn.execute(
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let inserted = tx.execute(
         "INSERT OR IGNORE INTO chat_submissions(session_id,id,fingerprint) VALUES (?1,?2,?3)",
         params![session, id, fingerprint],
     ).map_err(|e| e.to_string())?;
-    if inserted == 1 { return Ok(Claim::New); }
+    if inserted == 1 {
+        if crate::db::table_exists(&tx, "chat_recovery_items") { super::recovery::prepare(&tx, session, id, payload)?; }
+        tx.commit().map_err(|e| e.to_string())?;
+        return Ok(Claim::New);
+    }
+    tx.commit().map_err(|e| e.to_string())?;
     let (saved, outcome): (String, Option<String>) = conn.query_row(
         "SELECT fingerprint,outcome FROM chat_submissions WHERE session_id=?1 AND id=?2",
         params![session, id], |row| Ok((row.get(0)?, row.get(1)?)),
@@ -47,6 +53,9 @@ pub fn finish(conn: &Connection, session: &str, id: &str, outcome: &Result<Strin
     let value = serde_json::to_string(outcome).map_err(|e| e.to_string())?;
     conn.execute("UPDATE chat_submissions SET outcome=?3 WHERE session_id=?1 AND id=?2 AND outcome IS NULL",
         params![session, id, value]).map_err(|e| e.to_string())?;
+    if outcome.as_ref().is_ok_and(|v|v=="command") && crate::db::table_exists(conn,"chat_recovery_items") {
+        conn.execute("UPDATE chat_recovery_items SET phase='settled',active=0 WHERE session_id=?1 AND id=?2",params![session,id]).map_err(|e|e.to_string())?;
+    }
     Ok(())
 }
 
@@ -69,12 +78,18 @@ pub fn finish_dispatch(conn: &Connection, session: &str, id: &str, receipt: &str
     let value = serde_json::to_string(&Ok::<_, String>(receipt)).map_err(|e| e.to_string())?;
     conn.execute("UPDATE chat_submissions SET outcome=?3 WHERE session_id=?1 AND id=?2 AND outcome='{\"dispatching\":true}'",
         params![session,id,value]).map_err(|e| e.to_string())?;
+    if crate::db::table_exists(conn, "chat_recovery_items") {
+        conn.execute("UPDATE chat_recovery_items SET phase='sent' WHERE session_id=?1 AND id=?2 AND phase='dispatching'", params![session,id]).map_err(|e|e.to_string())?;
+    }
     Ok(())
 }
 
 /// The caller first confirms that the process is gone. A queue receipt proves dispatch never began;
 /// an unknown write, older error or different payload is never converted into a retryable rejection.
 pub fn recover_queued(conn: &Connection, session: &str, id: &str, payload: &[u8]) -> Result<bool, String> {
+    if crate::db::table_exists(conn,"chat_recovery_items") && conn.query_row("SELECT EXISTS(SELECT 1 FROM chat_recovery_items WHERE session_id=?1 AND id=?2 AND phase='queued')",params![session,id],|r|r.get::<_,bool>(0)).map_err(|e|e.to_string())? {
+        return Ok(false);
+    }
     let fingerprint = format!("{:x}", Sha256::digest(payload));
     let queued = serde_json::to_string(&Ok::<_, String>("queued")).unwrap();
     let rejected = serde_json::json!({"rejected":"The queued task was not dispatched before the agent stopped"}).to_string();
@@ -89,6 +104,9 @@ pub fn finish_rejected(conn: &Connection, session: &str, id: &str, error: &str) 
     let changed = conn.execute("UPDATE chat_submissions SET outcome=?3 WHERE session_id=?1 AND id=?2 AND outcome IS NULL",
         params![session, id, value]).map_err(|e| e.to_string())?;
     if changed != 1 { return Err("chat_submission_pending".into()); }
+    if crate::db::table_exists(conn, "chat_recovery_items") {
+        conn.execute("UPDATE chat_recovery_items SET phase='rejected',active=0 WHERE session_id=?1 AND id=?2 AND phase='prepared'",params![session,id]).map_err(|e|e.to_string())?;
+    }
     Ok(())
 }
 
@@ -105,6 +123,9 @@ pub fn claim_retry(conn: &Connection, session: &str, id: &str, payload: &[u8]) -
     let changed = conn.execute("UPDATE chat_submissions SET outcome=NULL WHERE session_id=?1 AND id=?2 AND fingerprint=?3 AND outcome=?4",
         params![session, id, fingerprint, saved]).map_err(|e| e.to_string())?;
     if changed != 1 { return Err("chat_submission_pending".into()); }
+    if crate::db::table_exists(conn, "chat_recovery_items") {
+        conn.execute("UPDATE chat_recovery_items SET phase='prepared',owner=?3 WHERE session_id=?1 AND id=?2 AND phase='rejected'",params![session,id,super::recovery::runtime_id()]).map_err(|e|e.to_string())?;
+    }
     crate::diagnostics::record("INFO", "agent_submission_retry", serde_json::json!({"sessionId":session,"messageId":id,"status":"reclaimed"}));
     Ok(Claim::New)
 }

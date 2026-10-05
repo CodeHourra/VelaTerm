@@ -95,8 +95,7 @@ export const DEFAULT_BINDINGS: Record<ShortcutAction, string> =
         splitDown: "mod+shift+d",
         search: "mod+f",
         globalSearch: "mod+shift+f",
-        // Cmd+A matches iTerm2 and macOS Terminal. Ctrl+A stays free for readline's
-        // move-to-beginning-of-line, which agent CLIs and shells rely on.
+        // Use native macOS selection while leaving Ctrl+A available to terminal applications.
         selectAllTerminal: "mod+a",
         saveDoc: "mod+s",
       }
@@ -110,8 +109,7 @@ export const DEFAULT_BINDINGS: Record<ShortcutAction, string> =
         splitDown: IS_MAC ? "cmd+shift+d" : "mod+alt+e",
         search: "mod+alt+f",
         globalSearch: "mod+alt+g",
-        // Ctrl+Shift+A matches Windows Terminal, GNOME Terminal, Konsole and WezTerm. Plain Ctrl+A must
-        // stay free for readline's move-to-beginning-of-line, used by every shell and agent CLI.
+        // Keep plain Ctrl+A available to terminal applications unless explicitly rebound.
         selectAllTerminal: "mod+shift+a",
         saveDoc: "mod+s",
       };

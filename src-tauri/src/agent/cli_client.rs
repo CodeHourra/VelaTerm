@@ -665,31 +665,57 @@ pub fn run_stat(args: &[String]) -> ! {
     }
 }
 
-const SELF_USAGE: &str = "usage: vself [--json]\n\n\
-Print the current session's identity and the chain of sessions that spawned it. The parent is the\n\
-session that ran `vspawn` to create this one, or empty when this session is top-level.\n\n\
-  --json    print the raw JSON answer instead of a summary\n\
+const SELF_USAGE: &str = "usage: vself [session] [--json]\n\n\
+Print a session's identity, parent, ancestors and direct children. Omit session to inspect the caller.\n\
+Session accepts an ID, ID prefix, exact name or unique name substring.\n\n\
+  --json    include all saved properties and per-session settings as JSON\n\
   -h        show this help";
 
-/// `vlx-term --self` entry point used by the PATH `vself` shim: POST `/whoami` and print the calling
-/// session's own id, name, and ancestry so a spawned session can find its parent.
-pub fn run_self(args: &[String]) -> ! {
-    let rest = &args[args.len().min(2)..];
+fn parse_self_args(rest: &[String]) -> Result<(Option<String>, bool), String> {
     let mut json = false;
+    let mut target = None;
     for arg in rest {
         match arg.as_str() {
-            "-h" | "--help" => {
-                println!("{SELF_USAGE}");
-                std::process::exit(0);
-            }
             "--json" => json = true,
-            other => {
-                eprintln!("vself: unknown option {other}");
-                eprintln!("{SELF_USAGE}");
-                std::process::exit(2);
-            }
+            other if other.starts_with('-') => return Err(format!("Unknown option {other}")),
+            other if other.trim().is_empty() => return Err("Specify a target session".into()),
+            other if target.is_none() => target = Some(other.to_owned()),
+            _ => return Err("Specify at most one target session".into()),
         }
     }
+    Ok((target, json))
+}
+
+#[cfg(test)]
+#[test]
+fn self_query_cli_preserves_targets_and_prints_child_relationships() {
+    let args = |values: &[&str]| values.iter().map(|v|v.to_string()).collect::<Vec<_>>();
+    assert_eq!(parse_self_args(&args(&[])).unwrap(), (None,false));
+    assert_eq!(parse_self_args(&args(&["Planning session","--json"])).unwrap(), (Some("Planning session".into()),true));
+    assert_eq!(parse_self_args(&args(&["--json","11111111"])).unwrap(), (Some("11111111".into()),true));
+    assert!(parse_self_args(&args(&["one","two"])).is_err());
+    assert!(parse_self_args(&args(&["--unknown"])).is_err());
+    assert!(parse_self_args(&args(&[" "])).is_err());
+    let output = render_self(&serde_json::json!({"session":{"sessionId":"12345678-1234","name":"Parent","kind":"terminal"},
+        "parent":null,"ancestors":[],"children":[{"sessionId":"87654321-1234","name":"Child","kind":"codex","archived":true}]}));
+    assert!(output.contains("children: 1"));
+    assert!(output.contains("87654321  Child (codex) [archived]"));
+}
+
+/// The `vself` shim reads session properties and relationships without opening or messaging a session.
+pub fn run_self(args: &[String]) -> ! {
+    let rest = &args[args.len().min(2)..];
+    if rest.iter().any(|arg| matches!(arg.as_str(), "-h" | "--help")) {
+        println!("{SELF_USAGE}");
+        std::process::exit(0);
+    }
+    let (target, json) = match parse_self_args(rest) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            eprintln!("vself: {error}\n{SELF_USAGE}");
+            std::process::exit(2);
+        }
+    };
 
     let (url, sid, token) = match session_env() {
         Ok(v) => v,
@@ -699,7 +725,7 @@ pub fn run_self(args: &[String]) -> ! {
         }
     };
     let endpoint = format!("{url}/whoami?t={token}");
-    let body = serde_json::json!({ "sessionId": sid }).to_string();
+    let body = serde_json::json!({ "sessionId": sid, "target": target }).to_string();
     let (code, payload) = match post_json_read(&endpoint, &body) {
         Some(v) => v,
         None => {
@@ -710,6 +736,10 @@ pub fn run_self(args: &[String]) -> ! {
     let value = read_value("vself", code, &payload);
     if code != 200 {
         report_read_failure("vself", code, &payload, &value)
+    }
+    if (target.is_some() || json) && value.get("children").is_none() {
+        eprintln!("vself: the running backend does not support session property queries; update and restart VelaTerm");
+        std::process::exit(1);
     }
     if json {
         println!("{payload}");
@@ -727,11 +757,11 @@ fn render_self_line(session: &serde_json::Value) -> String {
     format!("{}  {name} ({kind})", short_id(id))
 }
 
-/// Render `/whoami` as a short block: this session, its parent, then the rest of the ancestry.
+/// Render `/whoami` as the selected session, its parent, ancestors and direct children.
 fn render_self(value: &serde_json::Value) -> String {
     let mut out = String::new();
     if let Some(session) = value.get("session") {
-        out.push_str(&format!("self:   {}", render_self_line(session)));
+        out.push_str(&format!("session: {}", render_self_line(session)));
     }
     match value.get("parent") {
         Some(parent) if !parent.is_null() => {
@@ -743,6 +773,13 @@ fn render_self(value: &serde_json::Value) -> String {
         // Index 0 is the immediate parent, already shown above; list the grandparents onward.
         for ancestor in ancestors.iter().skip(1) {
             out.push_str(&format!("\n        {}", render_self_line(ancestor)));
+        }
+    }
+    if let Some(children) = value.get("children").and_then(|v|v.as_array()) {
+        out.push_str(&format!("\nchildren: {}", children.len()));
+        for child in children {
+            out.push_str(&format!("\n        {}{}", render_self_line(child),
+                if child["archived"].as_bool() == Some(true) { " [archived]" } else { "" }));
         }
     }
     out

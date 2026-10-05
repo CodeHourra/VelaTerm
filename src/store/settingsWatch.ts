@@ -19,6 +19,20 @@ import { useTermStore } from "./termStore";
 /** Cap on the wait for pending writes; see the flush note in `refresh`. */
 const FLUSH_TIMEOUT_MS = 1000;
 
+let settingsReady = false;
+let initialRefreshes = 0;
+let resolveSettingsReady: () => void;
+const settingsReadyPromise = new Promise<void>((resolve) => {
+  resolveSettingsReady = resolve;
+});
+
+/** Apply explicit theme choices after initial hydration, so startup cannot replace a user's choice
+ *  or persist unrelated preferences from the stale local cache. Later choices remain immediate. */
+export function runAfterInitialSettings(action: () => void): void {
+  if (settingsReady) action();
+  else void settingsReadyPromise.then(action);
+}
+
 /**
  * Re-read preferences from the backend and apply whatever differs.
  *
@@ -29,19 +43,28 @@ const FLUSH_TIMEOUT_MS = 1000;
  * the refresh; the local cache is written either way, so a dropped flush only defers the backend write.
  */
 export async function refreshSettingsFromBackend(): Promise<void> {
-  await flushNow(FLUSH_TIMEOUT_MS);
-  const changed = await reconcileSettings();
-  if (changed.size === 0) return;
-  if (changed.has("vlx-lang")) setLang(loadLangChoice());
-  if (
-    changed.has("vlx-theme") ||
-    changed.has("vlx-sound") ||
-    changed.has("vlx-notify") ||
-    changed.has("vlx-clean-images") ||
-    changed.has("vlx-record-sessions") ||
-    changed.has("vlx-settings")
-  ) {
-    useTermStore.getState().hydrateSettingsFromCache();
+  initialRefreshes++;
+  try {
+    await flushNow(FLUSH_TIMEOUT_MS);
+    const changed = await reconcileSettings();
+    if (changed.size === 0) return;
+    if (changed.has("vlx-lang")) setLang(loadLangChoice());
+    if (
+      changed.has("vlx-theme") ||
+      changed.has("vlx-sound") ||
+      changed.has("vlx-notify") ||
+      changed.has("vlx-clean-images") ||
+      changed.has("vlx-record-sessions") ||
+      changed.has("vlx-settings")
+    ) {
+      useTermStore.getState().hydrateSettingsFromCache();
+    }
+  } finally {
+    initialRefreshes--;
+    if (!settingsReady && initialRefreshes === 0) {
+      settingsReady = true;
+      resolveSettingsReady();
+    }
   }
 }
 

@@ -5,6 +5,7 @@ import fcntl
 import os
 from pathlib import Path
 import pty
+import pwd
 import re
 import select
 import signal
@@ -16,7 +17,7 @@ import time
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def verify(shell, family, user_config=False):
+def verify(shell, family, user_config=False, promptvars=True):
     with tempfile.TemporaryDirectory(prefix="vlx-completion-pty-") as directory:
         root = Path(directory)
         selection = root / "selection"
@@ -94,7 +95,9 @@ def verify(shell, family, user_config=False):
         try:
             if family != "pwsh":
                 read(1)
-                send(f"source '{script}'\r")
+                prefix = (f"PS0='USER-PS0 $((1+1)) '; shopt {'-s' if promptvars else '-u'} promptvars; "
+                          if family == "bash" else "")
+                send(f"{prefix}source '{script}'\r")
             output = until(b"6973;test;P\x07")
             assert b"6973;test;P\x07" in output, (family, "integration unavailable", output)
             if family == "zsh":
@@ -103,6 +106,7 @@ def verify(shell, family, user_config=False):
                          "zle -N _vlxdump; bindkey '^[[42~' _vlxdump")
             elif family == "bash":
                 setup = ("_vlxtest() { COMPREPLY=('中文 path' branch-two); }; complete -F _vlxtest vlxtest; "
+                         f"printf '%s.%s' \"${{BASH_VERSINFO[0]}}\" \"${{BASH_VERSINFO[1]}}\" > '{root}/version'; "
                          f"_vlxdump() {{ printf %s \"$READLINE_LINE\" > '{root}/buffer'; }}; "
                          "bind -x '\"\\e[42~\":_vlxdump'")
             elif family == "fish":
@@ -163,6 +167,75 @@ def verify(shell, family, user_config=False):
                 assert buffer().endswith("中文\\ folder/child/"), (family, "nested directory completion", buffer())
                 send(b"\x03")
                 read()
+            if family == "bash":
+                folder = root / "Soft folder"
+                child = folder / "中文 child"
+                child.mkdir(parents=True)
+                # Resolve temporary fixtures through the shell's real home, without changing HOME.
+                home_path = "~/" + os.path.relpath(root, Path.home())
+                account = pwd.getpwuid(os.getuid())
+                user_path = f"~{account.pw_name}/" + os.path.relpath(root, account.pw_dir)
+                cwd_file = root / "cwd"
+
+                def complete_directory(prefix, label, expected):
+                    line = f"cd {prefix}"
+                    send(line)
+                    revision, labels = query()
+                    assert label in labels, (family, "missing tilde directory suffix", labels)
+                    assert buffer() == line, (family, "path query changed input")
+                    accept(revision, labels.index(label))
+                    value = buffer()
+                    assert value.startswith("cd ~") and not value.startswith("cd \\~"), (family, value)
+                    assert value.endswith("/"), (family, "missing directory separator", value)
+                    send(f"; printf %s \"$PWD\" > '{cwd_file}'\r")
+                    output = until(b"6973;test;P\x07")
+                    assert cwd_file.read_text() == str(expected), (family, "wrong completed directory", value)
+                    assert b"6973;test;X\x07" in output, (family, "missing path execution boundary", output)
+
+                complete_directory(f"{home_path}/Sof", f"{home_path}/Soft folder/", folder)
+                # A second request must complete inside the selected directory, including Unicode quoting.
+                send(f"cd {home_path}/Sof")
+                revision, labels = query()
+                accept(revision, labels.index(f"{home_path}/Soft folder/"))
+                revision, labels = query()
+                assert f"{home_path}/Soft folder/中文 child/" in labels, (family, labels, buffer())
+                accept(revision, labels.index(f"{home_path}/Soft folder/中文 child/"))
+                send(f"; printf %s \"$PWD\" > '{cwd_file}'\r")
+                until(b"6973;test;P\x07")
+                assert cwd_file.read_text() == str(child), (family, "nested tilde directory completion")
+                complete_directory(f"{user_path}/Sof", f"{user_path}/Soft folder/", folder)
+                unsafe_folder = root / "Exec $(touch VLX_UNEXPECTED)"
+                unsafe_folder.mkdir()
+                complete_directory(f"{home_path}/Exe", f"{home_path}/{unsafe_folder.name}/", unsafe_folder)
+                assert not list(root.rglob("VLX_UNEXPECTED")), (family, "candidate path was evaluated")
+                send(f"cd '{root}'\r")
+                until(b"6973;test;P\x07")
+                (root / "~" / "literal folder").mkdir(parents=True)
+                literal_file = root / "literal"
+                send("_vlxliteral_complete() { COMPREPLY=('~/literal folder'); }; "
+                     "complete -F _vlxliteral_complete vlxliteral; "
+                     f"vlxliteral() {{ printf %s \"$1\" > '{literal_file}'; }}\r")
+                until(b"6973;test;P\x07")
+                for token in (r"\~/lit", "'~/lit'", '"~/lit"'):
+                    send(f"vlxliteral {token}")
+                    revision, labels = query()
+                    accept(revision, labels.index("~/literal folder/"))
+                    send("\r")
+                    until(b"6973;test;P\x07")
+                    assert literal_file.read_text() == "~/literal folder/", (family, "literal tilde expanded", token)
+                # Neither an invalid tilde prefix nor a missing account may change literal path semantics.
+                for tilde in ("~$(touch VLX_UNEXPECTED)", "~vlx_missing_" + root.name.replace("-", "_")):
+                    candidate = f"{tilde}/literal folder"
+                    (root / candidate).mkdir(parents=True)
+                    send(f"_vlxliteral_complete() {{ COMPREPLY=('{candidate}'); }}\r")
+                    until(b"6973;test;P\x07")
+                    send("vlxliteral ~")
+                    revision, labels = query()
+                    accept(revision, labels.index(candidate + "/"))
+                    send("\r")
+                    until(b"6973;test;P\x07")
+                    assert literal_file.read_text() == candidate + "/", (family, "literal prefix changed", candidate)
+                assert not list(root.rglob("VLX_UNEXPECTED")), (family, "tilde prefix was evaluated")
             marker = root / "executed"
             if family == "pwsh":
                 fixture.write_text(f"function global:vlxtest {{ param([string]$Value); [IO.File]::WriteAllText('{marker}',$Value) }}")
@@ -179,7 +252,14 @@ def verify(shell, family, user_config=False):
             output = read()
             assert marker.read_text() == "中文 path", (family, "incorrect shell quoting")
             assert b"6973;test;X\x07" in output, (family, "missing execution boundary")
-            print(f"PASS {family}: native candidates, Unicode/space quoting, unchanged query input, stale rejection, insert without execution")
+            if family == "bash":
+                if tuple(map(int, (root / "version").read_text().split("."))) >= (4, 4):
+                    expected_ps0 = b"USER-PS0 2 " if promptvars else b"USER-PS0 $((1+1)) "
+                    assert expected_ps0 in output, (family, "existing PS0 expansion was changed", output)
+                assert b"$(_vlxc_busy)" not in output, (family, "visible PS0 command substitution", output)
+            mode = f" (promptvars={'on' if promptvars else 'off'})" if family == "bash" else ""
+            print(f"PASS {family}{mode}: native candidates, Unicode/space quoting, unchanged query input, stale rejection, insert without execution"
+                  + (", tilde paths, literal tildes, nested directories, PS0" if family == "bash" else ""))
         finally:
             try:
                 os.kill(pid, signal.SIGKILL)
@@ -202,5 +282,7 @@ if __name__ == "__main__":
     for name in ("zsh", "bash", "fish", "pwsh"):
         if getattr(args, name):
             verify(getattr(args, name), name)
+            if name == "bash":
+                verify(args.bash, "bash", promptvars=False)
     if args.zsh and args.zsh_user_config:
         verify(args.zsh, "zsh", user_config=True)

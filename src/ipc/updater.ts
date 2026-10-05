@@ -24,10 +24,11 @@ import { safeError } from "./diagnosticSafety";
 //! installation. It lets the update server count installations instead of IP addresses, which merge users
 //! behind one NAT and split a single user whose address changes. Checks repeat on a schedule as well as at
 //! startup, because a terminal often stays open for days and would otherwise never report again.
+//! `X-App-Language` reports the effective UI locale on every check, including after a language change.
 
 import { useSyncExternalStore } from "react";
 
-import { LOCALES, t, type Locale } from "../i18n";
+import { getLocale, LOCALES, t, type Locale } from "../i18n";
 import { platform, type UpdateHandle } from "../platform";
 import { invoke } from "./transport";
 import { compareVersions, localizeReleaseNotes, sliceReleaseNotes } from "./updateNotes";
@@ -227,10 +228,12 @@ async function installId(): Promise<string | null> {
   return cachedInstallId;
 }
 
-/** Call the updater endpoint with the installation header attached. */
+/** Call the updater endpoint with the installation identifier and current UI language. */
 async function checkWithId(): Promise<UpdateHandle | null> {
   const id = await installId();
-  return platform.updater.check(id ? { "X-Install-Id": id } : undefined);
+  const headers: Record<string, string> = { "X-App-Language": getLocale() };
+  if (id) headers["X-Install-Id"] = id;
+  return platform.updater.check(headers);
 }
 
 /**

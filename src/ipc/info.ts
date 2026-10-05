@@ -33,6 +33,20 @@ export function createDir(path: string): Promise<void> {
   return invoke<void>("create_dir", { path });
 }
 
+/** Server-owned normalization, name defaults, and preflight validation; mutation still validates at execution. */
+export interface DestinationPreview {
+  parent: string;
+  name: string;
+  path: string;
+  problem: "emptyParent" | "emptyName" | "notAbsolute" | "invalidName" | "missingParent" | "unavailable" | null;
+  field: "location" | "name" | null;
+  existingKind: "file" | "directory" | null;
+}
+
+export function previewDestination(parentDir: string, name: string | null, repository?: string): Promise<DestinationPreview> {
+  return invoke<DestinationPreview>("preview_destination", { parentDir, name, repository });
+}
+
 /** Rename/move a file or directory; the backend rejects an existing destination without overwriting. */
 export function renamePath(from: string, to: string): Promise<void> {
   return invoke<void>("rename_path", { from, to });

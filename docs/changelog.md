@@ -1,9 +1,55 @@
 # Changelog
 
-> Created: 2026-07-09 16:10 · Updated: 2026-09-30
+> Created: 2026-07-09 16:10 · Updated: 2026-10-05
 
 All notable changes to VelaTerm are documented here, newest first.
 v0.1.91 is the first public release; earlier version numbers were internal iterations and are not covered.
+
+---
+
+## v0.2.7 — 2026-10-05
+
+- 🪐 Antigravity joins the conversation view as an experimental agent with text, tools, queued messages and native history; images, steering during a reply, interactive approvals, fork and rewind remain unavailable, and full cross-platform recovery testing is pending.
+
+- 🗂️ Collections support nested collections, projects and session groups, with creation and import from the workspace; deleting a collection preserves its projects and archived sessions.
+
+- ⚠️ Earlier versions must not use a database migrated from folders to collections; downgrading requires restoring a backup taken before migration.
+
+- 🏷️ Smart Rename names a session from its conversation using the current agent's settings, with an agent picker when those settings cannot be used.
+
+- 🌱 New sessions pick up the latest shell environment and newly installed agents without restarting VelaTerm.
+
+- 💾 Experimental conversation recovery restores saved messages, images and queued input after a restart and pauses interrupted work for explicit resumption; full native and cross-platform acceptance testing is pending.
+
+- 📸 Experimental screenshot capture in the macOS and Windows Tauri desktop apps lets you select a region, annotate it, copy it or save the original PNG; native desktop acceptance testing is pending, and Electron, browser and remote views do not support it.
+
+- 🧵 Claude background task tabs show their full native conversation history, including parallel tool calls.
+
+- 🖼️ A conversation message can contain up to 20 images, with a 5 MiB limit per image.
+
+- 📍 Conversation message markers offer previews and jump directly to earlier user messages.
+
+- 🧭 Directory pickers for projects, cloning and Save As share editable paths and location completion.
+
+- 🪪 `vself` reads saved session settings and parent-child relationships, while `vflow list` lists related planning and execution workflows without changing them.
+
+- ⌨️ Select All in the terminal is configurable in Shortcuts, defaults to Cmd+A on macOS and Ctrl+Shift+A elsewhere, and applies only when the terminal has focus.
+
+- 🐚 Bash completion handles paths beginning with `~`, and older Bash versions open sessions without PS0 errors.
+
+- 🛑 Child task hooks no longer change their parent's conversation status, and closing a conversation tab stops its active chat process.
+
+- 🪟 Windows restores terminal keyboard focus when returning to the window and removes the blue line during Chinese text composition.
+
+- 🎨 Classic Dark has clearer contrast, desktop icons follow the system theme, project icons are blue, and collection rows omit project counts.
+
+- 📚 Conversation and collection menus use a clearer Add to Knowledge Base label for organizing knowledge.
+
+- 🌐 Browser access to VelaTerm over plain HTTP on a local network opens correctly.
+
+- 🌍 Update checks carry the interface language so release notes can match it, and the update service accepts the Linux Electron updater.
+
+- 🧰 Kimi Code and Grok Build appear without model version numbers in agent names.
 
 ---
 

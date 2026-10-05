@@ -94,6 +94,9 @@ impl ChatEvent {
     }
 }
 
+/// Exact provider identity, when the native parser preserves one for this event.
+pub fn recovery_identity(event: &ChatEvent) -> Option<String> { event.native_id.clone() }
+
 /// Read a session's recording and return the session-view rows.
 ///
 /// Errors carry the reason the view cannot be shown — deleted recording, or an agent whose history is not a
@@ -110,6 +113,7 @@ pub fn read(kind: SessionKind, agent_session_id: &str) -> Result<Vec<ChatEvent>,
             }).collect());
     }
     let events = match kind {
+        SessionKind::Antigravity => super::antigravity_protocol::events(&crate::agent::antigravity::read_transcript(agent_session_id)?),
         SessionKind::Claude => claude_events(&resume::read_claude_transcript(agent_session_id)?),
         SessionKind::Codex => {
             let (_, content) = resume::read_codex_rollout_chain(agent_session_id)?;
@@ -117,7 +121,7 @@ pub fn read(kind: SessionKind, agent_session_id: &str) -> Result<Vec<ChatEvent>,
         }
         SessionKind::Opencode => {
             let messages = crate::agent::opencode_store::messages(agent_session_id)?;
-            super::opencode_timeline::events(&messages)
+            return Ok(opencode_history(&messages));
         }
         // Pi and OMP record an append-only tree of entries; the parser keeps the active branch.
         SessionKind::Pi | SessionKind::Omp => {
@@ -133,6 +137,16 @@ pub fn read(kind: SessionKind, agent_session_id: &str) -> Result<Vec<ChatEvent>,
         }
     };
     Ok(if kind == SessionKind::Claude { fold_claude(events) } else { fold(events) })
+}
+
+/// Bind identity and content from the same native-store snapshot, including repeated user bodies.
+pub(super) fn opencode_history(messages: &[crate::agent::opencode_store::OpencodeMessage]) -> Vec<ChatEvent> {
+    let mut events=fold(super::opencode_timeline::events(messages));
+    let mut ids=super::opencode_timeline::user_turns(messages).into_iter();
+    for event in events.iter_mut().filter(|e|e.kind=="user") {
+        event.native_id=ids.next().map(|t|t.message_id);
+    }
+    events
 }
 
 /// Read provider-native user-turn identities in transcript order.
@@ -465,6 +479,19 @@ pub fn replay(kind: SessionKind, agent_session_id: &str) -> Result<Vec<ChatRow>,
 }
 
 fn replay_recorded(kind: SessionKind, agent_session_id: &str) -> Result<Vec<ChatRow>, String> {
+    if kind == SessionKind::Antigravity {
+        let mut rows = super::antigravity_protocol::history_rows(&crate::agent::antigravity::read_transcript(agent_session_id)?);
+        // A replayed step belongs to the previous process; it cannot still be streaming or running.
+        for row in &mut rows {
+            match row {
+                ChatRow::Assistant { streaming, .. } | ChatRow::Reasoning { streaming, .. } => { *streaming = false; }
+                ChatRow::Tool { status, .. } if *status == "running" => { *status = "canceled"; }
+                _ => {},
+            }
+        }
+        attach_recorded_turn_durations(&mut rows);
+        return Ok(rows);
+    }
     if kind == SessionKind::Opencode {
         // OpenCode's store already holds addressable parts, and its subagents are whole sessions of their
         // own; the row ids come from the store so a later live event can update the same rows.
@@ -478,15 +505,8 @@ fn replay_recorded(kind: SessionKind, agent_session_id: &str) -> Result<Vec<Chat
         let path = resume::find_claude_transcript(agent_session_id)
             .ok_or("Claude transcript file not found")?;
         let content = resume::read_claude_transcript(agent_session_id)?;
-        let directory = path.with_extension("").join("subagents");
-        return Ok(claude_replay(&content, &mut |id| {
-            // Only provider identifiers are accepted; recording content cannot select arbitrary paths.
-            if id.is_empty() || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
-                return Err("Invalid Claude subagent identifier".to_string());
-            }
-            std::fs::read_to_string(directory.join(format!("agent-{id}.jsonl")))
-                .map_err(|_| "The subagent recording is unavailable".to_string())
-        }, &mut HashSet::new(), 0));
+        let mut read_child = claude_subagent_reader(path.with_extension("").join("subagents"));
+        return Ok(claude_replay(&content, &mut read_child, &mut HashSet::new(), 0));
     }
     if kind != SessionKind::Codex {
         return Ok(to_rows(read(kind, agent_session_id)?));
@@ -499,6 +519,99 @@ fn replay_recorded(kind: SessionKind, agent_session_id: &str) -> Result<Vec<Chat
     let mut read_thread = |id: &str| resume::read_codex_rollout_chain(id).map(|(_, value)| value);
     let subagents = codex_subagent_replays(&content, &mut read_thread);
     Ok(to_rows_with_subagents(events, &subagents))
+}
+
+/// One Claude subagent's own recording as timeline rows, for its task tab.
+///
+/// A background subagent never streams its steps to the parent's protocol, so while it runs its recording
+/// is the only place they appear. Re-reading the file is how the tab follows it.
+pub fn replay_claude_subagent(agent_session_id: &str, agent_id: &str) -> Result<Vec<ChatRow>, String> {
+    let path = resume::find_claude_transcript(agent_session_id)
+        .ok_or("Claude transcript file not found")?;
+    claude_subagent_rows(path.with_extension("").join("subagents"), agent_id)
+}
+
+fn claude_subagent_rows(directory: std::path::PathBuf, agent_id: &str) -> Result<Vec<ChatRow>, String> {
+    let mut read_child = claude_subagent_reader(directory);
+    let chain = claude_child_chain(&read_child(agent_id)?);
+    let mut ancestors = HashSet::from([agent_id.to_string()]);
+    let mut rows = claude_replay(&chain, &mut read_child, &mut ancestors, 1);
+    scope_child_rows(&mut rows, agent_id);
+    Ok(rows)
+}
+
+/// Reads a subagent recording by its agent id from the parent's `subagents` directory.
+fn claude_subagent_reader(directory: std::path::PathBuf) -> impl FnMut(&str) -> Result<String, String> {
+    move |id| {
+        // Only provider identifiers are accepted; recording content cannot select arbitrary paths.
+        if id.is_empty() || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
+            return Err("Invalid Claude subagent identifier".to_string());
+        }
+        std::fs::read_to_string(directory.join(format!("agent-{id}.jsonl")))
+            .map_err(|_| "The subagent recording is unavailable".to_string())
+    }
+}
+
+/// A child file marks its own messages as sidechain. They become the local main chain only when the child
+/// is read as a conversation of its own; the ordinary root/export parser is unchanged.
+fn claude_child_chain(text: &str) -> String {
+    claude_with_parallel_calls(text, &resume::claude_active_branch(text)).lines().filter_map(|line| {
+        let mut value: Value = serde_json::from_str(line).ok()?;
+        value["isSidechain"] = Value::Bool(false);
+        Some(value.to_string())
+    }).collect::<Vec<_>>().join("\n")
+}
+
+/// Put back the parallel tool calls a subagent recording leaves off its active branch.
+///
+/// A subagent writes each tool call of one response as its own record, and the results of calls made in
+/// parallel can continue from different ones. The conversation then follows one of them and the others
+/// end as side branches, so the active branch alone loses those calls. A side branch is taken back only
+/// when it starts with another part of the same response (same `message.id` as its parent) and holds
+/// nothing but tool results and attachments after that; a rewind starts with a new prompt and never
+/// qualifies.
+fn claude_with_parallel_calls(content: &str, branch: &str) -> String {
+    let uuid_of = |value: &Value| value.get("uuid").and_then(Value::as_str).map(str::to_string);
+    let active: HashSet<String> = branch.lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter_map(|value| uuid_of(&value))
+        .collect();
+    let mut kept = active.clone();
+    let records: Vec<Option<Value>> = content.lines().map(|line| serde_json::from_str(line).ok()).collect();
+    let message_ids: HashMap<String, String> = records.iter().flatten()
+        .filter_map(|value| Some((uuid_of(value)?, value.pointer("/message/id")?.as_str()?.to_string())))
+        .collect();
+    let mut restored = false;
+    // Parents precede their children in the file, so one pass in order reaches every qualifying record.
+    for value in records.iter().flatten() {
+        let (Some(uuid), Some(parent)) = (uuid_of(value), value.get("parentUuid").and_then(Value::as_str)) else {
+            continue;
+        };
+        if kept.contains(&uuid) || !kept.contains(parent) {
+            continue;
+        }
+        let same_response = value.get("type").and_then(Value::as_str) == Some("assistant")
+            && message_ids.get(&uuid).is_some_and(|id| message_ids.get(parent) == Some(id));
+        let tool_results = value.get("type").and_then(Value::as_str) == Some("user")
+            && value.pointer("/message/content").and_then(Value::as_array).is_some_and(|blocks| {
+                !blocks.is_empty() && blocks.iter().all(|b| b.get("type").and_then(Value::as_str) == Some("tool_result"))
+            });
+        let attachment = value.get("type").and_then(Value::as_str) == Some("attachment");
+        // Results and attachments only continue a branch that was itself taken back.
+        let on_side_branch = !active.contains(parent);
+        if same_response || (on_side_branch && (tool_results || attachment)) {
+            kept.insert(uuid);
+            restored = true;
+        }
+    }
+    if !restored {
+        return branch.to_string();
+    }
+    content.lines().zip(&records)
+        .filter(|(_, value)| value.as_ref().and_then(uuid_of).is_none_or(|uuid| kept.contains(&uuid)))
+        .map(|(line, _)| line)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Rebuild only children linked by native tool results. Unrelated sidechain files stay out of the view.
@@ -547,14 +660,7 @@ fn claude_replay(
                     Err("Nested subagent history exceeds the replay limit".to_string())
                 } else {
                     let loaded = read_child(id).map(|text| {
-                        // A child file marks its own messages as sidechain. They become the local main
-                        // chain only inside its card; the ordinary root/export parser is unchanged.
-                        let branch = resume::claude_active_branch(&text);
-                        let normalized = branch.lines().filter_map(|line| {
-                            let mut value: Value = serde_json::from_str(line).ok()?;
-                            value["isSidechain"] = Value::Bool(false);
-                            Some(value.to_string())
-                        }).collect::<Vec<_>>().join("\n");
+                        let normalized = claude_child_chain(&text);
                         let last = normalized.lines().filter_map(|line| serde_json::from_str::<Value>(line).ok())
                             .filter(|v| v.get("type").and_then(Value::as_str) == Some("assistant")).last();
                         if let Some(last) = last {
@@ -1189,6 +1295,62 @@ mod tests {
         assert!(children.iter().any(|r| matches!(r, ChatRow::Reasoning { text, .. } if text == "reason")));
         assert!(children.iter().any(|r| matches!(r, ChatRow::Tool { name, output: Some(text), .. } if name == "Read" && text == "file contents")));
         assert!(children.iter().any(|r| matches!(r, ChatRow::Tool { name, children, .. } if name == "Agent" && matches!(&children[0], ChatRow::Assistant { text, .. } if text == "nested answer"))));
+    }
+
+    #[test]
+    fn claude_subagent_rows_read_one_child_as_its_own_conversation() {
+        let dir = std::env::temp_dir().join(format!("subagent-rows-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let child = [
+            r#"{"type":"user","isSidechain":true,"message":{"content":"Inspect files"}}"#.to_string(),
+            r#"{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"tool_use","id":"read","name":"Read","input":{"file_path":"a"}}]}}"#.to_string(),
+            r#"{"type":"user","isSidechain":true,"message":{"content":[{"type":"tool_result","tool_use_id":"read","content":"file contents"}]}}"#.to_string(),
+            claude_task_record("nested-tool", "nested"),
+        ].join("\n");
+        std::fs::write(dir.join("agent-child.jsonl"), child).unwrap();
+        std::fs::write(dir.join("agent-nested.jsonl"),
+            r#"{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"text","text":"nested answer"}]}}"#).unwrap();
+
+        let rows = claude_subagent_rows(dir.clone(), "child").unwrap();
+        assert!(matches!(&rows[0], ChatRow::User { text, .. } if text == "Inspect files"));
+        assert!(rows.iter().any(|r| matches!(r, ChatRow::Tool { name, output: Some(text), .. } if name == "Read" && text == "file contents")));
+        assert!(rows.iter().any(|r| matches!(r, ChatRow::Tool { name, children, .. } if name == "Agent" && matches!(&children[0], ChatRow::Assistant { text, .. } if text == "nested answer"))));
+        // Ids match the same rows drawn inside the parent's card.
+        assert!(rows.iter().all(|r| r.id().starts_with("child-child-")));
+
+        assert!(claude_subagent_rows(dir.clone(), "missing").is_err());
+        assert!(claude_subagent_rows(dir.clone(), "../agent-child").is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn claude_child_chain_keeps_parallel_calls_left_on_side_branches() {
+        // The shape a subagent wrote for two parallel calls: the Read result continues from the Read record,
+        // the Bash result from the Bash record, and the conversation goes on from the Bash result.
+        let lines = [
+            r#"{"type":"user","uuid":"p","parentUuid":null,"isSidechain":true,"message":{"content":"Inspect"}}"#,
+            r#"{"type":"assistant","uuid":"bash","parentUuid":"p","isSidechain":true,"message":{"id":"m1","content":[{"type":"tool_use","id":"t-bash","name":"Bash","input":{"command":"ls"}}]}}"#,
+            r#"{"type":"assistant","uuid":"read","parentUuid":"bash","isSidechain":true,"message":{"id":"m1","content":[{"type":"tool_use","id":"t-read","name":"Read","input":{"file_path":"a"}}]}}"#,
+            r#"{"type":"user","uuid":"read-result","parentUuid":"read","isSidechain":true,"message":{"content":[{"type":"tool_result","tool_use_id":"t-read","content":"file"}]}}"#,
+            r#"{"type":"attachment","uuid":"hook","parentUuid":"read-result","isSidechain":true,"attachment":{"type":"hook_success"}}"#,
+            r#"{"type":"user","uuid":"bash-result","parentUuid":"bash","isSidechain":true,"message":{"content":[{"type":"tool_result","tool_use_id":"t-bash","content":"listing"}]}}"#,
+            r#"{"type":"assistant","uuid":"answer","parentUuid":"bash-result","isSidechain":true,"message":{"id":"m2","content":[{"type":"text","text":"Done"}]}}"#,
+        ].join("\n");
+        let rows = claude_replay(&claude_child_chain(&lines), &mut |_| Err("none".into()), &mut HashSet::new(), 0);
+        for (name, output) in [("Bash", "listing"), ("Read", "file")] {
+            assert!(rows.iter().any(|r| matches!(r, ChatRow::Tool { name: n, output: Some(o), .. } if n == name && o == output)), "{name} is missing");
+        }
+        assert!(matches!(rows.last(), Some(ChatRow::Assistant { text, .. }) if text == "Done"));
+
+        // A rewind starts its abandoned branch with a prompt; that branch stays out.
+        let rewound = [
+            r#"{"type":"user","uuid":"p","parentUuid":null,"message":{"content":"First"}}"#,
+            r#"{"type":"assistant","uuid":"a","parentUuid":"p","message":{"id":"m1","content":[{"type":"text","text":"Reply"}]}}"#,
+            r#"{"type":"user","uuid":"old","parentUuid":"a","message":{"content":"Abandoned"}}"#,
+            r#"{"type":"user","uuid":"new","parentUuid":"a","message":{"content":"Kept"}}"#,
+        ].join("\n");
+        let chain = claude_child_chain(&rewound);
+        assert!(chain.contains("Kept") && !chain.contains("Abandoned"));
     }
 
     #[test]

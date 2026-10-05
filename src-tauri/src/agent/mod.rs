@@ -40,6 +40,8 @@ pub mod runs;
 pub mod pi_models;
 pub mod resume;
 pub mod session_settings;
+pub mod session_query;
+pub mod session_title;
 pub mod server;
 pub mod spawn_cli;
 pub mod spawn_requests;

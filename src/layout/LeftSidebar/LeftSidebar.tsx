@@ -4,7 +4,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ContextMenu, type MenuItem } from "../../components/ContextMenu";
-import { FormModal } from "../../components/FormModal";
 import Icons from "../../components/Icons";
 import { useT } from "../../i18n";
 import { env, platform } from "../../platform";
@@ -18,12 +17,12 @@ import {
 } from "../../store/termStore";
 import { isWorktreeGone } from "../../hooks/useGitBranch";
 import {
+  collectionNameTaken,
   countByAgentState,
   isVirtualProject,
   projectRoot,
   type AgentState,
   type NodeKind,
-  type ProjectFolder,
 } from "../../types";
 import { MARK_LABEL_KEYS, NODE_MARKS, normalizeMark } from "../../marks";
 import { useSessionMenu } from "../sessionMenu";
@@ -43,9 +42,12 @@ import {
   type SidebarTreeTab,
   type SidebarViewRect,
 } from "./sidebarTreeLayout";
-import { ProjectFolderDialogs, type FolderDialog } from "./ProjectFolderDialogs";
-import { moveToFolderItem } from "./projectFolderMenu";
-import { setProjectFolder } from "../../store/projectFolders";
+import { CollectionDialog } from "./CollectionDialog";
+import { collectionDialogUrl, navigateCollectionDialog, useCollectionDialog } from "./collectionNavigation";
+import { moveToCollectionItem } from "./projectCollectionMenu";
+import { setProjectCollection } from "../../store/projectCollections";
+import { projectDialogUrl } from "../../remote/dialogNavigation";
+import { newGroupDialogUrl } from "./groupNavigation";
 
 /** Status filters: working (pulsing green), attention (pulsing yellow), replied (magenta), and replied with
  * background work still running (cyan). */
@@ -201,7 +203,6 @@ function SidebarTreePane({
   onSplitDown,
   onClose,
   onNewCollection,
-  onNewFolder,
   treeHandlers,
 }: {
   view: SidebarTreeView;
@@ -212,8 +213,7 @@ function SidebarTreePane({
   onSplitDown: () => void;
   onClose: () => void;
   onNewCollection: () => void;
-  onNewFolder: () => void;
-  treeHandlers: Omit<TreeHandlers, "view" | "isPrimary">;
+  treeHandlers: Omit<TreeHandlers, "view" | "isPrimary" | "onNewCollection">;
 }) {
   const t = useT();
   const setTreeFilter = useTermStore((s) => s.setSidebarTreeViewFilter);
@@ -264,33 +264,15 @@ function SidebarTreePane({
         )}
       </div>
       <div ref={treeWrapRef} className="sidebar-tree-body">
-        <ProjectTree view={view} isPrimary={isPrimary} {...treeHandlers} />
+        <ProjectTree
+          view={view}
+          isPrimary={isPrimary}
+          onNewCollection={onNewCollection}
+          {...treeHandlers}
+        />
         <TreeScrollbar wrapRef={treeWrapRef} />
       </div>
       <div className="sidebar-tree-footer">
-        {/* Creation action, kept apart from the two view controls on the right. */}
-        <button
-          className="icon-btn sm sidebar-tree-new-folder"
-          title={t("folder.new")}
-          aria-label={t("folder.new")}
-          onClick={(event) => {
-            event.stopPropagation();
-            onNewFolder();
-          }}
-        >
-          <Icons.folderPlus size={14} />
-        </button>
-        <button
-          className="icon-btn sm sidebar-tree-new-collection"
-          title={t("tree.newCollection")}
-          aria-label={t("tree.newCollection")}
-          onClick={(event) => {
-            event.stopPropagation();
-            onNewCollection();
-          }}
-        >
-          <Icons.layers size={14} />
-        </button>
         <button
           className="icon-btn sm sidebar-tree-refresh"
           title={t("tree.refreshStatusFilter")}
@@ -412,7 +394,7 @@ export function LeftSidebar() {
   const width = useTermStore((s) => s.leftWidth);
   const importProject = useTermStore((s) => s.importProject);
   const openProjectPath = useTermStore((s) => s.openProjectPath);
-  const addVirtualProject = useTermStore((s) => s.addVirtualProject);
+  const projects = useTermStore((s) => s.projects);
   const setCloneModalOpen = useTermStore((s) => s.setCloneModalOpen);
   const renameNode = useTermStore((s) => s.renameNode);
   const openSession = useTermStore((s) => s.openSession);
@@ -495,7 +477,7 @@ export function LeftSidebar() {
     buildMarkItem,
     openDialog,
     dialogs,
-  } = useSessionMenu();
+  } = useSessionMenu({ groupNavigation: true });
 
   const [menu, setMenu] = useState<{
     node: TreeNodeRef;
@@ -515,24 +497,27 @@ export function LeftSidebar() {
     viewId: string;
   } | null>(null);
   const [renameVal, setRenameVal] = useState("");
-  // Name prompt for a collection; the sidebar owns it because the footer button has no node to hang a dialog on.
-  const [collectionOpen, setCollectionOpen] = useState(false);
-  const [folderMenu, setFolderMenu] = useState<{
-    folder: ProjectFolder;
-    viewId: string;
-    x: number;
-    y: number;
-  } | null>(null);
-  const [folderDialog, setFolderDialog] = useState<FolderDialog | null>(null);
+  const collectionDialog = useCollectionDialog();
+  const treeMutationError = useTermStore(s => s.treeMutationError);
   const startRename = (node: TreeNodeRef) => {
     const viewId = menu?.viewId ?? effectiveActiveViewId;
     setRenaming({ id: node.id, kind: node.kind, viewId });
     setRenameVal(node.name);
   };
-  const commitRename = () => {
-    // Strip control characters again at the final boundary. WKWebView may insert U+001C on edge-case
-    // arrow input (see ProjectTree); never persist a name containing replacement boxes.
-    const name = renameVal.replace(/[\u0000-\u001F\u007F-\u009F]/g, "").trim();
+  // Strip control characters again at the final boundary. WKWebView may insert U+001C on edge-case
+  // arrow input (see ProjectTree); never persist a name containing replacement boxes.
+  const cleanRenameVal = renameVal.replace(/[\u0000-\u001F\u007F-\u009F]/g, "").trim();
+  const renameError =
+    renaming?.kind === "project" &&
+    projects.some((p) => p.id === renaming.id && isVirtualProject(p)) &&
+    collectionNameTaken(projects, cleanRenameVal, renaming.id)
+      ? t("collection.duplicateName")
+      : null;
+  // A duplicate collection name keeps the input open on Enter so it can be corrected; leaving the field
+  // discards the edit instead.
+  const commitRename = (fromBlur?: boolean) => {
+    if (renameError && !fromBlur) return;
+    const name = renameError ? "" : cleanRenameVal;
     if (renaming && name) {
       const id = renaming.id;
       // Rename temporary session/browser/document drafts in memory; persist formal nodes through renameNode.
@@ -546,7 +531,42 @@ export function LeftSidebar() {
   };
   const cancelRename = () => setRenaming(null);
 
-  // Hover add for sessions opens a type menu scoped to the node kind.
+  const collectionCreationItems = (collectionId: string): MenuItem[] => [
+    {
+      label: t("tree.newCollection"), icon: <Icons.layers size={14} />,
+      href: collectionDialogUrl("create", undefined, collectionId),
+      onClick: event => {
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault(); navigateCollectionDialog("create", undefined, collectionId);
+      },
+    },
+    {
+      label: t("tree.createProject"), icon: <Icons.projectPlus size={14} />,
+      href: projectDialogUrl("create", collectionId),
+      onClick: event => {
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault(); useTermStore.getState().setCreateProjectModalOpen(true, collectionId);
+      },
+    },
+    {
+      label: t("tree.importProject"), icon: <Icons.projectOpen size={14} />,
+      href: projectDialogUrl("open", collectionId),
+      onClick: event => {
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault(); void importProject(collectionId);
+      },
+    },
+    {
+      label: t("tree.newGroup"), icon: <Icons.newGroup size={14} />,
+      href: newGroupDialogUrl(collectionId),
+      onClick: event => {
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault(); openDialog({ type: "newGroup", projectId: collectionId, parentGroupId: null });
+      },
+    },
+  ];
+
+  // Hover add retains session creation and also offers collection-scoped containers and projects.
   const onAddSession = (node: TreeNodeRef, x: number, y: number) => {
     const projectId = node.projectId;
     let groupId: string | null = null;
@@ -558,7 +578,11 @@ export function LeftSidebar() {
     }
     // Put New Terminal first in every project/group/session hover-add menu, and in project/group context
     // menus, for convenient center-pane draft terminals.
-    setNewSessionMenu({ x, y, items: newSessionItems(projectId, groupId, parent, { withTerminal: true }) });
+    const collection = node.kind === "project" && isVirtualProject(projects.find(p => p.id === node.id));
+    setNewSessionMenu({ x, y, items: [
+      ...(collection ? [...collectionCreationItems(node.id), { label: "", separator: true }] : []),
+      ...newSessionItems(projectId, groupId, parent, { withTerminal: true }),
+    ] });
   };
 
   // Hover add creates top-level groups under projects or child groups under groups.
@@ -654,19 +678,24 @@ export function LeftSidebar() {
       const project = st.projects.find((p) => p.id === node.projectId);
       // A collection is stored as a project row but has no folder, so this menu names it a collection.
       const virtual = isVirtualProject(project);
-      const moveToFolder = moveToFolderItem(t, project, st.projectFolders, (folderId) => {
-        void setProjectFolder(node.projectId, folderId).catch(() => {});
+      const moveToCollection = moveToCollectionItem(t, project, st.projects, (collectionId) => {
+        void setProjectCollection(node.projectId, collectionId).catch(() => {});
       });
       // Match group layout: Session section (including persistent browser/Resume), then project actions.
       return [
         ...newSessionItems(node.projectId, null, null, { withBrowser: true, withTerminal: true }),
         sep,
-        {
+        ...(virtual ? collectionCreationItems(node.id) : [{
           label: t("tree.newGroup"),
-          onClick: () => openDialog({ type: "newGroup", projectId: node.projectId, parentGroupId: null }),
-        },
+          icon: <Icons.newGroup size={14} />,
+          href: newGroupDialogUrl(node.projectId),
+          onClick: (event: React.MouseEvent) => {
+            if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault(); openDialog({ type: "newGroup", projectId: node.projectId, parentGroupId: null });
+          },
+        }]),
         buildMarkItem("project", node.id),
-        ...(moveToFolder ? [moveToFolder] : []),
+        ...(moveToCollection ? [moveToCollection] : []),
         {
           label: t("common.experimental"),
           submenu: [
@@ -686,7 +715,13 @@ export function LeftSidebar() {
           label: virtual ? t("tree.collectionInfo") : t("tree.projectInfo"),
           onClick: () => openDialog({ type: "projectInfo", id: node.id }),
         },
-        rename,
+        virtual ? {
+          label: t("common.rename"), href: collectionDialogUrl("rename", node.id),
+          onClick: event => {
+            if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault(); navigateCollectionDialog("rename", node.id);
+          },
+        } : rename,
         {
           label: virtual ? t("tree.deleteCollection") : t("tree.removeProject"),
           danger: true,
@@ -711,7 +746,12 @@ export function LeftSidebar() {
       const groupBlock: MenuItem[] = [
         {
           label: t("tree.newSubgroup"),
-          onClick: () => openDialog({ type: "newGroup", projectId: node.projectId, parentGroupId: node.id }),
+          icon: <Icons.newGroup size={14} />,
+          href: newGroupDialogUrl(node.projectId, node.id),
+          onClick: event => {
+            if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault(); openDialog({ type: "newGroup", projectId: node.projectId, parentGroupId: node.id });
+          },
         },
         // Move to Worktree binds the group to a worktree, new or existing, and re-points a group that already
         // has one. Sessions already in the group keep their own directory; later ones start in the worktree.
@@ -817,19 +857,36 @@ export function LeftSidebar() {
 
   return (
     <aside className="col col-left" style={{ width, borderRight: "none" }} {...folderDropProps}>
+      {treeMutationError && <div className="sidebar-tree-error" role="alert">
+        <span>{treeMutationError}</span>
+        <button className="icon-btn sm" aria-label={t("common.close")} onClick={() => useTermStore.setState({ treeMutationError: null })}><Icons.x size={12} /></button>
+      </div>}
       {folderDropOver && <div className="sidebar-folder-drop">{t("tree.dropFoldersHint")}</div>}
       <div className="col-head">
         <span className="title">Workspace</span>
         <span className="sp" />
+        <a
+          href={collectionDialogUrl("create")}
+          className="icon-btn sm"
+          title={t("tree.newCollection")}
+          aria-label={t("tree.newCollection")}
+          onClick={(event) => {
+            if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            navigateCollectionDialog("create");
+          }}
+        >
+          <Icons.layers size={14} />
+        </a>
         <button
           className="icon-btn sm"
           title={t("tree.createProject")}
           onClick={() => useTermStore.getState().setCreateProjectModalOpen(true)}
         >
-          <Icons.folderPlus size={14} />
+          <Icons.projectPlus size={14} />
         </button>
         <button className="icon-btn sm" title={t("tree.importProject")} onClick={() => void importProject()}>
-          <Icons.folderOpen size={14} />
+          <Icons.projectOpen size={14} />
         </button>
         <button className="icon-btn sm" title={t("tree.cloneProject")} onClick={() => setCloneModalOpen(true)}>
           <Icons.git size={14} />
@@ -872,25 +929,16 @@ export function LeftSidebar() {
                 onActivate={() => setActiveTreeView?.(view.id)}
                 onSplitDown={() => splitTreeView?.("vertical", view.id)}
                 onClose={() => deleteTreeView?.(view.id)}
-                onNewCollection={() => setCollectionOpen(true)}
-                onNewFolder={() => setFolderDialog({ type: "create" })}
+                onNewCollection={() => navigateCollectionDialog("create")}
                 treeHandlers={{
                   onContext: (node, x, y) => {
                     setActiveTreeView?.(view.id);
                     setMenu({ node, viewId: view.id, x, y });
                   },
-                  onFolderContext: (folder, x, y) => {
-                    setActiveTreeView?.(view.id);
-                    setFolderMenu({ folder, viewId: view.id, x, y });
-                  },
-                  contextId:
-                    menu?.viewId === view.id
-                      ? menu.node.id
-                      : folderMenu?.viewId === view.id
-                        ? folderMenu.folder.id
-                        : null,
+                  contextId: menu?.viewId === view.id ? menu.node.id : null,
                   renamingId: renaming?.viewId === view.id ? renaming.id : null,
                   renameVal,
+                  renameError,
                   setRenameVal,
                   commitRename,
                   cancelRename,
@@ -927,46 +975,7 @@ export function LeftSidebar() {
           onClose={() => setNewSessionMenu(null)}
         />
       )}
-      {folderMenu && (
-        <ContextMenu
-          x={folderMenu.x}
-          y={folderMenu.y}
-          items={[
-            {
-              label: t("common.rename"),
-              onClick: () => setFolderDialog({ type: "rename", folder: folderMenu.folder }),
-            },
-            {
-              label: t("folder.delete"),
-              danger: true,
-              onClick: () => setFolderDialog({ type: "delete", folder: folderMenu.folder }),
-            },
-          ]}
-          onClose={() => setFolderMenu(null)}
-        />
-      )}
-
-      {collectionOpen && (
-        <FormModal
-          title={t("collection.title")}
-          fields={[
-            {
-              key: "name",
-              label: t("collection.name"),
-              placeholder: t("collection.namePlaceholder"),
-              required: true,
-              autoFocus: true,
-            },
-          ]}
-          submitLabel={t("collection.submit")}
-          onCancel={() => setCollectionOpen(false)}
-          onSubmit={(values) => {
-            setCollectionOpen(false);
-            void addVirtualProject(values.name.trim());
-          }}
-        />
-      )}
-      <ProjectFolderDialogs dialog={folderDialog} onClose={() => setFolderDialog(null)} />
+      {collectionDialog && <CollectionDialog route={collectionDialog} />}
 
       {dialogs}
 

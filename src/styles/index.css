@@ -57,10 +57,13 @@ body {
    xterm.css sets opacity:0 on the hidden textarea by default, so macOS WKWebView never fires
    compositionstart and the composing keystrokes of a Chinese or Japanese input method are sent to
    the terminal verbatim (typing produces uuuu instead of characters). A very small opacity fixes it:
-   invisible to the eye, yet the IME still treats the element as visible. */
+   invisible to the eye, yet the IME still treats the element as visible.
+   Outline: while composing, xterm sizes the textarea to the pre-edit overlay, and WebKit's default focus
+   ring (system accent blue) can then show as a line above and below the pre-edit text. */
 .xterm .xterm-helper-textarea {
   opacity: 0.01 !important;
   color: transparent !important;
+  outline: none !important;
 }
 
 /* Pre-edit overlay: terminal colours, and wrapped inside the terminal's right edge.
@@ -163,7 +166,7 @@ body {
 .vlx-btn-primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
 }
 .vlx-btn-primary:disabled {
   opacity: 0.5;

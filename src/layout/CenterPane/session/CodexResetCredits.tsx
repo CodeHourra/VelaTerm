@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import Icons from "../../../components/Icons";
 import { useT } from "../../../i18n";
+import { genId } from "../../../genId";
 import { codexResetCreditConsume, usageRefresh, type CodexResetOutcome } from "../../../ipc/commands";
 import { useTermStore } from "../../../store/termStore";
 import { ChipPopover } from "./extras";
@@ -42,7 +43,7 @@ export function CodexResetCredits() {
     setError(false);
     setOutcome(null);
     try {
-      const key = sessionStorage.getItem(PENDING_KEY) || crypto.randomUUID();
+      const key = sessionStorage.getItem(PENDING_KEY) || genId();
       // Persist before sending. If storage fails, no redemption request is sent.
       sessionStorage.setItem(PENDING_KEY, key);
       setPending(key);

@@ -22,7 +22,7 @@ _vlxc_query() {
   local saved_status=$? line=$READLINE_LINE point=$READLINE_POINT
   local quoting_locale=${LC_ALL:-${LC_CTYPE:-${LANG:-C}}}
   local LC_ALL=C
-  local i ch quote='' escape=0 start=0 end word='' spec func='' prev='' current='' candidate quoted REPLY
+  local i ch quote='' escape=0 start=0 end word='' spec func='' prev='' current='' candidate quoted path tilde suffix REPLY
   local -a words=() COMPREPLY=()
   _vlxc_buffer=$line _vlxc_cursor=$point
   _vlxc_values=() _vlxc_cursors=()
@@ -87,8 +87,32 @@ _vlxc_query() {
   for candidate in "${COMPREPLY[@]}"; do
     ((${#_vlxc_values[@]} >= 64)) && break
     [[ -n $candidate ]] || continue
-    [[ -d $candidate && $candidate != */ ]] && candidate+=/
-    LC_ALL=$quoting_locale printf -v quoted %q "$candidate"
+    path=$candidate tilde=''
+    if [[ ${line:start:1} == '~' && $candidate == '~'* ]]; then
+      tilde=${candidate%%/*}
+      # Evaluate only a validated tilde prefix; the candidate's path is never evaluated.
+      if [[ $tilde =~ ^~[a-zA-Z0-9_.+-]*$ ]]; then
+        eval "path=$tilde"
+        if [[ $path != "$tilde" ]]; then
+          path+=${candidate:${#tilde}}
+        else tilde='' path=$candidate
+        fi
+      else tilde=''
+      fi
+    fi
+    [[ -d $path && $candidate != */ ]] && candidate+=/
+    if [[ -n $tilde ]]; then
+      quoted=$tilde
+      # Keep the first slash unquoted so Bash still expands the tilde, even with $'...' quoting.
+      if [[ $candidate == */* ]]; then
+        quoted+=/
+        if [[ -n ${candidate#*/} ]]; then
+          LC_ALL=$quoting_locale printf -v suffix %q "${candidate#*/}"
+          quoted+=$suffix
+        fi
+      fi
+    else LC_ALL=$quoting_locale printf -v quoted %q "$candidate"
+    fi
     _vlxc_values+=("${line:0:start}${quoted}${line:end}")
     _vlxc_cursors+=($((start + ${#quoted})))
     _vlxc_hex "$candidate"
@@ -115,7 +139,8 @@ else
   PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND; }_vlxc_ready"
 fi
 if (( BASH_VERSINFO[0] > 4 || BASH_VERSINFO[1] >= 4 )); then
-  PS0="${PS0-}"'$(_vlxc_busy)'
+  # Literal protocol bytes work with promptvars disabled and preserve the user's PS0 expansion.
+  printf -v PS0 '%s\e]6973;%s;X\a' "${PS0-}" "$_vlxc_nonce"
 else
   # Older Bash has no pre-execution prompt hook.
   bind -x '"\e[99;1~":_vlxc_busy'

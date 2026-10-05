@@ -12,10 +12,10 @@ vi.mock("./engineSwitch", () => ({ useEngineSwitch: () => ({ switchTo: vi.fn(), 
 // Exercise the pane's orchestration; menu layout is covered separately by the controls themselves.
 vi.mock("./controls", () => ({
   LevelBar: () => null,
-  ControlChip: ({ title, label, value, options, onPick }: {
+  ControlChip: ({ title, label, value, options, onPick, disabled }: {
     title: string; label?: string; value: string; options: { value: string; label: string; tag?: string }[];
-    onPick: (value: string, keep: boolean) => void;
-  }) => <select aria-label={title} data-label={label} value={value} onChange={(event) => onPick(event.target.value, true)}>
+    onPick: (value: string, keep: boolean) => void; disabled?: boolean;
+  }) => <select aria-label={title} data-label={label} value={value} disabled={disabled} onChange={(event) => onPick(event.target.value, true)}>
     {options.map((option) => <option key={option.value} value={option.value}>{option.label}{option.tag ? ` — ${option.tag}` : ""}</option>)}
   </select>,
 }));
@@ -28,6 +28,7 @@ vi.mock("./permissionCards", () => ({
 import { invoke, listen, onTransportReconnect } from "../../../ipc/transport";
 import { COMPOSER_CHIP_IDS, DEFAULT_COMPOSER_INLINE_CHIPS } from "../../../store/settings";
 import { useTermStore } from "../../../store/termStore";
+import { MAX_IMAGES } from "./attachments";
 import { ChatPane } from "./ChatPane";
 import { useOutbox } from "./outbox";
 import { clearChatCache } from "./chatCache";
@@ -113,7 +114,7 @@ it("replays newer events over a late snapshot without losing history or restorin
   expect(screen.getByText("New queue")).toBeTruthy();
 });
 
-async function mountPane(kind: "claude" | "codex" | "opencode" = "claude", expectedModel: string | null = "old-model", mobile = false) {
+async function mountPane(kind: "claude" | "codex" | "opencode" | "antigravity" = "claude", expectedModel: string | null = "old-model", mobile = false) {
   const view = render(<ChatPane session={{ id: "s", projectId: "p", name: "Claude", kind, engine: "chat", collapsed: false, sortOrder: 0, createdAt: 0 }}
     area={{}} hidden={false} focused multi={false} mobile={mobile} onActivate={() => {}} onSplit={() => {}} onClose={() => {}} />);
   if (expectedModel !== null) await waitFor(() => expect((screen.getByRole("combobox", { name: "Model" }) as HTMLSelectElement).value).toBe(expectedModel));
@@ -1101,7 +1102,7 @@ it.each(["attachment", "rewind"] as const)("keeps history and the composer uncha
 });
 
 it("preserves all images when rewind exceeds the attachment limit and waits for excess images to be removed", async () => {
-  const images = Array.from({ length: 4 }, () => ({ mimeType: "image/png", data: "UE5H" }));
+  const images = Array.from({ length: MAX_IMAGES }, () => ({ mimeType: "image/png", data: "UE5H" }));
   snapshotOverrides = { rewindScopes: ["conversation"], rows: [{ kind: "user", id: "restore-limit", text: "Original", images }] };
   const previous = vi.mocked(invoke).getMockImplementation()!;
   vi.mocked(invoke).mockImplementation((command, args) => command === "chat_rewind"
@@ -1113,11 +1114,11 @@ it("preserves all images when rewind exceeds the attachment limit and waits for 
   fireEvent.click(screen.getByRole("button", { name: "Rewind from here" }));
   fireEvent.click(screen.getByRole("button", { name: "Rewind conversation" }));
   fireEvent.click(screen.getByRole("button", { name: "Rewind" }));
-  await waitFor(() => expect(container.querySelectorAll(".sv-attach-thumb")).toHaveLength(5));
+  await waitFor(() => expect(container.querySelectorAll(".sv-attach-thumb")).toHaveLength(MAX_IMAGES + 1));
   fireEvent.keyDown(input, { key: "Enter" });
-  expect(screen.getByText("A message can include up to 4 images")).toBeTruthy();
+  expect(screen.getByText(`A message can include up to ${MAX_IMAGES} images`)).toBeTruthy();
   expect(input.value).toBe("Original");
-  expect(container.querySelectorAll(".sv-attach-thumb")).toHaveLength(5);
+  expect(container.querySelectorAll(".sv-attach-thumb")).toHaveLength(MAX_IMAGES + 1);
   expect(vi.mocked(invoke).mock.calls.some(([command]) => command === "chat_send")).toBe(false);
   fireEvent.click([...container.querySelectorAll<HTMLButtonElement>(".sv-attach-drop")].at(-1)!);
   expect(container.querySelector(".sv-attach-note")).toBeNull();
@@ -1702,4 +1703,31 @@ it("switches Claude in Chrome for the conversation, remembers the default, and f
   await waitFor(() => expect((screen.getByRole("combobox", { name: "Claude in Chrome is on" }) as HTMLSelectElement).value).toBe("on"));
   act(() => eventCallback({ type: "chromeChanged", enabled: false }));
   expect((screen.getByRole("combobox", { name: "Claude in Chrome is off" }) as HTMLSelectElement).value).toBe("off");
+});
+
+
+it("Antigravity disables launch settings while working and queues Alt+Enter without steering", async () => {
+  const { container } = await mountPane("antigravity", null);
+  await waitFor(() => expect(container.querySelector('[data-chip="model"] select')).toBeTruthy());
+  act(() => useTermStore.setState({ runtimes: { s: { status: "running", agent: "antigravity", agentState: "working" } } }));
+  act(() => eventCallback({ type: "turnStarted", startedAt: Date.now() }));
+  for (const chip of ["model", "effort", "permission"]) {
+    expect(container.querySelector<HTMLButtonElement>(`[data-chip="${chip}"] select, [data-chip="${chip}"] button`)?.disabled).toBe(true);
+  }
+  expect(screen.queryByRole("button", { name: "Steer" })).toBeNull();
+  const input = container.querySelector<HTMLTextAreaElement>(".sv-composer textarea")!;
+  fireEvent.change(input, { target: { value: "Next request" } });
+  fireEvent.keyDown(input, { key: "Enter", altKey: true });
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("chat_send", expect.objectContaining({ behavior: "queue", text: "Next request" })));
+  act(() => useTermStore.setState({ runtimes: { s: { status: "running", agent: "antigravity", agentState: "waiting" } } }));
+  act(() => eventCallback({ type: "turnCompleted" }));
+  expect(container.querySelector<HTMLButtonElement>('[data-chip="model"] select')?.disabled).toBe(false);
+});
+
+it("Antigravity rejects dropped images with a clear text-only notice", async () => {
+  const { container } = await mountPane("antigravity", null);
+  fireEvent.drop(container.querySelector(".sv-composer")!, { dataTransfer: { files: [new File(["png"], "example.png", { type: "image/png" })] } });
+  await screen.findByText("Antigravity conversation view currently supports text messages only.");
+  expect(container.querySelector(".sv-attach-thumb")).toBeNull();
+  expect(container.querySelector<HTMLTextAreaElement>(".sv-composer textarea")?.placeholder).toBe("Message Antigravity, or use @files");
 });

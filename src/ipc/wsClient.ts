@@ -36,6 +36,7 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import nacl from "tweetnacl";
 
 import { t } from "../i18n";
+import { genId } from "../genId";
 import { handshakeFailureReason, mapBackendError, type HandshakeFailure } from "./backendError";
 import { recordRequestError } from "./reqLog";
 import { apiUrl, shareBasePath } from "./shareBase";
@@ -149,10 +150,7 @@ function getDeviceId(): string {
   try {
     let id = localStorage.getItem("vlx-device-id");
     if (!id) {
-      id =
-        typeof crypto !== "undefined" && crypto.randomUUID
-          ? crypto.randomUUID()
-          : Math.random().toString(36).slice(2) + Date.now().toString(36);
+      id = genId();
       localStorage.setItem("vlx-device-id", id);
     }
     return id;
@@ -802,7 +800,7 @@ class WsClient {
   ): Promise<PtySpawnResult> {
     const res = (await this.request(
       attachOnly
-        ? { t: "pty-spawn", sid, args: { ...args, diagnosticRequestId: crypto.randomUUID(), diagnosticOperationId: undefined }, attachOnly: true }
+        ? { t: "pty-spawn", sid, args: { ...args, diagnosticRequestId: genId(), diagnosticOperationId: undefined }, attachOnly: true }
         : { t: "pty-spawn", sid, args },
     )) as {
       pid: number;

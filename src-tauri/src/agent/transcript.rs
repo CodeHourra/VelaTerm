@@ -794,6 +794,7 @@ pub fn source_path(kind: SessionKind, agent_session_id: &str) -> Option<std::pat
         SessionKind::Claude => resume::find_claude_transcript(agent_session_id),
         SessionKind::Codex => resume::find_codex_rollout(agent_session_id),
         SessionKind::Grok => resume::find_grok_updates(agent_session_id),
+        SessionKind::Antigravity => crate::agent::antigravity::transcript_path(agent_session_id),
         SessionKind::Pi | SessionKind::Omp => resume::find_pi_session(kind, agent_session_id),
         // Kiro uses identity-aware multi-source reads; other non-file stores and plain terminals have no path.
         _ => None,
@@ -808,6 +809,10 @@ pub fn read_at(kind: SessionKind, path: &Path) -> Result<Vec<TranscriptMessage>,
         SessionKind::Codex => parse_file(path, parse_codex_line),
         SessionKind::Grok => parse_grok_file(path),
         SessionKind::Pi | SessionKind::Omp => parse_pi_file(path),
+        SessionKind::Antigravity => {
+            let content = std::fs::read_to_string(path).map_err(|e| format!("Failed to read transcript: {e}"))?;
+            Ok(merge(antigravity_pieces(&content).into_iter()))
+        }
         _ => Err("Transcript parsing is not supported for this session kind".to_string()),
     }
 }
@@ -821,8 +826,16 @@ fn parse_pi_file(path: &Path) -> Result<Vec<TranscriptMessage>, String> {
 }
 
 fn pi_pieces(content: &str) -> Vec<Piece> {
-    use crate::agent::export::{pi_events, Event};
-    pi_events(content)
+    event_pieces(crate::agent::export::pi_events(content))
+}
+
+fn antigravity_pieces(content: &str) -> Vec<Piece> {
+    event_pieces(crate::agent::chat::antigravity_protocol::events(content))
+}
+
+fn event_pieces(events: Vec<crate::agent::export::Event>) -> Vec<Piece> {
+    use crate::agent::export::Event;
+    events
         .into_iter()
         .filter_map(|event| match event {
             Event::User { text, ts } => Some(Piece {
@@ -891,9 +904,9 @@ pub fn read(kind: SessionKind, agent_session_id: &str) -> Result<Vec<TranscriptM
         SessionKind::Cursor => {
             Err("Transcript view is not supported for cursor sessions yet".to_string())
         }
-        // Antigravity transcript_path JSON logs are not integrated yet.
         SessionKind::Antigravity => {
-            Err("Transcript view is not supported for antigravity sessions yet".to_string())
+            let content = crate::agent::antigravity::read_transcript(agent_session_id)?;
+            Ok(merge(antigravity_pieces(&content).into_iter()))
         }
         // Cline stores session data in internal SQLite under ~/.cline/data/sessions.
         SessionKind::Cline => {

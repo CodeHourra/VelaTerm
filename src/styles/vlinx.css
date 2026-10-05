@@ -37,11 +37,13 @@
      override below. Explicit [data-theme] replaces these values once initialized. */
   --bg-0: oklch(0.2 0.006 260);
   --text: oklch(0.93 0.004 260);
+  --text-on-accent: #fff;
+  --accent-green-swatch: #3fcf8e;
 }
 /* Light startup fallback used only before data-theme is written. Equal specificity lets the later
    [data-theme] rules override it after initialization. */
 @media (prefers-color-scheme: light) {
-  :root { --bg-0: #ffffff; --text: oklch(0.28 0.008 260); --grok-brand-color: #000000; }
+  :root { --bg-0: #ffffff; --text: oklch(0.28 0.008 260); --text-on-accent: #fff; --grok-brand-color: #000000; }
 }
 [data-accent="green"]  { --accent: oklch(0.74 0.15 158); --accent-soft: oklch(0.74 0.15 158/.14); --accent-line: oklch(0.74 0.15 158/.5); }
 [data-accent="blue"]   { --accent: oklch(0.7 0.15 250);  --accent-soft: oklch(0.7 0.15 250/.16);  --accent-line: oklch(0.7 0.15 250/.5); }
@@ -51,22 +53,25 @@
 [data-density="compact"]  { --row-h: 24px; --ui-fs: 12px;   --term-fs: 12.5px; --pane-gap: 2px; }
 [data-density="comfy"]    { --row-h: 32px; --ui-fs: 13px;   --term-fs: 14px;  --pane-gap: 4px; }
 
-/* ---- DARK (default) ---- */
+/* ---- DARK ---- */
 [data-theme="dark"] {
   --grok-brand-color: #ffffff;
   --codex-brand-color: #c4c9d1;
-  --bg-0: oklch(0.2 0.006 260);     /* app frame */
-  --bg-1: oklch(0.205 0.006 260);   /* sidebars */
-  --bg-2: oklch(0.225 0.007 260);   /* raised: tabs, headers */
-  --bg-term: oklch(0.175 0.006 260);/* Terminal background source of truth. XTERM_THEME[dark].background must match to avoid visible seams. */
+  /* Classic dark surfaces retain the brighter auxiliary text approved for the dark scheme. */
+  --bg-0: oklch(0.2 0.006 260);                 /* app frame */
+  --bg-1: oklch(0.205 0.006 260);                 /* sidebars */
+  --bg-2: oklch(0.225 0.007 260);                 /* raised: tabs, headers */
+  --bg-term: oklch(0.175 0.006 260);              /* Keep XTERM_THEME[dark].background in sync to avoid visible seams. */
   --bg-hover: oklch(1 0 0 / 0.045);
   --bg-active: oklch(1 0 0 / 0.07);
   --border: oklch(1 0 0 / 0.08);
   --border-strong: oklch(1 0 0 / 0.14);
   --text: oklch(0.93 0.004 260);
-  --text-mid: oklch(0.72 0.006 260);
-  --text-dim: oklch(0.55 0.006 260);
-  --text-faint: oklch(0.42 0.006 260);
+  --text-mid: oklch(0.86 0.006 260);
+  --text-dim: oklch(0.8 0.006 260);
+  --text-faint: oklch(0.7 0.006 260);
+  --text-on-accent: #fff;
+  --accent-green-swatch: #3fcf8e;
   --shadow: 0 12px 34px -10px oklch(0 0 0 / 0.6);
   --term-cmd: oklch(0.93 0.004 260);
   --term-out: oklch(0.78 0.006 260);
@@ -81,6 +86,7 @@
 /* ---- LIGHT ---- */
 [data-theme="light"] {
   --grok-brand-color: #000000;
+  --text-on-accent: #fff;
   /* Pure white chrome/terminal base so light mode matches Codex-style white panels (not cool gray). */
   --bg-0: #ffffff;
   --bg-1: #ffffff;
@@ -207,6 +213,7 @@ button { font-family: inherit; color: inherit; background: none; border: none; c
 
 .col-head { height: 34px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 10px 0 12px; border-bottom: 1px solid var(--border); }
 .col-head .title { font-size: 10.5px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--text-dim); font-weight: 600; }
+.col-left .col-head .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .col-head .sp { flex: 1; }
 .icon-btn { width: 24px; height: 24px; display: grid; place-items: center; border-radius: var(--r-sm); color: var(--text-dim); }
 .icon-btn:hover { background: var(--bg-hover); color: var(--text); }
@@ -234,8 +241,6 @@ svg { display: block; }
 .sidebar-tree-body { position: relative; flex: 1; min-height: 0; }
 .sidebar-tree-footer { height: 30px; flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 4px; padding: 3px 6px; border-top: 1px solid var(--border); background: var(--bg-1); }
 .sidebar-tree-footer .icon-btn { flex: none; }
-/* The create action sits at the left end, away from the view controls on the right. */
-.sidebar-tree-footer .sidebar-tree-new-collection { margin-right: auto; }
 .sidebar-tree-divider { z-index: 6; }
 .sidebar-tree-divider.horizontal { width: 1px; cursor: col-resize; }
 .sidebar-tree-divider.vertical { height: 1px; cursor: row-resize; }
@@ -278,12 +283,9 @@ svg { display: block; }
    accent selection; remove it with the menu. Real multiselection retains its fill plus the border. */
 .row.context { background: var(--bg-active); color: var(--text); box-shadow: inset 0 0 0 1px var(--border-strong); }
 .row.sel.context { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent-line); }
-.row.active.session::before { content:""; position:absolute; left:0; top:5px; bottom:5px; width:2px; border-radius:2px; background: var(--accent); }
-/* Other panes of the active tab: the focused row's fill and bar at much lower contrast, so the whole split reads as
-   one group while the focused pane keeps the full highlight. Selection, hover and a context-menu target keep their
-   own fill, and an unread row keeps its full-strength yellow bar. */
+/* Other panes of the active tab use a low-contrast fill so the split reads as one group.
+   Selection, hover and a context-menu target keep their own fill. */
 .row.in-view.session:not(.sel):not(.context):not(:hover) { background: color-mix(in srgb, var(--accent-soft) 25%, transparent); }
-.row.in-view.session:not(.unread)::before { content:""; position:absolute; left:0; top:5px; bottom:5px; width:2px; border-radius:2px; background: var(--accent-line); opacity: .35; }
 .row .tw { width: 14px; flex: none; display: grid; place-items: center; color: var(--text-faint); }
 .row .tw.leaf { visibility: hidden; }
 .row .ic { width: 16px; flex: none; display: grid; place-items: center; position: relative; }
@@ -297,8 +299,7 @@ svg { display: block; }
 .row .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 .row.project .nm { font-weight: 700; color: var(--text); letter-spacing: 0.2px; }
 .row.group .nm { color: var(--text-mid); }
-.row.project-folder .nm { font-weight: 700; color: var(--text-mid); letter-spacing: 0.2px; }
-.row .folder-count { flex: none; min-width: 16px; text-align: right; color: var(--text-faint); font-size: 10px; }
+.row.collection .nm { font-weight: 700; color: var(--text-mid); letter-spacing: 0.2px; }
 .row.session .nm { font-weight: 400; }
 .row .meta { flex: none; min-width: 18px; justify-content: flex-end; color: var(--text-faint); font-size: 10px; opacity: 0; transition: opacity .1s; display: flex; gap: 2px; }
 .row:hover .meta { opacity: 1; }
@@ -313,9 +314,7 @@ svg { display: block; }
 .st-background { background: var(--cyan); }
 .st-idle { background: var(--text-faint); }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
-/* Unread notification cleared on open: left rail plus a ripple around the status dot. Yellow belongs
-   to the attention family used by counts and filters, distinct from the accent selection rail. */
-.row.session.unread:not(.sel)::before { content:""; position:absolute; left:0; top:5px; bottom:5px; width:2px; border-radius:2px; background: var(--yellow); }
+/* Unread notifications use a rippling status dot. Yellow matches the attention counts and filters. */
 .st-unread { background: var(--yellow); animation: unread-pulse 1s ease-in-out infinite; }
 @keyframes unread-pulse {
   0%, 100% { opacity: 1;    transform: scale(1.25); box-shadow: 0 0 7px 1px color-mix(in oklch, var(--yellow) 60%, transparent); }
@@ -415,7 +414,11 @@ svg { display: block; }
 .empty { flex: 1; display: grid; place-items: center; color: var(--text-faint); }
 .empty .inner { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 14px; }
 .empty .glyph { font-size: 30px; opacity: .5; }
-.empty kbd, .hint-kbd { font-family: inherit; padding: 2px 7px; border: 1px solid var(--border-strong); border-radius: 5px; color: var(--text-dim); font-size: 11px; }
+/* Use the system UI face so keyboard symbols retain their familiar proportions. */
+.empty kbd, .hint-kbd { font-family: var(--font-prose); padding: 2px 7px; border: 1px solid var(--border-strong); border-radius: 5px; color: var(--text-dim); font-size: 12px; letter-spacing: .04em; white-space: nowrap; }
+.empty-split-hints { display: flex; flex-direction: column; gap: var(--space-2, 8px); max-width: min(480px, 100%); color: var(--text-dim); }
+.empty-split-keys { display: flex; justify-content: center; flex-wrap: wrap; gap: var(--space-3, 12px) var(--space-4, 16px); }
+.empty-split-keys > span { display: inline-flex; align-items: center; gap: var(--space-2, 8px); }
 /* Shared empty-state primary action. A neutral outline blends in until hover adds accent feedback. */
 .empty-action { display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; border: 1px solid var(--border-strong); border-radius: var(--r-md); color: var(--text-mid); font-size: var(--ui-fs); transition: background .12s, color .12s, border-color .12s; }
 .empty-action:hover { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-line); }
@@ -662,3 +665,6 @@ svg { display: block; }
 .quit-btn.primary { border: 1px solid var(--accent); background: var(--accent); color: var(--bg-0); font-weight: 600; }
 .quit-btn.primary:hover { filter: brightness(1.06); }
 .quit-btn:disabled { opacity: .6; cursor: default; filter: none; }
+
+.sidebar-tree-error { display: flex; align-items: flex-start; gap: var(--space-2, 8px); margin: var(--space-2, 8px); padding: var(--space-2, 8px); border: 1px solid var(--status-error); border-radius: var(--r-sm); color: var(--status-error); font-size: 12px; }
+.sidebar-tree-error span { flex: 1; min-width: 0; overflow-wrap: anywhere; }

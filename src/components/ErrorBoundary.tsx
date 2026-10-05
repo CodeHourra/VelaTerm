@@ -37,7 +37,7 @@ function CrashScreen({ error }: { error: Error }) {
         <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>
           {t("err.renderTitle")}
         </div>
-        <div style={{ fontSize: 12, color: "#999", marginBottom: 14 }}>
+        <div style={{ fontSize: 12, color: "var(--text-dim, var(--text))", marginBottom: 14 }}>
           {t("err.renderDesc")}
         </div>
 
@@ -69,9 +69,9 @@ const containerStyle: React.CSSProperties = {
   inset: 0,
   display: "grid",
   placeItems: "center",
-  background: "#1a1a1a",
-  color: "#e0e0e0",
-  fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+  background: "var(--bg-0)",
+  color: "var(--text)",
+  fontFamily: "var(--font-mono)",
   zIndex: 99999,
 };
 
@@ -79,17 +79,17 @@ const cardStyle: React.CSSProperties = {
   maxWidth: 560,
   width: "90%",
   padding: 28,
-  background: "#242424",
-  border: "1px solid #333",
+  background: "var(--bg-2, color-mix(in srgb, var(--bg-0) 93%, var(--text)))",
+  border: "1px solid var(--border-strong, color-mix(in srgb, var(--text) 30%, var(--bg-0)))",
   borderRadius: 12,
 };
 
 const msgStyle: React.CSSProperties = {
   padding: "10px 12px",
-  background: "#2a1a1a",
-  border: "1px solid #5c2020",
+  background: "color-mix(in srgb, var(--red, var(--text)) 12%, var(--bg-0))",
+  border: "1px solid var(--red, var(--text))",
   borderRadius: 6,
-  color: "#ff8080",
+  color: "var(--red, var(--text))",
   fontSize: 12.5,
   lineHeight: 1.5,
   wordBreak: "break-word",
@@ -100,12 +100,12 @@ const stackStyle: React.CSSProperties = {
   margin: 0,
   marginBottom: 16,
   padding: "10px 12px",
-  background: "#1e1e1e",
-  border: "1px solid #333",
+  background: "var(--bg-0)",
+  border: "1px solid var(--border, color-mix(in srgb, var(--text) 30%, var(--bg-0)))",
   borderRadius: 6,
   fontSize: 11,
   lineHeight: 1.5,
-  color: "#aaa",
+  color: "var(--text-mid, var(--text))",
   overflow: "auto",
   maxHeight: 200,
   whiteSpace: "pre-wrap",
@@ -116,8 +116,8 @@ const btnStyle: React.CSSProperties = {
   padding: "8px 20px",
   border: "none",
   borderRadius: 6,
-  background: "#4a9eff",
-  color: "#fff",
+  background: "var(--accent)",
+  color: "var(--text-on-accent)",
   fontSize: 13,
   fontWeight: 600,
   cursor: "pointer",

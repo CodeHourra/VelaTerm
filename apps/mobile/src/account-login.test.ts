@@ -40,6 +40,19 @@ test('server expiry stops polling and allows a fresh login',async()=>{
   await login.start();assert.equal(login.state.phase,'error');assert.equal(login.active,false);
 });
 
+test('closing an unapproved sign-in browser stops waiting and permits another sign-in',async()=>{
+  let starts=0;
+  const login=new AccountLogin(async action=>{
+    if(action==='login'){starts++;return {}};
+    if(starts===1)throw Object.assign(new Error('cancelled'),{code:'ACCOUNT_LOGIN_CANCELLED'});
+    return {linked:true};
+  });
+  await login.start();
+  assert.equal(login.active,false);assert.equal(login.state.phase,'error');
+  assert.equal(login.state.message,'chat.auth.canceled');
+  await login.start();assert.equal(starts,2);assert.equal(login.state.phase,'linked');
+});
+
 test('a response from an abandoned login cannot overwrite the next account state',async()=>{
   let resolve!:(value:{linked:boolean})=>void;
   const login=new AccountLogin(async()=>new Promise(done=>{resolve=done}));

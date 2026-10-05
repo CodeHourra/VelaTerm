@@ -134,3 +134,80 @@ describe("startSettingsWatch", () => {
     expect(() => stop()).not.toThrow();
   });
 });
+
+describe("theme choices during startup", () => {
+  async function freshWatch() {
+    vi.resetModules();
+    return import("./settingsWatch");
+  }
+
+  it("applies a queued choice after hydration and preserves backend preferences", async () => {
+    const watch = await freshWatch();
+    const sync = await import("../ipc/settingsSync");
+    localStorage.setItem("vlx-settings", JSON.stringify({ darkStyle: "soft", accent: "green" }));
+    let answer: (settings: Record<string, string>) => void = () => {};
+    invoke.mockReturnValueOnce(new Promise<Record<string, string>>((resolve) => { answer = resolve; }));
+    const order: string[] = [];
+    hydrateSettingsFromCache.mockImplementationOnce(() => { order.push("hydrate"); });
+    const refresh = watch.refreshSettingsFromBackend();
+    watch.runAfterInitialSettings(() => {
+      order.push("choose");
+      const settings = JSON.parse(localStorage.getItem("vlx-settings")!);
+      const json = JSON.stringify({ ...settings, darkStyle: "classic" });
+      localStorage.setItem("vlx-settings", json);
+      sync.pushSetting("vlx-settings", json);
+    });
+    expect(order).toEqual([]);
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith("get_app_settings"));
+    answer({ "vlx-settings": JSON.stringify({ darkStyle: "soft", accent: "blue" }) });
+    await refresh;
+    invoke.mockResolvedValueOnce(undefined);
+    await sync.flushNow();
+
+    expect(order).toEqual(["hydrate", "choose"]);
+    expect(JSON.parse(localStorage.getItem("vlx-settings")!)).toEqual({ darkStyle: "classic", accent: "blue" });
+    expect(invoke).toHaveBeenLastCalledWith("set_app_settings", {
+      entries: { "vlx-settings": JSON.stringify({ darkStyle: "classic", accent: "blue" }) },
+    });
+  });
+
+  it("waits for overlapping initial reads before applying the latest choice", async () => {
+    const watch = await freshWatch();
+    const answers: Array<(settings: Record<string, string>) => void> = [];
+    invoke.mockImplementation(() => new Promise<Record<string, string>>((resolve) => { answers.push(resolve); }));
+    const first = watch.refreshSettingsFromBackend();
+    const second = watch.refreshSettingsFromBackend();
+    const choose = vi.fn();
+    watch.runAfterInitialSettings(() => choose("classic"));
+    watch.runAfterInitialSettings(() => choose("soft"));
+    await vi.waitFor(() => expect(answers).toHaveLength(2));
+    answers[1]({});
+    await second;
+    expect(choose).not.toHaveBeenCalled();
+    answers[0]({});
+    await first;
+
+    expect(choose.mock.calls).toEqual([["classic"], ["soft"]]);
+  });
+
+  it("applies later choices immediately after startup with an unchanged cache", async () => {
+    const watch = await freshWatch();
+    invoke.mockResolvedValueOnce({});
+    await watch.refreshSettingsFromBackend();
+    const choose = vi.fn();
+    watch.runAfterInitialSettings(choose);
+
+    expect(choose).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases a queued choice when the initial backend read fails", async () => {
+    const watch = await freshWatch();
+    invoke.mockRejectedValueOnce(new Error("offline"));
+    const refresh = watch.refreshSettingsFromBackend();
+    const choose = vi.fn();
+    watch.runAfterInitialSettings(choose);
+    await refresh;
+
+    expect(choose).toHaveBeenCalledTimes(1);
+  });
+});

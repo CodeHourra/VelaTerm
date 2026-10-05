@@ -46,9 +46,9 @@ function kindLabel(kind: SessionKind): string {
   if (kind === "pi") return "Pi";
   if (kind === "omp") return "OMP";
   if (kind === "crush") return "Crush";
-  if (kind === "kimi") return "Kimi Code (K3)";
+  if (kind === "kimi") return "Kimi Code";
   if (kind === "kiro") return "Kiro";
-  if (kind === "grok") return "Grok Build (Grok 4.5)";
+  if (kind === "grok") return "Grok Build";
   if (kind === "zoo") return "Zoo Code";
   return t("kind.browser");
 }
@@ -709,7 +709,7 @@ export function PermissionSeg() {
                     borderRadius: 5,
                     border: "1px solid var(--accent)",
                     background: "var(--accent)",
-                    color: "#fff",
+                    color: "var(--text-on-accent)",
                     cursor: "pointer",
                     display: "inline-flex",
                     alignItems: "center",

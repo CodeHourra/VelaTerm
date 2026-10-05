@@ -4,10 +4,11 @@ import { diagnosticEvent, } from "../ipc/transport";
 //! The center area uses tabs containing recursively splittable pane trees.
 
 import { create } from "zustand";
+import { navigateProjectDialog, readProjectDialogCollection, writeDialogDraft } from "../remote/dialogNavigation";
 import { DEFAULT_CONVERSATION_FONT_SIZE, normalizeTextSize, normalizeTextLineHeight } from "../theme";
 import { t } from "../i18n";
 import { setBrowserUrl } from "../ipc/browser";
-import { chatClear, setSessionEngine, type ChatBackgroundTask } from "../ipc/chat";
+import { chatClear, chatStop, setSessionEngine, type ChatBackgroundTask } from "../ipc/chat";
 import {
   getSessionCwd,
   ptyKill,
@@ -76,6 +77,7 @@ import {
   loadTheme,
   resolveTheme,
   type AccentChoice,
+  type DarkStyle,
   type Density,
   type DividerStyle,
   type InspectorTab,
@@ -92,7 +94,6 @@ import type {
   Group,
   NodeKind,
   Project,
-  ProjectFolder,
   Session,
   SessionId,
   SessionEngine,
@@ -852,8 +853,8 @@ interface TermStore {
   // Persistent structure loaded from SQLite.
   projects: Project[];
   groups: Group[];
-  /** Sidebar folders grouping projects, in no particular order; see arrangeProjectsInFolders. */
-  projectFolders: ProjectFolder[];
+  /** Last failed sidebar mutation, displayed until dismissed or a successful retry. */
+  treeMutationError: string | null;
   sessions: Session[];
   /** Archived sessions loaded on demand for the knowledge-base Collections view. */
   archivedSessions: Session[];
@@ -1045,6 +1046,7 @@ interface TermStore {
   recordSessions: boolean;
 
   // Vlinx appearance settings, driven by `data-*` attributes and persisted in `vlx-settings`.
+  darkStyle: DarkStyle;
   accent: AccentChoice;
   density: Density;
   paneStyle: PaneStyle;
@@ -1133,18 +1135,18 @@ interface TermStore {
   loadTree: () => Promise<void>;
   /** Reload the preset list; called at startup and on the cross-client presets-changed broadcast. */
   loadAgentPresets: () => Promise<void>;
-  importProject: () => Promise<void>;
+  importProject: (collectionId?: string | null) => Promise<void>;
   /** Imports a project selected by the browser directory picker. */
   importProjectPath: (rootPath: string) => Promise<void>;
   /** Handles `vela <path>` by importing or reusing, expanding, selecting, and revealing the project. */
-  openProjectPath: (rootPath: string) => Promise<void>;
-  /** Creates a collection: a top-level container bound to no folder, then selects and reveals it. */
-  addVirtualProject: (name: string) => Promise<void>;
+  openProjectPath: (rootPath: string, collectionId?: string | null) => Promise<void>;
+  /** Creates a collection with no directory of its own, optionally under a parent, then selects and reveals it. */
+  addVirtualProject: (name: string, collectionId?: string | null) => Promise<void>;
   /** Expands, selects, and reveals a just-created or just-imported project, clearing sidebar filters. */
   revealFreshProject: (projectId: string) => Promise<void>;
-  setDirPickerOpen: (open: boolean) => void;
+  setDirPickerOpen: (open: boolean, collectionId?: string | null) => void;
   /** Opens or closes the create-project dialog. */
-  setCreateProjectModalOpen: (open: boolean) => void;
+  setCreateProjectModalOpen: (open: boolean, collectionId?: string | null) => void;
   /** Opens or closes Settings. */
   setSettingsOpen: (open: boolean) => void;
   /** Opens or closes Share. */
@@ -1273,7 +1275,7 @@ interface TermStore {
   ) => void;
   closeTab: (tabId: SessionId) => void;
   /**
-   * Closes a background tab without restoring it, removing its tree so unmount kills or detaches the process.
+   * Ends each background session through its engine and removes the tab without restoring it.
    */
   closeLiveTab: (tabId: string) => void;
   /**
@@ -1479,6 +1481,7 @@ interface TermStore {
   closeSearch: () => void;
 
   // Persisted Vlinx appearance settings applied through `data-*` attributes.
+  setDarkTheme: (style: DarkStyle) => void;
   setAccent: (v: AccentChoice) => void;
   setDensity: (v: Density) => void;
   setPaneStyle: (v: PaneStyle) => void;
@@ -1683,6 +1686,7 @@ function mergeLaunchChoice(
 function persistAndApplyVisual(getState: () => TermStore) {
   const s = getState();
   const ps: PersistedSettings = {
+    darkStyle: s.darkStyle,
     accent: s.accent,
     density: s.density,
     paneStyle: s.paneStyle,
@@ -1805,7 +1809,7 @@ function primaryViewAliases(
 function snapshotCollapsed(
   state: Pick<
     TermStore,
-    "projects" | "groups" | "projectFolders" | "sessions" | "ephemeralSessions"
+    "projects" | "groups" | "sessions" | "ephemeralSessions"
   >,
   source: SidebarTreeView,
 ): Record<string, boolean> {
@@ -1816,7 +1820,6 @@ function snapshotCollapsed(
   };
   for (const project of state.projects) put(project.id, project.collapsed);
   for (const group of state.groups) put(group.id, group.collapsed);
-  for (const folder of state.projectFolders) put(folder.id, folder.collapsed);
   for (const session of state.sessions) put(session.id, session.collapsed);
   for (const [id, ephemeral] of Object.entries(state.ephemeralSessions)) {
     put(id, ephemeral.collapsed);
@@ -1911,10 +1914,21 @@ const initialPrimarySidebarView =
     (view) => view.id === initialSidebarViews.primaryId,
   ) ?? initialSidebarViews.views[0];
 
+/** Explicit tab closure must stop each session through its own engine before its view unmounts. */
+function stopTabSessions(state: TermStore, tabId: string): void {
+  const paneTree = state.paneTrees[tabId];
+  if (!paneTree) return;
+  for (const sid of collectSessionIds(paneTree)) {
+    const session = state.sessions.find((s) => s.id === sid) ?? state.ephemeralSessions[sid];
+    const stop = session?.engine === "chat" ? chatStop : ptyKill;
+    void stop(sid).catch(() => {});
+  }
+}
+
 export const useTermStore = create<TermStore>((set, get) => ({
   projects: [],
   groups: [],
-  projectFolders: [],
+  treeMutationError: null,
   sessions: [],
   archivedSessions: [],
   treeLoaded: false,
@@ -2112,7 +2126,6 @@ export const useTermStore = create<TermStore>((set, get) => ({
       return {
         projects: t.projects,
         groups: t.groups,
-        projectFolders: t.folders ?? [],
         sessions: t.sessions,
         treeLoaded: true,
         runtimes,
@@ -2126,30 +2139,30 @@ export const useTermStore = create<TermStore>((set, get) => ({
     });
   },
 
-  importProject: async () => {
+  importProject: async (collectionId) => {
     // Desktop shells use a native directory dialog; browser and remote windows use the server-side picker.
     // Do not key this on `hasNativeHost`, because remote windows can have a host without a usable native dialog.
     if (!isTauri && !platform.env.isElectron) {
-      set({ dirPickerOpen: true });
+      get().setDirPickerOpen(true, collectionId ?? null);
       return;
     }
     const picked = await platform.dialog.pickDirectory();
     if (!picked) return; // User canceled.
-    await get().openProjectPath(picked);
+    await get().openProjectPath(picked, collectionId);
   },
 
   importProjectPath: async (rootPath) => {
-    await get().openProjectPath(rootPath);
-    set({ dirPickerOpen: false });
+    await get().openProjectPath(rootPath, readProjectDialogCollection());
+    get().setDirPickerOpen(false);
   },
 
-  openProjectPath: async (rootPath) => {
-    const project = await tree.importProject(rootPath);
+  openProjectPath: async (rootPath, collectionId) => {
+    const project = await tree.importProject(rootPath, collectionId);
     await get().revealFreshProject(project.id);
   },
 
-  addVirtualProject: async (name) => {
-    const project = await tree.createVirtualProject(name);
+  addVirtualProject: async (name, collectionId) => {
+    const project = await tree.createVirtualProject(name, collectionId);
     await get().revealFreshProject(project.id);
   },
 
@@ -2185,23 +2198,25 @@ export const useTermStore = create<TermStore>((set, get) => ({
     saveSidebarViewsTick(get);
   },
 
-  setDirPickerOpen: (open) => set({ dirPickerOpen: open }),
-  setCreateProjectModalOpen: (open) => set({ createProjectModalOpen: open }),
+  setDirPickerOpen: (open, collectionId) => { navigateProjectDialog("open", open, false, collectionId); set({ dirPickerOpen: open }); },
+  setCreateProjectModalOpen: (open, collectionId) => { navigateProjectDialog("create", open, false, collectionId); set({ createProjectModalOpen: open }); },
   setSettingsOpen: (open) => set({ settingsOpen: open }),
   setShareOpen: (open) => set({ shareOpen: open }),
   setErrorLogOpen: (open) => set({ errorLogOpen: open }),
 
-  setCloneModalOpen: (open) => set({ cloneModalOpen: open }),
+  setCloneModalOpen: (open) => { navigateProjectDialog("clone", open); set({ cloneModalOpen: open }); },
 
   cloneProjectInto: async (url, parentDir, folderName, branch, operationId) => {
     // Let the dialog display Git errors; close and reload only after success.
     await tree.cloneProject(url, parentDir, folderName, branch, operationId);
-    set({ cloneModalOpen: false });
+    get().setCloneModalOpen(false);
     await get().loadTree();
   },
 
   promptSaveAs: (defaultName) =>
     new Promise<string | null>((resolve) => {
+      navigateProjectDialog("save", true);
+      writeDialogDraft("saveName", defaultName);
       set({ saveAsRequest: { defaultName, resolve } });
     }),
 
@@ -2636,7 +2651,16 @@ export const useTermStore = create<TermStore>((set, get) => ({
           p.id === id ? { ...p, collapsed: next } : p,
         ),
       }));
-      tree.setCollapsed("project", id, next).catch(() => {});
+      try {
+        await tree.setCollapsed("project", id, next);
+        set({ treeMutationError: null });
+      } catch (error) {
+        set((state) => ({
+          projects: state.projects.map((p) => p.id === id && p.collapsed === next ? { ...p, collapsed: cur.collapsed } : p),
+          treeMutationError: error instanceof Error ? error.message : String(error),
+        }));
+        await get().loadTree();
+      }
     } else if (kind === "group") {
       const cur = get().groups.find((g) => g.id === id);
       if (!cur) return;
@@ -2884,13 +2908,8 @@ export const useTermStore = create<TermStore>((set, get) => ({
 
   closeTab: (tabId) => {
     // Explicit tab closure terminates all contained sessions here. Unmount also serves automatic detach-only
-    // flows in browser mode, so it cannot express user intent reliably. Repeated desktop kill is idempotent.
-    const closingTree = get().paneTrees[tabId];
-    if (closingTree) {
-      for (const sid of collectSessionIds(closingTree)) {
-        void ptyKill(sid).catch(() => {});
-      }
-    }
+    // flows in browser mode, so it cannot express user intent reliably. Repeated stops are idempotent.
+    stopTabSessions(get(), tabId);
     set((state) => {
       const idx = state.openTabs.indexOf(tabId);
       const openTabs = state.openTabs.filter((t) => t !== tabId);
@@ -3190,12 +3209,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
     // Manual background-tab closure expresses termination intent and must kill server processes in browser mode.
     // Automatic overflow eviction remains detach-only because it is not an explicit user close.
     if (get().liveTabs.includes(tabId)) {
-      const closingTree = get().paneTrees[tabId];
-      if (closingTree) {
-        for (const sid of collectSessionIds(closingTree)) {
-          void ptyKill(sid).catch(() => {});
-        }
-      }
+      stopTabSessions(get(), tabId);
     }
     set((state) => {
       if (!state.liveTabs.includes(tabId)) return {};
@@ -4228,14 +4242,14 @@ export const useTermStore = create<TermStore>((set, get) => ({
   toggleBottom: () => set((s) => ({ bottomExpanded: !s.bottomExpanded })),
   toggleTheme: () => {
     const mode: Theme = get().theme === "dark" ? "light" : "dark";
-    applyTheme(mode);
+    applyTheme(mode, get().darkStyle);
     pushSetting("vlx-theme", mode); // Mirror to backend for cross-shell sharing.
     persistAndApplyVisual(get); // Re-resolve automatic accents and publish `vlx-settings`.
     set({ theme: mode });
     notifyAgentsColorScheme(get);
   },
   setTheme: (mode) => {
-    applyTheme(mode);
+    applyTheme(mode, get().darkStyle);
     pushSetting("vlx-theme", mode); // Mirror to backend for cross-shell sharing.
     persistAndApplyVisual(get);
     set({ theme: mode });
@@ -4544,6 +4558,10 @@ export const useTermStore = create<TermStore>((set, get) => ({
   closeSearch: () => set({ searchOpen: false }),
 
   // ── Vlinx appearance: update, persist, and apply `data-*` ──
+  setDarkTheme: (style) => {
+    set({ darkStyle: style });
+    get().setTheme("dark");
+  },
   setAccent: (v) => {
     set({ accent: v });
     persistAndApplyVisual(get);
@@ -4750,7 +4768,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
     persistAndApplyVisual(get);
   },
   applyAppearance: () => {
-    applyTheme(get().theme);
+    applyTheme(get().theme, get().darkStyle);
     persistAndApplyVisual(get);
     notifyAgentsColorScheme(get);
   },
@@ -4766,7 +4784,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
       cleanPastedImages: loadCleanPastedImages(),
       recordSessions: loadRecordSessions(),
     });
-    applyTheme(theme);
+    applyTheme(theme, ps.darkStyle);
     applyVisual(visualOf(ps));
     notifyAgentsColorScheme(get);
   },

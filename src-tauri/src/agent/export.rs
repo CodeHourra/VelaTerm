@@ -106,6 +106,11 @@ pub fn export_markdown(
                 .ok_or("Pi session file not found")?;
             (path, pi_events(&resume::read_pi_transcript(kind, agent_session_id)?))
         }
+        SessionKind::Antigravity => {
+            let path = crate::agent::antigravity::transcript_path(agent_session_id)
+                .ok_or("Antigravity transcript file not found")?;
+            (path, crate::agent::chat::antigravity_protocol::events(&crate::agent::antigravity::read_transcript(agent_session_id)?))
+        }
         SessionKind::Terminal => {
             return Err("Terminal sessions have no agent transcript".to_string())
         }

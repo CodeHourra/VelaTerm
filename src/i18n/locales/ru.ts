@@ -222,7 +222,7 @@ const ru: typeof en = {
   "memory.collectionConversation": "Диалог",
   "memory.collectionEmptyEntries": "В этом диалоге пока нет статей базы знаний.",
   "memory.title": "База знаний",
-  "memory.add": "Подготовить для базы знаний сеансов",
+  "memory.add": "Добавить в базу знаний",
   "memory.intro": "Упорядочивайте знания по проектам и сеансам. Сохранённые статьи не зависят от изменений источников и доступны для ручного редактирования.",
   "memory.entries": "Статьи базы знаний",
   "memory.emptyJobs": "История обработки пока пуста.",
@@ -304,11 +304,25 @@ const ru: typeof en = {
   "chat.sync.loading": "Синхронизация переписки…",
   "chat.sync.failed": "Не удалось синхронизировать. Загруженные сообщения по-прежнему доступны.",
   "chat.sync.history": "Загрузить более ранние сообщения",
+  "chat.rail.title": "Ваши сообщения",
+  "chat.rail.imageMessage": "Сообщение с изображением",
+  "chat.rail.emptyMessage": "Пустое сообщение",
+  "chat.rail.loading": "Загрузка предыдущих сообщений…",
+  "chat.rail.unavailable": "Это сообщение больше недоступно.",
+  "chat.rail.failed": "Не удалось загрузить сообщение.",
   "chat.submission.updateRequired": "Обновите сервер, прежде чем отправлять сообщения из этого клиента.",
   "chat.submission.sending": "Отправка…",
   "chat.submission.sent": "Отправлено",
   "chat.submission.queued": "В очереди",
   "chat.submission.failed": "Ошибка отправки",
+  "chat.recovery.savedSubmission": "Сохранённая отправка (соответствие исходному сообщению ещё не установлено)",
+  "chat.recovery.saveError": "Не удалось сохранить на этом устройстве сообщение, ожидающее подтверждения.",
+  "chat.recovery.readError": "Не удалось восстановить на этом устройстве сообщения, ожидающие подтверждения.",
+  "chat.recovery.writerBlocked": "Не удалось проверить, какой процесс управляет этой сессией. Перед продолжением убедитесь, что её не использует другой экземпляр приложения или предыдущий агент.",
+  "chat.recovery.interrupted": "Агент остановился до подтверждения завершения работы. Перед продолжением проверьте историю.",
+  "chat.recovery.paused": "Сообщения в очереди сохранены. Отправка приостановлена до тех пор, пока вы не решите её возобновить.",
+  "chat.recovery.resumeQueue": "Возобновить отправку",
+  "chat.recovery.continue": "Продолжить прерванную работу",
   "chat.submission.unknown": "Доставка не подтверждена",
   "chat.submission.check": "Проверить статус",
   "common.retry": "Повторить", // Retry
@@ -347,6 +361,7 @@ const ru: typeof en = {
   "titlebar.hotReloadedAt": (time) => `Горячая перезагрузка в ${time}`, // Hot reloaded at {time}
   "titlebar.themeSystem": (resolved) => `Как в системе (сейчас: ${resolved})`, // Follow system (currently {resolved})
   "titlebar.themeDark": "Тёмная", // Dark
+  "titlebar.themeClassicDark": "Классическая тёмная", // Classic Dark
   "titlebar.themeLight": "Светлая", // Light
   "titlebar.gameCenter": "Игровой центр",
   "titlebar.browser": "Встроенный браузер", // Built-in Browser
@@ -708,8 +723,33 @@ const ru: typeof en = {
   "settings.scRecording": "Нажмите клавиши…", // Press keys…
   "settings.scHint":
     "Нажмите на сочетание, затем нажмите новую комбинацию (нужен Cmd/Ctrl).", // hint
+  "settings.scScreenshotSection": "Снимок экрана",
+  "settings.scScreenshot": "Сделать снимок экрана",
+  "settings.scOff": "Выключено",
+  "settings.scScreenshotHint":
+    "Работает в любом приложении, даже когда VelaTerm в фоне. Чтобы отключить, нажмите на сочетание, а затем на клавишу Delete.",
+  "settings.scConflictTabs": "Уже используется для переключения вкладок",
+  "settings.scInUse": "Это сочетание уже занято другим приложением",
   "settings.scReset": "Сбросить по умолчанию", // Restore defaults
   "settings.scConflict": (label: string) => `Уже используется «${label}»`, // conflict
+
+  // ── Screenshot overlay ──
+  "screenshot.hint": "Выделите область перетаскиванием или щёлкните, чтобы снять весь экран",
+  "screenshot.rect": "Прямоугольник",
+  "screenshot.ellipse": "Эллипс",
+  "screenshot.arrow": "Стрелка",
+  "screenshot.pen": "Карандаш",
+  "screenshot.mosaic": "Мозаика",
+  "screenshot.text": "Текст",
+  "screenshot.undo": "Отменить действие",
+  "screenshot.save": "Сохранить",
+  "screenshot.cancel": "Отмена",
+  "screenshot.done": "Готово",
+  "screenshot.doneTip": "Скопировать в буфер обмена (Enter)",
+  "screenshot.small": "Мелкий",
+  "screenshot.medium": "Средний",
+  "screenshot.large": "Крупный",
+  "screenshot.failed": (detail: string) => `Не удалось экспортировать снимок экрана: ${detail}`,
 
   // ── Remote access panel ──
   "remote.title": "Удалённый доступ (браузер)", // Remote Access (Browser)
@@ -836,6 +876,7 @@ const ru: typeof en = {
   "tree.moveToSession": "Переместить под сессию (сделать дочерней)", // Move under a session (as child)
   "tree.moveTo": "Переместить в…", // Move to…
   "tree.openNewTab": "Открыть в новой вкладке", // Open in New Tab
+  "tree.openInSplit": "Открыть в панели", // Open in Split
   "tree.openSplitRight": "Открыть в панели справа", // Open in Split Right
   "tree.openSplitDown": "Открыть в панели снизу", // Open in Split Down
   "tree.openInFocusedPane": "Открыть в активной панели", // Open in Focused Pane
@@ -843,6 +884,18 @@ const ru: typeof en = {
   "tree.tileSelectedTooMany": "Разложить плиткой (не больше 4 сессий)", // Tile Selected Sessions (up to 4)
   "tree.forkSession": "Форкнуть сессию", // Fork Session
   "tree.exportSession": "Экспортировать сессию…", // Export Session…
+  "sessionTitle.rename": "Умное переименование",
+  "sessionTitle.chooseAgentHint": "Агент этого сеанса недоступен. Выберите другого агента; будут использованы его настройки по умолчанию.",
+  "sessionTitle.agentUnavailable": "Выбранный агент недоступен. Выберите другого агента или проверьте его настройки.",
+  "sessionTitle.generating": "Создание заголовка…",
+  "sessionTitle.unavailable": "Для этого сеанса нет доступной для чтения переписки.",
+  "sessionTitle.noAgent": "Ни один поддерживаемый агент не установлен. Для создания заголовков установите Claude, Codex, OpenCode, Pi, OMP или Grok.",
+  "sessionTitle.busy": "Для этого сеанса уже создаётся заголовок.",
+  "sessionTitle.tooLarge": "Переписка слишком длинная для создания заголовка. Текущий заголовок сохранён.",
+  "sessionTitle.timeout": "Время создания заголовка истекло. Повторите попытку.",
+  "sessionTitle.invalid": "Агент вернул некорректный заголовок. Повторите попытку.",
+  "sessionTitle.changed": "Сеанс изменился во время создания заголовка, поэтому заголовок не был обновлён.",
+  "sessionTitle.failed": "Агенту не удалось создать заголовок. Повторите попытку.",
   "tree.sessionInfo": "Сведения о сессии", // Session Info
   "tree.groupInfo": "Сведения о группе", // Group Info
   "tree.collectionInfo": "Сведения о коллекции", // Collection Info
@@ -861,7 +914,6 @@ const ru: typeof en = {
   "tree.persistDoc": "Сохранить на диск…", // Save to Disk…
   "tree.closeScratch": "Закрыть черновик", // Close Scratch
   "tree.importProject": "Импортировать проект", // Import Project
-  "tree.openInSplit": "Открыть в панели", // Open in Split
   "tree.createProject": "Создать проект",
   "tree.dropFoldersHint": "Перетащите папки сюда, чтобы добавить их как проекты",
   // New Collection / Collection name / research / Create Collection / No directory / Delete Collection
@@ -871,30 +923,20 @@ const ru: typeof en = {
   "collection.name": "Название коллекции",
   "collection.namePlaceholder": "research",
   "collection.submit": "Создать коллекцию",
+  "collection.duplicateName": "Коллекция с таким названием уже существует.",
   "collection.tag": "Без каталога",
   "collection.deleteTitle": "Удалить коллекцию",
   "collection.deleteBody": (name) =>
-    `Удалить коллекцию «${name}»? Все её группы и сессии тоже будут удалены. Это действие нельзя отменить.`,
-  "folder.projectCount": (count) => `${count} ${plural(count, "проект", "проекта", "проектов")}`, // {count} projects
-  "folder.new": "Новая папка", // New Folder
-  "folder.createTitle": "Новая папка", // New Folder
-  "folder.renameTitle": "Переименовать папку", // Rename Folder
-  "folder.name": "Имя папки", // Folder name
-  "folder.namePlaceholder": "payments", // payments
-  "folder.create": "Создать папку", // Create Folder
-  "folder.delete": "Удалить папку", // Delete Folder
-  "folder.deleteTitle": "Удалить папку", // Delete Folder
-  "folder.deleteBody": (name) =>
-    `Удалить папку «${name}»? Проекты в ней сохранятся и будут перемещены из папки.`, // Delete folder "{name}"? The projects inside are kept and moved out of the folder.
-  "folder.moveTo": "Переместить в папку", // Move to Folder
-  "folder.none": "Без папки", // No Folder
+    `Удалить коллекцию «${name}»? Её проекты будут перенесены на верхний уровень со всем содержимым. Группы и неархивированные сессии, относящиеся непосредственно к коллекции, будут удалены; архивированные сессии сохранятся.`,
+  "collection.projectCount": (count) => `${count} ${plural(count, "проект", "проекта", "проектов")}`, // {count} projects
+  "collection.renameTitle": "Переименовать коллекцию",
+  "collection.moveTo": "Переместить в коллекцию",
+  "collection.none": "Верхний уровень",
   "tree.cloneProject": "Клонировать из Git", // Clone from Git
   "createProject.title": "Создать проект",
   "createProject.name": "Название проекта",
   "createProject.namePlaceholder": "мой-проект",
-  "createProject.into": "Создать в",
   "createProject.choose": "Выбрать…",
-  "createProject.noParent": "Выберите родительскую папку",
   "createProject.invalidName": "Введите одно имя папки без / и \\.",
   "createProject.creating": "Создание…",
   "createProject.submit": "Создать проект",
@@ -905,9 +947,6 @@ const ru: typeof en = {
   "clone.branchPlaceholder": "Пусто — ветка по умолчанию", // Default branch if empty
   "clone.folder": "Имя папки", // Folder name
   "clone.folderPlaceholder": "Автоматически из URL", // Auto from URL
-  "clone.into": "Клонировать в", // Clone into
-  "clone.choose": "Выбрать…", // Choose…
-  "clone.noParent": "Выберите родительскую папку", // Choose a parent folder
   "clone.cloning": "Клонирование…", // Cloning…
   "clone.cancelling": "Отмена…",
   "clone.stageStarting": "Запуск Git…",
@@ -929,6 +968,7 @@ const ru: typeof en = {
   "tree.filterWorking": "В работе", // Working
   "tree.filterAsking": "Ожидает", // Pending
   "tree.filterWaiting": "Просмотрено", // Viewed
+  "tree.filterBackground": "Фоновые задачи", // Tasks running
   "tree.filterStatus": "Фильтр по статусу", // Filter by status
   "tree.refreshStatusFilter": "Обновить фильтр по статусу",
   "tree.refreshStatusMatch": "Обновить статус",
@@ -955,7 +995,6 @@ const ru: typeof en = {
   "mark.urgent": "Срочно", // Urgent
   "mark.important": "Важно", // Important
   "mark.bug": "Ошибка", // Bug
-  "tree.filterBackground": "Фоновые задачи", // Tasks running
   "mark.done": "Готово", // Done
   "mark.wip": "В работе", // In progress
   "mark.pinned": "Закреплено", // Pinned
@@ -1151,6 +1190,7 @@ const ru: typeof en = {
   "center.noSessionHintPre": "Выберите сессию в боковой панели или нажмите ", // Pick a session from the sidebar, or press
   "center.noSessionHintPost": ", чтобы создать терминал", // to create a terminal
   "center.createTerminal": "Создать терминал", // Create Terminal
+  "center.splitHint": "Откройте сессию, чтобы разделить окно с помощью этих сочетаний клавиш:",
   "tab.unsavedDot": "Несохранённые изменения", // Unsaved changes
   "tab.newTerminal": "Новый терминал", // New terminal
   "tab.newDocument": "Новый документ", // New document
@@ -1420,19 +1460,60 @@ const ru: typeof en = {
   "login.authFailed":
     "Ошибка аутентификации. Проверьте пароль доступа или откройте новую ссылку для сопряжения, если её создали заново.", // Authentication failed, check password or use a new pairing link
   "dir.title": "Выбор каталога проекта", // Choose Project Directory
-  "dir.pathPlaceholder":
-    "Поиск или введите путь и нажмите Enter (поддерживается ~)", // Search, or type a path and press Enter (supports ~)
   "dir.up": "На уровень вверх", // Up one level
   "dir.newFolder": "Новая папка", // New Folder
   "dir.newFolderPlaceholder": "Имя папки", // Folder name
-  "dir.goInput": "Перейти по введённому пути", // Go to typed path
-  "dir.noSubdirs": "(подкаталогов нет)", // (no subdirectories)
   "dir.empty": "(пустая папка)", // (empty folder)
   "dir.noMatch": "Нет совпадений", // No matching items
-  "dir.target": "Целевая папка", // Target
   "dir.showHidden": "Показать скрытые элементы", // Show hidden items
   "dir.importing": "Импорт…", // Importing…
-  "dir.choose": "Выбрать этот каталог", // Choose This Directory
+  "dir.choose": "Выбрать", // Choose
+  "dir.back": "Назад", // Back
+  "dir.forward": "Вперёд", // Forward
+  "dir.editPath": "Ввести путь", // Type a Path
+  "dir.pathLabel": "Путь к папке", // Folder path
+  "dir.filter": "Фильтр", // Filter
+  "dir.places": "Быстрый доступ", // Places
+  "dir.sectionLocations": "Расположения", // Locations
+  "dir.sectionDrives": "Этот компьютер", // This PC
+  "dir.sectionProjects": "Проекты", // Projects
+  "dir.sectionRecent": "Недавние", // Recent
+  "dir.placeHome": "Домашняя папка", // Home
+  "dir.placeComputer": "Компьютер", // Computer
+  "dir.placeFileSystem": "Файловая система", // File System
+  "dir.cantOpen": "Не удаётся открыть эту папку.", // This folder cannot be opened.
+  "dir.backTo": (path: string) => `Вернуться в ${path}`, // Back to ${path}
+  "dir.goHome": "Перейти в домашнюю папку", // Go to Home
+  "dir.folder": "Папка", // Folder
+  "location.label": "Расположение", // Location
+  "location.browse": "Обзор…", // Browse…
+  "location.pickerTitle": "Выбор расположения", // Choose Location
+  "location.ready": "Здесь будет создана новая папка.", // A new folder will be created here.
+  "location.checking": "Проверка…", // Checking…
+  "location.missing": (path: string) => `Путь ${path} не существует или недоступен.`, // ${path} does not exist or cannot be opened.
+  "location.notAbsolute": "Введите полный путь.", // Enter a full path.
+  "location.exists": "Файл или папка с таким именем уже существует.", // A file or folder with this name already exists.
+  "dir.go": "Перейти", // Go
+  "dir.pathPending": "Нажмите Enter или «Перейти», чтобы открыть этот путь.", // Press Enter or Go to open this path.
+  "dir.selectedFolder": "Выбранная папка", // Selected folder
+  "dir.openFolder": "Открыть папку", // Open Folder
+  "location.local": "Локально", // Local
+  "location.server": "Сервер", // Server
+  "location.host": "Неизвестный хост", // Unknown host
+  "location.unknownOs": "Неизвестная система", // Unknown system
+  "location.hostUnavailable": "Сведения о хосте недоступны.", // Host information is unavailable.
+  "location.invalidName": "Это имя нельзя использовать.", // This name cannot be used.
+  "location.validationFailed": "Не удалось проверить это расположение.", // This location could not be checked.
+  "location.enterTarget": "Введите расположение и имя.", // Enter a location and a name.
+  "location.createTo": "Создать в", // Create at
+  "clone.destination": "Клонировать в", // Clone to
+  "clone.ready": "Можно клонировать", // Ready to clone
+  "clone.defaultBranch": "Ветка по умолчанию", // Default branch
+  "createProject.createdRetry": "Папка создана, но импортировать проект не удалось.", // The folder was created, but the project could not be imported.
+  "createProject.retryImport": "Повторить импорт", // Retry Import
+  "doc.saveTo": "Сохранить в", // Save to
+  "doc.saveAsReopen": "Чтобы сохранить, снова откройте «Сохранить как» из документа.", // Open Save As again from the document to save it.
+  "clone.cancelClone": "Отменить клонирование", // Cancel Clone
   "conn.reconnecting": "Соединение потеряно, переподключение…", // Connection lost, reconnecting…
   "conn.reconnectNow": "Переподключиться сейчас", // Reconnect now
   "conn.retrying": "Переподключение…", // Reconnecting…
@@ -1760,6 +1841,7 @@ const ru: typeof en = {
   "chat.catalogChecked": (time: string) => `Последняя проверка: ${time}`,
   "chat.catalogFailed": "Не удалось обновить каталог. Предыдущий каталог остаётся доступным.",
   "chat.catalogRefresh": "Обновить",
+  "chat.modelsCliOutdated": "Эта версия Claude Code не предоставляет список моделей. Обновите Claude Code, чтобы увидеть все доступные модели.",
   "chat.modelDefault": "Модель по умолчанию",
   "chat.mode.default": "Всегда спрашивать",
   "chat.mode.agentDefault": "По умолчанию агента",
@@ -2025,6 +2107,9 @@ const ru: typeof en = {
   "chat.tasks.command": "Команда",
   "chat.tasks.output": "Вывод",
   "chat.tasks.noOutput": "Вывода пока нет.",
+  "chat.tasks.conversation": "Диалог",
+  "chat.tasks.noConversation": "Записей пока нет.",
+  "chat.tasks.conversationUnavailable": "Этот диалог недоступен.",
   "chat.tasks.outputTruncated": "Показана только последняя часть вывода.",
   "chat.tasks.phases": "Этапы",
   "chat.tasks.noProgress": "Для этой задачи нет данных о ходе работы отдельных агентов.",
@@ -2146,6 +2231,10 @@ const ru: typeof en = {
   "term.runs.logFinished": (code) => `Завершено, код завершения ${code}`,
   "term.runs.logEnded": "Завершено",
   "term.runs.logEmpty": "Вывода пока нет",
+  "chat.antigravity.placeholder": "Напишите Antigravity или укажите файлы через @файлы",
+  "chat.antigravity.textOnly": "В режиме диалога Antigravity пока поддерживаются только текстовые сообщения.",
+  "chat.antigravity.permissionsHint": "Инструменты, требующие одобрения, необходимо заранее разрешить в настройках Antigravity или использовать в режиме терминала.",
+  "chat.antigravity.settingsHint": "Изменяйте модель, уровень рассуждений или разрешения между ходами.",
 };
 
 export default ru;

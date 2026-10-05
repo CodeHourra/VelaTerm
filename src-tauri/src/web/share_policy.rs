@@ -51,7 +51,7 @@ impl ShareScope {
             let visible: Vec<Value> = sessions.iter().filter(|s| self.contains(s)).map(|s| {
                 json!({"id":s.id,"name":s.name,"kind":s.kind,"engine":s.engine,
                     "projectId":s.project_id,"projectName":projects.iter().find(|p|p.id == s.project_id).map(|p|p.name.as_str()),
-                    "canChat":s.engine == "chat" && matches!(s.kind, SessionKind::Claude | SessionKind::Codex | SessionKind::Opencode | SessionKind::Pi | SessionKind::Omp)})
+                    "canChat":s.engine == "chat" && s.kind.supports_chat()})
             }).collect();
             if cmd == "shared_sessions" {
                 return Ok(json!(visible));
@@ -290,6 +290,7 @@ fn app_command(cmd: &str) -> bool {
             | "chat_interrupt"
             | "chat_auto_continue_cancel"
             | "chat_permission"
+            | "chat_recovery_resume"
             | "chat_queue_steer"
             | "chat_queue_remove"
             | "chat_queue_update"
@@ -328,7 +329,7 @@ fn filtered_tree(app: &AppCtx, scope: &ShareScope) -> Result<Value, String> {
         let mut value = serde_json::to_value(project).map_err(|_| "Cannot encode shared tree")?;
         // The sidebar renderer trims rootPath; the real host path must not reach the visitor.
         value["rootPath"] = json!("");
-        value["folderId"] = Value::Null;
+        value["collectionId"] = Value::Null;
         projects.push(value);
     }
     let mut groups = Vec::new();
@@ -356,7 +357,7 @@ fn filtered_tree(app: &AppCtx, scope: &ShareScope) -> Result<Value, String> {
         }
         sessions.push(value);
     }
-    Ok(json!({"projects": projects, "groups": groups, "sessions": sessions, "folders": []}))
+    Ok(json!({"projects": projects, "groups": groups, "sessions": sessions}))
 }
 
 /// Filters the host state snapshot down to sessions inside the scope.
@@ -369,7 +370,7 @@ fn filtered_session_states(app: &AppCtx, scope: &ShareScope) -> Result<Value, St
         .map(|s| s.id.as_str())
         .collect();
     let states: std::collections::HashMap<String, crate::session_state::SessionState> =
-        crate::session_state::snapshot();
+        crate::command_core::session_states(app)?;
     let filtered: std::collections::HashMap<&str, &crate::session_state::SessionState> = states
         .iter()
         .filter(|(id, _)| allowed.contains(id.as_str()))
@@ -396,6 +397,7 @@ fn allowed_command(cmd: &str) -> bool {
             | "chat_send"
             | "chat_interrupt"
             | "chat_permission"
+            | "chat_recovery_resume"
             | "chat_queue_steer"
             | "chat_queue_remove"
             | "chat_queue_update"
@@ -475,6 +477,8 @@ mod tests {
         assert!(visible[0].get("agentArgs").is_none());
         assert!(visible[0].get("cwd").is_none());
         let origin = crate::web::dispatch::CallOrigin::Remote;
+        assert_eq!(dispatch_shared(&app,&scope,"chat_recovery_resume",&json!({"sessionId":other.id}),"recovery-test",origin).unwrap_err(),"Session is outside the shared scope");
+        assert_eq!(scope.dispatch(&app,"chat_recovery_resume",&json!({"sessionId":other.id})).unwrap_err(),"Session is outside the shared scope");
         assert!(dispatch_shared(&app, &scope, "mobile_notification_preview", &json!({"sessionId":other.id}), "notification-test", origin).is_err());
         let preview = dispatch_shared(&app, &scope, "mobile_notification_preview", &json!({"sessionId":session.id}), "notification-test", origin).unwrap();
         assert_eq!(preview, json!({"title":"Visible","body":""}));
@@ -627,19 +631,18 @@ mod shared_surface_tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
-    /// Folder names are host-side organization and a folder id would point at nothing the visitor has, so the
-    /// shared tree carries neither, and visitors cannot manage folders.
+    /// A share grant does not expose names of unshared parent collections or broaden access to their members.
     #[test]
-    fn shared_tree_omits_project_folders() {
+    fn shared_tree_omits_unshared_collection_membership() {
         use crate::host::HeadlessHost;
-        let dir = std::env::temp_dir().join(format!("share-folders-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("share-collections-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let db = crate::db::Db::open(&dir.join("test.db")).unwrap();
         let project = {
             let conn = db.conn.lock().unwrap();
             let project = repo::create_virtual_project(&conn, "Shared").unwrap();
-            let folder = repo::create_project_folder(&conn, "Client work").unwrap();
-            repo::set_project_folder(&conn, &project.id, Some(folder.id.as_str())).unwrap();
+            let collection = repo::create_virtual_project(&conn, "Client work").unwrap();
+            repo::set_project_collection(&conn, &project.id, Some(collection.id.as_str())).unwrap();
             let session = repo::create_session(
                 &conn,
                 &project.id,
@@ -664,12 +667,14 @@ mod shared_surface_tests {
         };
         let origin = crate::web::dispatch::CallOrigin::Remote;
         let tree = dispatch_shared(&app, &scope, "list_tree", &json!({}), "ws-test", origin).unwrap();
-        assert_eq!(tree["folders"], json!([]));
-        assert!(tree["projects"][0]["folderId"].is_null());
+        assert_eq!(tree["projects"].as_array().unwrap().len(), 1);
+        assert_eq!(tree["projects"][0]["name"], "Shared");
+        assert_eq!(tree.get("folders"), None);
+        assert!(tree["projects"][0]["collectionId"].is_null());
         assert!(dispatch_shared(
             &app,
             &scope,
-            "create_project_folder",
+            "set_project_collection",
             &json!({ "name": "x" }),
             "ws-test",
             origin

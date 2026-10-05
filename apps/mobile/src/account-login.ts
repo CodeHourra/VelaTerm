@@ -45,6 +45,9 @@ export class AccountLogin {
     }catch(error){
       if(generation!==this.generation)return;
       const code=(error as {code?:string})?.code;
+      if(code==='ACCOUNT_LOGIN_CANCELLED') {
+        this.update('error','chat.auth.canceled');return;
+      }
       if(code==='ACCOUNT_LOGIN_EXPIRED' || code==='ACCOUNT_AUTH_REQUIRED') {
         this.update('error','mobile.loginExpired');return;
       }

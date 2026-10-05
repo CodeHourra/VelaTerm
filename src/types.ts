@@ -40,7 +40,7 @@ export function supportsPermissionToggle(kind: SessionKind): boolean {
 export type SessionEngine = "tui" | "chat";
 
 /** Agent kinds the chat engine can drive. The backend refuses the rest, so nothing may offer them. */
-export const CHAT_ENGINE_KINDS: SessionKind[] = ["claude", "codex", "opencode", "pi", "omp"];
+export const CHAT_ENGINE_KINDS: SessionKind[] = ["claude", "codex", "opencode", "pi", "omp", "antigravity"];
 export function supportsChatEngine(kind: SessionKind): boolean {
   return CHAT_ENGINE_KINDS.includes(kind);
 }
@@ -63,27 +63,18 @@ export type DisplayStatus = SessionStatus | AgentState | "unavailable";
 /** Node kind used by rename, delete, and move operations. */
 export type NodeKind = "project" | "group" | "session";
 
-/** User-created sidebar folder grouping projects. One level only; deleting it leaves its projects loose. */
-export interface ProjectFolder {
-  id: string;
-  name: string;
-  sortOrder: number;
-  collapsed: boolean;
-  createdAt: number;
-}
-
 export interface Project {
   id: string;
   name: string;
-  /** Absolute project directory, or empty for a collection — a top-level container bound to no folder. */
+  /** Absolute project directory, or empty for a collection, a container with no directory of its own. */
   rootPath: string;
   color?: string | null;
   sortOrder: number;
   collapsed: boolean;
   /** Optional emoji marker shown before the name in the sidebar; see `Session.mark`. */
   mark?: string | null;
-  /** Sidebar folder holding this project. Absent, null, or an id no longer in `Tree.folders` means top level. */
-  folderId?: string | null;
+  /** Containing collection; absent or null means top level. */
+  collectionId?: string | null;
   createdAt: number;
 }
 
@@ -94,7 +85,7 @@ export function projectRoot(p: Project | null | undefined): string | null {
   return root ? root : null;
 }
 
-/** True for a collection: a top-level container with no folder behind it. */
+/** True for a collection: a container with no directory of its own. */
 export function isVirtualProject(p: Project | null | undefined): boolean {
   return !!p && !p.rootPath.trim();
 }
@@ -106,7 +97,7 @@ export function collectionNameTaken(projects: Project[], name: string, excludeId
   return projects.some((p) => isVirtualProject(p) && p.id !== excludeId && p.name.trim().toLowerCase() === wanted);
 }
 
-/** Sidebar display order: collections above folder-backed projects, each kind keeping its stored order. */
+/** Sibling display order: collections before directory projects, each kind keeping its stored order. */
 export function collectionsFirst(projects: Project[]): Project[] {
   return [...projects].sort((a, b) => Number(isVirtualProject(b)) - Number(isVirtualProject(a)));
 }
@@ -199,12 +190,11 @@ export interface Session {
   createdAt: number;
 }
 
-/** Complete tree snapshot. `folders` is absent from hosts that predate folders. */
+/** Complete tree snapshot. */
 export interface Tree {
   projects: Project[];
   groups: Group[];
   sessions: Session[];
-  folders?: ProjectFolder[];
 }
 
 /** In-memory session runtime state. */

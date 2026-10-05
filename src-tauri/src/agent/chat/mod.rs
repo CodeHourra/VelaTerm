@@ -12,11 +12,13 @@
 //! - `config_schema` asks the agent which settings it accepts, so the composer can complete them;
 //! - `engine` owns the running processes, one per session, and turns the wire into timeline rows.
 
+pub mod antigravity_protocol;
 pub mod auto_continue;
 pub mod config_schema;
 pub mod codex_protocol;
 pub mod engine;
 pub mod history;
+pub mod user_messages;
 pub mod opencode_protocol;
 pub mod opencode_timeline;
 pub mod pi_protocol;
@@ -24,5 +26,7 @@ pub mod protocol;
 pub mod shell;
 pub mod skills;
 pub mod submissions;
+pub mod recovery;
+pub(crate) mod ownership;
 
 pub use history::{read, ChatEvent};

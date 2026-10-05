@@ -143,11 +143,11 @@ export function MobileTerminal({
                           : session.kind === "crush"
                             ? "Crush"
                             : session.kind === "kimi"
-                              ? "Kimi Code (K3)"
+                              ? "Kimi Code"
                               : session.kind === "kiro"
                                 ? "Kiro"
                               : session.kind === "grok"
-                                ? "Grok Build (Grok 4.5)"
+                                ? "Grok Build"
                               : session.kind === "zoo"
                                 ? "Zoo Code"
                             : "Claude",

@@ -9,6 +9,9 @@ pub mod appimage;
 #[cfg(feature = "gui")]
 mod browser;
 mod command_core;
+// GUI-only Windows fix returning keyboard focus to the webview when a window is reactivated.
+#[cfg(all(feature = "gui", target_os = "windows"))]
+mod focus_win;
 // Tauri command registry is compiled only for GUI builds.
 #[cfg(feature = "gui")]
 mod commands;
@@ -27,8 +30,7 @@ mod knowledge;
 // GUI-only: remote windows download files through the local host, with a save dialog and progress.
 #[cfg(feature = "gui")]
 mod local_download;
-// Unix-only: imports the login shell's environment when the process was not started from a shell.
-#[cfg(unix)]
+// Load current platform/shell environments for new sessions without mutating the running application.
 pub mod login_env;
 mod security;
 pub use security::run_draft_verifier;
@@ -46,6 +48,8 @@ mod native_drop;
 // GUI-only watchdog reporting stalls of the platform event loop, which are what a frozen window actually is.
 #[cfg(feature = "gui")]
 mod stall;
+#[cfg(feature = "gui")]
+mod screenshot;
 // vela-server provisioning: R2 download, minisign verification, and cache. The GUI provisions remote hosts with
 // it; the headless build only uses the manifest and signature checks for `vela-server update`.
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
@@ -615,6 +619,9 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
         // Endpoint/key live in tauri.conf.json, and release.sh enables artifacts only with a signing key.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        // System-wide screenshot hotkey; the accelerator is registered in setup from app_settings.
+        .plugin(screenshot::plugin())
+        .manage(screenshot::ScreenshotState::default())
         .manage(PtyManager::new())
         .manage(agent::chat::engine::ChatManager::new())
         .manage(WebServer::new())
@@ -873,6 +880,7 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
             #[cfg(target_os = "macos")]
             let frame_is_dark = startup_frame_is_dark(&db, app.handle());
             app.manage(db);
+            screenshot::init(app.handle());
 
             if let Some(win) = app.get_webview_window("main") {
                 #[cfg(target_os = "macos")]
@@ -1066,6 +1074,12 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                 native_drop::install(&win);
             }
 
+            // Track the main view's focus so window reactivation can hand the keyboard back to it.
+            #[cfg(target_os = "windows")]
+            if let Some(webview) = app.get_webview("main") {
+                focus_win::track(&webview);
+            }
+
             // Disable WebView2 browser accelerator handling in the main view so Ctrl-based app shortcuts
             // reach frontend keydown. Built-in browser child views retain normal browser accelerators.
             #[cfg(target_os = "windows")]
@@ -1236,6 +1250,15 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
             browser::browser_close,
             // 6) Paths of files dropped from the OS file manager, read from the platform drag channel.
             native_drop::take_dropped_paths,
+            // Desktop-only screenshots: global hotkey settings and the annotation overlay window.
+            screenshot::screenshot_shortcut_get,
+            screenshot::screenshot_shortcut_set,
+            screenshot::screenshot_start,
+            screenshot::screenshot_frame,
+            screenshot::screenshot_ready,
+            screenshot::screenshot_close,
+            screenshot::screenshot_copy,
+            screenshot::screenshot_save,
             // 7) macOS native notifications invoked directly from notify.ts.
             native_notify,
             native_notify_auth_status,
@@ -1268,12 +1291,22 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                         api.prevent_close();
                         request_quit_confirmation(app);
                     }
+                    // Window activation leaves keyboard focus on the top-level HWND under the `unstable`
+                    // child-webview path; hand it back to the webview the user was typing in.
+                    #[cfg(target_os = "windows")]
+                    tauri::RunEvent::WindowEvent {
+                        label,
+                        event: tauri::WindowEvent::Focused(true),
+                        ..
+                    } => focus_win::restore(app, label),
                     _ => {}
                 }
 
                 // When enabled, remove only this process's pasted-image temp files on exit, preserving
                 // images used by other instances.
                 if let tauri::RunEvent::Exit = event {
+                    let ctx = host::AppCtx::Tauri(app.clone());
+                    ctx.chat().shutdown(&ctx);
                     diagnostics::record("INFO","runtime_stopping",serde_json::json!({}));
                     diagnostics::flush();
                     // Retire the local-link record so an SSH mirror connection does not even try this
@@ -1748,6 +1781,7 @@ fn serve_main(args: &ServeArgs) -> Result<(), String> {
     diagnostics::flush();
     web.stop();
     ctx.remote_web().stop();
+    ctx.chat().shutdown(&ctx);
     ctx.pty().kill_all();
     // Match GUI removal of this process's pasted-image files when cleanup is enabled.
     if pasted_image_cleanup_enabled(ctx.db()) {

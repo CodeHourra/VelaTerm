@@ -1,35 +1,19 @@
-//! Create-project dialog: choose a parent directory and enter one folder name, then create that empty directory
-//! and import it as a project. Desktop shells use the native directory picker; browser and remote clients browse
-//! the server with the shared ServerFileBrowser.
+//! Create Project dialog: a project name and a Location, then create that empty folder and import it as a
+//! project. Location is an editable path with Browse… (LocationField), the same on every platform; the
+//! destination is checked live before Create is enabled.
 
+import "./folder-picker.css";
 import { useEffect, useState } from "react";
-import type { CSSProperties } from "react";
 import { Backdrop } from "../components/Backdrop";
+import Icons from "../components/Icons";
 import { useT } from "../i18n";
 import { createDir } from "../ipc/info";
-import { isTauri } from "../ipc/transport";
-import { env, platform } from "../platform";
 import { useTermStore } from "../store/termStore";
-import {
-  cardStyle,
-  ghostBtn,
-  joinPath,
-  primaryBtn,
-  ServerBrowserView,
-  useServerBrowser,
-} from "./ServerFileBrowser";
-
-const fieldLabel: CSSProperties = {
-  fontSize: 11,
-  color: "var(--text-muted)",
-  marginBottom: 4,
-};
-
-/** Project names must be one directory component; the backend reports platform-specific filename restrictions. */
-function isValidProjectName(name: string): boolean {
-  const trimmed = name.trim();
-  return !!trimmed && trimmed !== "." && trimmed !== ".." && !/[\\/]/.test(trimmed);
-}
+import { DestinationBox, LocationField, rememberProjectLocation, useDestination, useProjectLocation } from "./LocationField";
+import { pushRecentFolder } from "./ServerFileBrowser";
+import { ExecutionContext } from "./ExecutionContext";
+import { trapDialogFocus, useDialogFocus } from "./dialogFocus";
+import { readProjectDialogCollection, useDialogDraft, useDialogNavigationLock } from "./dialogNavigation";
 
 export function CreateProjectModal() {
   const t = useT();
@@ -37,19 +21,19 @@ export function CreateProjectModal() {
   const setOpen = useTermStore((s) => s.setCreateProjectModalOpen);
   const openProjectPath = useTermStore((s) => s.openProjectPath);
 
-  const useNativePicker = isTauri || env.isElectron;
-  const browser = useServerBrowser(open && !useNativePicker);
-  const [name, setName] = useState("");
-  const [nativeParent, setNativeParent] = useState("");
+  const [name, setName] = useDialogDraft("projectName", open);
+  const [location, setLocation] = useProjectLocation(open);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
   // If directory creation succeeded but import failed, retry only the idempotent import step.
   const [createdPath, setCreatedPath] = useState("");
+  const locked = creating || !!createdPath;
+  const dest = useDestination(location, name, open && !locked);
+  const dialogRef = useDialogFocus(open);
+  const unlockNavigation = useDialogNavigationLock("create", creating);
 
   useEffect(() => {
     if (!open) return;
-    setName("");
-    setNativeParent("");
     setCreating(false);
     setError("");
     setCreatedPath("");
@@ -57,28 +41,25 @@ export function CreateProjectModal() {
 
   if (!open) return null;
 
-  const projectName = name.trim();
-  const validName = isValidProjectName(projectName);
-  const parentDir = useNativePicker ? nativeParent : browser.selectedDir;
-  const targetPath = createdPath || (parentDir && validName ? joinPath(parentDir, projectName) : "");
-  const canCreate = !creating && !!parentDir && validName;
-
-  const chooseNative = async () => {
-    const picked = await platform.dialog.pickDirectory();
-    if (picked) setNativeParent(picked);
-  };
+  const canCreate = !creating && (!!createdPath || dest.kind === "ok");
 
   const confirm = async () => {
-    if (!canCreate || !targetPath) return;
+    if (!canCreate) return;
+    const parent = dest.kind === "ok" ? dest.parent : "";
+    const target = createdPath || (dest.kind === "ok" ? dest.path : "");
+    const collectionId = readProjectDialogCollection();
+    if (!target) return;
     setCreating(true);
     setError("");
     try {
       if (!createdPath) {
-        await createDir(targetPath);
-        setCreatedPath(targetPath);
+        await createDir(target);
+        setCreatedPath(target);
+        rememberProjectLocation(parent);
+        pushRecentFolder(parent);
       }
-      await openProjectPath(targetPath);
-      if (!useNativePicker) browser.pushRecent(parentDir);
+      await openProjectPath(target, collectionId);
+      unlockNavigation();
       setOpen(false);
     } catch (e) {
       setError(String(e));
@@ -88,120 +69,88 @@ export function CreateProjectModal() {
 
   return (
     <Backdrop onClose={() => !creating && setOpen(false)} zIndex={300}>
-      <div
+      <form
+        role="dialog"
+        ref={dialogRef}
+        aria-modal="true"
+        aria-label={t("createProject.title")}
+        className="fp-dialog fp-form"
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
+          trapDialogFocus(e);
           if (e.key === "Escape" && !creating) setOpen(false);
         }}
-        style={cardStyle}
+        onSubmit={(e) => {
+          e.preventDefault();
+          void confirm();
+        }}
       >
-        <div style={{ padding: "14px 16px 8px" }}>
-          <div style={{ fontWeight: 700, fontSize: 14, color: "var(--text)" }}>
-            {t("createProject.title")}
-          </div>
+        <div className="fp-head">
+          <span className="fp-title">{t("createProject.title")}</span>
+          <button type="button" className="icon-btn" aria-label={t("common.cancel")} title={t("common.cancel")} disabled={creating} onClick={() => setOpen(false)}>
+            <Icons.x size={14} />
+          </button>
         </div>
+        <ExecutionContext />
 
-        <div
-          style={{
-            padding: "0 16px",
-            display: "flex",
-            flexDirection: "column",
-            gap: 12,
-            overflow: "auto",
-          }}
-        >
-          <label style={{ display: "block" }}>
-            <div style={fieldLabel}>{t("createProject.name")}</div>
+        <div className="fp-fields">
+          <label className="fp-field">
+            <span className="fp-label">{t("createProject.name")}</span>
             <input
-              className="vlx-input"
+              className={"vlx-input" + (dest.kind === "bad" && dest.field === "name" ? " bad" : "")}
               autoFocus
-              disabled={creating || !!createdPath}
+              disabled={locked}
               placeholder={t("createProject.namePlaceholder")}
+              spellCheck={false}
               value={name}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && canCreate) void confirm();
-              }}
               onChange={(e) => {
                 setName(e.target.value);
                 setError("");
               }}
             />
-            {projectName && !validName && (
-              <div style={{ marginTop: 5, fontSize: 11.5, color: "var(--status-error)" }}>
-                {t("createProject.invalidName")}
-              </div>
-            )}
           </label>
 
-          <div>
-            <div style={fieldLabel}>{t("createProject.into")}</div>
-            {useNativePicker ? (
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <div
-                  title={parentDir}
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    fontSize: 12,
-                    color: parentDir ? "var(--text)" : "var(--text-faint)",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {parentDir || t("createProject.noParent")}
-                </div>
-                <button
-                  onClick={() => void chooseNative()}
-                  disabled={creating || !!createdPath}
-                  style={ghostBtn}
-                >
-                  {t("createProject.choose")}
-                </button>
-              </div>
-            ) : (
-              <div
-                aria-disabled={creating || !!createdPath}
-                style={{
-                  pointerEvents: creating || createdPath ? "none" : undefined,
-                  opacity: creating || createdPath ? 0.72 : 1,
-                }}
-              >
-                <ServerBrowserView browser={browser} />
-              </div>
-            )}
+          <div className="fp-field">
+            <label className="fp-label" htmlFor="create-project-location">{t("location.label")}</label>
+            <LocationField
+              id="create-project-location"
+              value={location}
+              onChange={(v) => {
+                setLocation(v);
+                setError("");
+              }}
+              disabled={locked}
+              invalid={dest.kind === "bad" && dest.field === "location"}
+            />
           </div>
 
-          {targetPath && (
-            <div style={{ fontSize: 11.5, color: "var(--text-faint)", wordBreak: "break-all" }}>
-              → {targetPath}
+          {createdPath ? (
+            <div className="fp-dest ok">
+              <Icons.check size={14} />
+              <div className="fp-dest-text">
+                <span className="fp-dest-label">{t("location.createTo")}</span>
+                <span className="fp-dest-path">{createdPath}</span>
+                <span className="fp-dest-status">{t("createProject.createdRetry")}</span>
+              </div>
             </div>
+          ) : (
+            <DestinationBox dest={dest} label={t("location.createTo")} />
           )}
 
-          {error && (
-            <div style={{ fontSize: 12, color: "var(--status-error)", wordBreak: "break-all" }}>
-              {error}
-            </div>
-          )}
+          {error && <div className="fp-error">{error}</div>}
         </div>
 
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "flex-end",
-            gap: 8,
-            padding: "10px 16px",
-            borderTop: "1px solid var(--border)",
-          }}
-        >
-          <button onClick={() => setOpen(false)} disabled={creating} style={ghostBtn}>
+        <div className="fp-foot">
+          <span className="fp-spacer" />
+          <button type="button" className="vlx-btn" onClick={() => setOpen(false)} disabled={creating}>
             {t("common.cancel")}
           </button>
-          <button onClick={() => void confirm()} disabled={!canCreate} style={primaryBtn(!canCreate)}>
-            {creating ? t("createProject.creating") : t("createProject.submit")}
+          <button type="submit" className="vlx-btn vlx-btn-primary" disabled={!canCreate}>
+            {creating ? t("createProject.creating") : createdPath ? t("createProject.retryImport") : t("createProject.submit")}
           </button>
         </div>
-      </div>
+      </form>
     </Backdrop>
   );
 }

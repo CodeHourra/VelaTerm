@@ -65,7 +65,7 @@ pub fn catalog() -> Vec<LaunchOption> {
             Antigravity,
             "Antigravity",
             Some("--effort"),
-            &["low", "medium", "high"],
+            super::chat::antigravity_protocol::EFFORTS,
         ),
         (
             Cline,

@@ -43,9 +43,9 @@ export const RESUMABLE_KINDS: { kind: SessionKind; label: string }[] = [
   { kind: "pi", label: "Pi" },
   { kind: "omp", label: "OMP" },
   { kind: "crush", label: "Crush" },
-  { kind: "kimi", label: "Kimi Code (K3)" },
+  { kind: "kimi", label: "Kimi Code" },
   { kind: "kiro", label: "Kiro" },
-  { kind: "grok", label: "Grok Build (Grok 4.5)" },
+  { kind: "grok", label: "Grok Build" },
   { kind: "zoo", label: "Zoo Code" },
 ];
 
@@ -69,9 +69,9 @@ export function kindLabel(kind: SessionKind): string {
   if (kind === "pi") return "Pi";
   if (kind === "omp") return "OMP";
   if (kind === "crush") return "Crush";
-  if (kind === "kimi") return "Kimi Code (K3)";
+  if (kind === "kimi") return "Kimi Code";
   if (kind === "kiro") return "Kiro";
-  if (kind === "grok") return "Grok Build (Grok 4.5)";
+  if (kind === "grok") return "Grok Build";
   return "Zoo Code";
 }
 

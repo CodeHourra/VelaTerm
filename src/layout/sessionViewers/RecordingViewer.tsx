@@ -21,7 +21,7 @@ import { useT } from "../../i18n";
 import { readRecording } from "../../ipc/commands";
 import { useTermStore } from "../../store/termStore";
 import { terminalLinkHandler, webLinkActivate } from "../../terminal/openLink";
-import { resolveTheme, XTERM_THEME } from "../../theme";
+import { xtermTheme } from "../../theme";
 
 const SEARCH_OPTS = {
   decorations: {
@@ -72,7 +72,7 @@ export function RecordingViewer({
       scrollback: 200000,
       // Handle OSC 8 links like usePtySession; see terminal/openLink.ts.
       linkHandler: terminalLinkHandler,
-      theme: XTERM_THEME[resolveTheme(useTermStore.getState().theme)],
+      theme: xtermTheme(useTermStore.getState().theme),
     });
     const fitAddon = new FitAddon();
     const searchAddon = new SearchAddon();

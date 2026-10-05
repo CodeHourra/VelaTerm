@@ -52,7 +52,7 @@ import {
 
 /** Accent palette; auto follows the light/dark theme. */
 const ACCENT_HEX: Record<string, string> = {
-  green: "#3fcf8e",
+  green: "var(--accent-green-swatch)",
   blue: "#5b9dff",
   amber: "#f5b14c",
   violet: "#b08bff",
@@ -800,7 +800,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                           borderRadius: 5,
                           border: "1px solid var(--accent)",
                           background: cliStatus?.installed ? "var(--bg-active)" : "var(--accent)",
-                          color: cliStatus?.installed ? "var(--text)" : "#fff",
+                          color: cliStatus?.installed ? "var(--text)" : "var(--text-on-accent)",
                           cursor: cliBusy ? "wait" : "pointer",
                           opacity: cliStatus === null ? 0.55 : 1,
                         }}
@@ -868,7 +868,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                             ? "1px solid var(--border)"
                             : "1px solid var(--accent)",
                           background: skillOn ? "var(--bg-active)" : "var(--accent)",
-                          color: skillOn ? "var(--text-dim)" : "#fff",
+                          color: skillOn ? "var(--text-dim)" : "var(--text-on-accent)",
                           cursor: "pointer",
                         }}
                         onClick={async () => {

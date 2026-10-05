@@ -804,9 +804,13 @@ async function checkForUpdate(headers) {
   const arch = process.arch === "arm64" ? "aarch64" : "x86_64";
   const current = app.getVersion();
   const url = `${UPDATE_ENDPOINT}/linux/${arch}?current_version=${encodeURIComponent(current)}`;
-  // Only the anonymous installation header is forwarded.
+  // Forward only update telemetry headers and identify this shell's updater to the service.
   const installId = headers && typeof headers["X-Install-Id"] === "string" ? headers["X-Install-Id"] : "";
-  const res = await net.fetch(url, { headers: installId ? { "X-Install-Id": installId } : {} });
+  const language = headers && typeof headers["X-App-Language"] === "string" ? headers["X-App-Language"] : "";
+  const requestHeaders = { "User-Agent": `velaterm-electron-updater/${current}` };
+  if (installId) requestHeaders["X-Install-Id"] = installId;
+  if (language) requestHeaders["X-App-Language"] = language;
+  const res = await net.fetch(url, { headers: requestHeaders });
   if (res.status === 204) {
     pendingUpdate = null;
     return null;

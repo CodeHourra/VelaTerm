@@ -404,7 +404,7 @@ export function UpdateModal() {
                 ...BTN_BASE,
                 border: "1px solid var(--accent)",
                 background: "var(--accent)",
-                color: "#fff",
+                color: "var(--text-on-accent)",
               }}
             >
               {stage.kind === "error" ? t("updater.retry") : t("updater.updateNow")}
@@ -417,7 +417,7 @@ export function UpdateModal() {
                 ...BTN_BASE,
                 border: "1px solid var(--accent)",
                 background: "var(--accent)",
-                color: "#fff",
+                color: "var(--text-on-accent)",
               }}
             >
               {t("updater.restartNow")}

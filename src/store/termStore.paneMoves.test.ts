@@ -11,6 +11,11 @@ vi.mock("../ipc/commands", () => ({
   listShells: vi.fn().mockResolvedValue([]),
 }));
 vi.mock("../ipc/tree", () => ({ listTree: vi.fn() }));
+vi.mock("../ipc/chat", () => ({
+  chatClear: vi.fn(),
+  setSessionEngine: vi.fn(),
+  chatStop: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("../notify", () => ({ notify: vi.fn() }));
 vi.mock("../ipc/transport", () => ({ isTauri: true, invokeNative: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("../platform", () => {
@@ -27,6 +32,7 @@ vi.mock("../platform", () => {
 });
 
 import { ptyKill } from "../ipc/commands";
+import { chatStop } from "../ipc/chat";
 import { collectSessionIds, findBySession } from "../layout/CenterPane/paneTree";
 import type { Session } from "../types";
 import { useTermStore } from "./termStore";
@@ -93,10 +99,43 @@ function shownIn(): Record<string, string> {
 
 beforeEach(() => {
   vi.mocked(ptyKill).mockClear();
+  vi.mocked(chatStop).mockClear();
 });
 
 afterEach(() => {
   localStorage.clear();
+});
+
+describe("closing session tabs", () => {
+  it.each(["background", "visible"] as const)("ends each %s session through its engine and preserves existing unread markers", (location) => {
+    seed(["A", "B", "C", "D"]);
+    useTermStore.setState({
+      sessions: [
+        { ...mkSession("A"), engine: "chat" },
+        { ...mkSession("B"), engine: "tui" },
+        { ...mkSession("C"), engine: "chat" },
+        { ...mkSession("D"), engine: "chat" },
+      ],
+    });
+    const st = useTermStore.getState();
+    st.openSession("A");
+    st.openSessionInSplit("B", "horizontal");
+    st.openSession("C", { newTab: location === "visible" });
+    st.openSession("D", { newTab: location === "visible" });
+    useTermStore.setState({ notifications: { C: 123 } });
+    expect(useTermStore.getState().liveTabs).toEqual(location === "background" ? ["A", "C"] : []);
+
+    const close = location === "background" ? st.closeLiveTab : st.closeTab;
+    close("A");
+    close("C");
+    close("C"); // Closing the same removed tab must not stop its sessions again.
+
+    expect(vi.mocked(chatStop).mock.calls).toEqual([["A"], ["C"]]);
+    expect(vi.mocked(ptyKill).mock.calls).toEqual([["B"]]);
+    expect(useTermStore.getState().notifications).toEqual({ C: 123 });
+    expect(shownIn()).toEqual({ D: "D" });
+    expect(useTermStore.getState().activeSessionId).toBe("D");
+  });
 });
 
 describe("openSessionInSplit", () => {

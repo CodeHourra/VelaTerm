@@ -1,0 +1,240 @@
+/* Screenshot overlay. Self-contained: the overlay does not load the application stylesheets. */
+
+:root {
+  --shot-accent: #2dbd6e;
+  --shot-bar-bg: rgba(38, 40, 44, 0.96);
+  --shot-bar-border: rgba(255, 255, 255, 0.1);
+  --shot-text: #e8e8ea;
+  --shot-text-dim: #9a9ca3;
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  user-select: none;
+  -webkit-user-select: none;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+}
+
+.shot-root {
+  position: fixed;
+  inset: 0;
+  touch-action: none;
+}
+
+.shot-frame,
+.shot-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+}
+
+.shot-dim {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+/* The selection darkens everything around it through its own oversized shadow. */
+.shot-sel {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid var(--shot-accent);
+  box-shadow: 0 0 0 200vmax rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+.shot-handle {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  margin: -4px 0 0 -4px;
+  background: var(--shot-accent);
+  border: 1px solid #fff;
+  box-sizing: border-box;
+}
+
+.shot-size,
+.shot-hint {
+  position: absolute;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.shot-hint {
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  font-size: 13px;
+}
+
+.shot-toolbar {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  cursor: default;
+}
+
+.shot-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 8px;
+  background: var(--shot-bar-bg);
+  border: 1px solid var(--shot-bar-border);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+.shot-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--shot-text);
+  cursor: pointer;
+}
+
+.shot-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.shot-btn.active {
+  color: var(--shot-accent);
+  background: rgba(45, 189, 110, 0.14);
+}
+
+.shot-btn:disabled {
+  color: var(--shot-text-dim);
+  opacity: 0.45;
+  cursor: default;
+}
+
+.shot-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--shot-bar-border);
+}
+
+.shot-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  margin-left: 4px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 6px;
+  background: var(--shot-accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.shot-done:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.shot-done:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.shot-options .shot-size-btn {
+  width: 28px;
+  height: 28px;
+}
+
+.shot-dot {
+  display: block;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.shot-swatch {
+  width: 18px;
+  height: 18px;
+  margin: 0 3px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.shot-swatch.active {
+  outline: 2px solid var(--shot-accent);
+  outline-offset: 2px;
+}
+
+.shot-text {
+  position: absolute;
+  box-sizing: content-box;
+  margin: 0;
+  /* No padding, so typed text sits exactly where the committed text is drawn. */
+  padding: 0;
+  min-width: 24px;
+  border: none;
+  outline: 1px dashed rgba(255, 255, 255, 0.7);
+  outline-offset: 3px;
+  background: transparent;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  caret-color: currentColor;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.shot-error {
+  max-width: 360px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(229, 72, 77, 0.92);
+  color: #fff;
+  font-size: 12px;
+}
+
+.shot-loupe {
+  position: absolute;
+  pointer-events: none;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  background: #000;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+
+.shot-loupe canvas {
+  display: block;
+}
+
+.shot-loupe-info {
+  padding: 3px 6px;
+  background: rgba(0, 0, 0, 0.8);
+  color: #fff;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}

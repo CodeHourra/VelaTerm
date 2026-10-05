@@ -1,3 +1,49 @@
+## v0.2.7 — 2026-10-05
+
+- 🪐 Antigravity se incorpora a la vista de conversación como agente experimental con texto, herramientas, mensajes en cola e historial nativo; las imágenes, las instrucciones durante una respuesta, las aprobaciones interactivas, la bifurcación y el retroceso siguen sin estar disponibles, y queda pendiente la validación completa de la recuperación en todas las plataformas.
+
+- 🗂️ Las colecciones admiten subcolecciones, proyectos y grupos de sesiones, se pueden crear o importar desde el espacio de trabajo y conservan sus proyectos y sesiones archivadas al eliminarlas.
+
+- ⚠️ Las versiones anteriores no deben usar una base de datos cuyas carpetas se hayan migrado a colecciones; para volver a una versión anterior hay que restaurar una copia de seguridad previa a la migración.
+
+- 🏷️ El cambio de nombre inteligente asigna un nombre a la sesión según su conversación con la configuración del agente actual y permite elegir otro agente cuando esa configuración no se puede usar.
+
+- 🌱 Las nuevas sesiones utilizan el entorno shell actualizado y los agentes recién instalados sin reiniciar VelaTerm.
+
+- 💾 Tras un reinicio, la recuperación experimental de conversaciones restaura los mensajes, las imágenes y las entradas en cola guardados y pausa el trabajo interrumpido hasta que se reanude explícitamente; queda pendiente la validación completa en entornos nativos y en todas las plataformas.
+
+- 📸 La captura de pantalla experimental de las aplicaciones Tauri para macOS y Windows permite seleccionar una zona, añadir anotaciones, copiarla o guardar el PNG original; queda pendiente la validación de las aplicaciones nativas y no se admite en Electron, el navegador ni las vistas remotas.
+
+- 🧵 Las pestañas de tareas de Claude en segundo plano muestran todo su historial nativo de conversación, incluidas las llamadas a herramientas en paralelo.
+
+- 🖼️ Cada mensaje de conversación admite hasta 20 imágenes, con un límite de 5 MiB por imagen.
+
+- 📍 Los marcadores de mensajes permiten previsualizar el contenido y saltar directamente a mensajes anteriores del usuario.
+
+- 🧭 Los selectores de directorios para proyectos, clonar y Guardar como ofrecen de forma uniforme la edición de rutas y el autocompletado de ubicaciones.
+
+- 🪪 `vself` lee la configuración guardada de las sesiones y sus relaciones entre padres e hijos, mientras que `vflow list` enumera los flujos de planificación y ejecución relacionados sin modificarlos.
+
+- ⌨️ Seleccionar todo en el terminal se configura en los atajos, usa por defecto Cmd+A en macOS y Ctrl+Shift+A en otras plataformas y solo se aplica cuando el terminal tiene el foco.
+
+- 🐚 El autocompletado de Bash admite rutas que empiezan por `~`, y las versiones antiguas de Bash abren sesiones sin errores de PS0.
+
+- 🛑 Los hooks de tareas secundarias ya no cambian el estado de conversación de su sesión principal, y cerrar una pestaña de conversación detiene su proceso Chat activo.
+
+- 🪟 Windows recupera el foco del teclado del terminal al volver a la ventana y elimina la línea azul durante la composición de texto chino.
+
+- 🎨 El tema oscuro clásico ofrece un contraste más claro, los iconos del escritorio siguen el tema del sistema, los de proyectos son azules y las colecciones ya no muestran el número de proyectos.
+
+- 📚 Los menús de sesiones y colecciones usan una etiqueta más clara para añadir contenido a la base de conocimientos.
+
+- 🌐 El acceso a VelaTerm mediante HTTP sin cifrar en una red local abre la página correctamente.
+
+- 🌍 Las comprobaciones de actualizaciones incluyen el idioma de la interfaz para mostrar las notas de versión correspondientes, y el servicio admite el actualizador Electron de Linux.
+
+- 🧰 Los nombres de agentes Kimi Code y Grok Build ya no incluyen el número de versión del modelo.
+
+---
+
 ## v0.2.6 — 2026-09-30
 
 - 🐧 La versión para Linux ahora se basa en Electron. El AppImage conserva su nombre de archivo y tus datos, ya no requiere WebKitGTK ni libfuse2, y las instalaciones existentes se actualizan a ella mediante el actualizador integrado.

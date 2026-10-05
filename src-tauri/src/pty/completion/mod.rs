@@ -284,6 +284,8 @@ impl Filter {
 pub fn configure_zsh_startup(
     state: &State,
     cmd: &mut portable_pty::CommandBuilder,
+    binaries: &[String],
+    current_path: Option<&std::ffi::OsStr>,
 ) -> Result<(), String> {
     let dir = state
         .selection_file
@@ -300,7 +302,8 @@ pub fn configure_zsh_startup(
         quote(&dir.to_string_lossy())
     );
     let finish = format!(
-        "unset _vlxc_startup_zdotdir_set _vlxc_startup_zdotdir\nbuiltin source {}\n",
+        "unset _vlxc_startup_zdotdir_set _vlxc_startup_zdotdir\n{}builtin source {}\n",
+        startup_path(binaries, current_path),
         quote(&dir.join("integration.zsh").to_string_lossy())
     );
     for file in [".zshenv", ".zprofile", ".zshrc", ".zlogin"] {
@@ -325,13 +328,15 @@ pub fn configure_zsh_startup(
 /// a login shell never reads, so the caller starts Bash without `-l` and this file replays the login sequence
 /// itself. Two differences from a real login shell remain: `shopt -q login_shell` reports false, and
 /// `~/.bash_logout` does not run on exit.
-pub fn configure_bash_startup(state: &State) -> Result<PathBuf, String> {
+/// Append verified binary directories after profiles load, preserving PATH precedence and avoiding a
+/// second .bashrc evaluation when the user's login profile already sources it.
+pub fn configure_bash_startup(state: &State, binaries: &[String], current_path: Option<&std::ffi::OsStr>) -> Result<PathBuf, String> {
     let dir = state
         .selection_file
         .parent()
         .ok_or("Missing completion directory")?;
     let quote = |s: &str| format!("'{}'", s.replace('\'', "'\\''"));
-    let body = format!(
+    let mut body = String::from(
         "# Load the user's login startup files in Bash's own order, then the integration.\n\
          [[ ! -r /etc/profile ]] || builtin source /etc/profile\n\
          for _vlxc_startup_profile in \"$HOME/.bash_profile\" \"$HOME/.bash_login\" \"$HOME/.profile\"; do\n\
@@ -339,13 +344,23 @@ pub fn configure_bash_startup(state: &State) -> Result<PathBuf, String> {
          \tbuiltin source \"$_vlxc_startup_profile\"\n\
          \tbreak\n\
          done\n\
-         unset _vlxc_startup_profile\n\
-         builtin source {}\n",
-        quote(&dir.join("integration.bash").to_string_lossy())
+         unset _vlxc_startup_profile\n"
     );
+    body.push_str(&startup_path(binaries, current_path));
+    body.push_str(&format!("builtin source {}\n", quote(&dir.join("integration.bash").to_string_lossy())));
     let path = dir.join("bashrc");
     std::fs::write(&path, body).map_err(|e| e.to_string())?;
     Ok(path)
+}
+
+fn startup_path(binaries: &[String], current_path: Option<&std::ffi::OsStr>) -> String {
+    let mut dirs = crate::agent::executable::binary_dirs(binaries);
+    if let Some(path) = current_path {
+        for dir in std::env::split_paths(path).filter(|dir| dir.is_absolute() && dir.is_dir()) {
+            if !dirs.contains(&dir) { dirs.push(dir); }
+        }
+    }
+    crate::agent::executable::path_startup_script(&dirs)
 }
 
 /// Install only in application data; shell profiles are never edited.

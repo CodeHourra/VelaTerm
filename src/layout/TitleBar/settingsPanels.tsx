@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import { normalizeArgDashes } from "../../args";
 import Select from "../../components/Select";
+import AgentSelect from "../../components/AgentSelect";
 import {
   LaunchLoadState,
   ModelEffortFields,
@@ -27,6 +28,17 @@ import {
   type GiteaStatus,
 } from "../../ipc/commands";
 import { isTauri } from "../../ipc/transport";
+import {
+  screenshotShortcutGet,
+  screenshotShortcutSet,
+  type ScreenshotShortcutStatus,
+} from "../../ipc/screenshot";
+import {
+  acceleratorFromEvent,
+  formatAccelerator,
+  inAppConflict,
+  sameChord,
+} from "../../screenshot/accelerator";
 import { env } from "../../platform";
 import { useTermStore } from "../../store/termStore";
 import { defaultEngineFor } from "../../store/settings";
@@ -49,7 +61,8 @@ const SC_LABEL: Record<ShortcutAction, I18nKey> = {
   saveDoc: "settings.scSaveDoc",
 };
 
-/** Shortcut row with a label and current chord button. Clicking the button starts key capture. */
+/** Shortcut row with a label and current chord button. Clicking the button starts key capture.
+ * `fromEvent`/`format` default to in-app chords; `onClear` lets Delete/Backspace turn the shortcut off. */
 function ShortcutRow({
   label,
   combo,
@@ -57,6 +70,10 @@ function ShortcutRow({
   onStart,
   onCapture,
   onCancel,
+  onClear,
+  fromEvent = comboFromEvent,
+  format = formatCombo,
+  emptyLabel,
 }: {
   label: string;
   combo: string;
@@ -64,6 +81,10 @@ function ShortcutRow({
   onStart: () => void;
   onCapture: (combo: string) => void;
   onCancel: () => void;
+  onClear?: () => void;
+  fromEvent?: (e: KeyboardEvent) => string | null;
+  format?: (combo: string) => string;
+  emptyLabel?: string;
 }) {
   const t = useT();
   useEffect(() => {
@@ -76,12 +97,16 @@ function ShortcutRow({
         onCancel();
         return;
       }
-      const c = comboFromEvent(e);
-      if (c) onCapture(c); // Only modifier-plus-letter chords are valid; keep waiting on null.
+      if (onClear && (e.key === "Delete" || e.key === "Backspace")) {
+        onClear();
+        return;
+      }
+      const c = fromEvent(e);
+      if (c) onCapture(c); // Invalid chords return null; keep waiting.
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [recording, onCapture, onCancel]);
+  }, [recording, onCapture, onCancel, onClear, fromEvent]);
 
   return (
     <Field label={label}>
@@ -100,7 +125,7 @@ function ShortcutRow({
           cursor: "pointer",
         }}
       >
-        {recording ? t("settings.scRecording") : formatCombo(combo)}
+        {recording ? t("settings.scRecording") : combo ? format(combo) : emptyLabel}
       </button>
     </Field>
   );
@@ -112,8 +137,16 @@ export function ShortcutsPanel() {
   const overrides = useTermStore((s) => s.shortcutOverrides);
   const setShortcut = useTermStore((s) => s.setShortcut);
   const resetShortcuts = useTermStore((s) => s.resetShortcuts);
-  const [recording, setRecording] = useState<ShortcutAction | null>(null);
+  const [recording, setRecording] = useState<ShortcutAction | "screenshot" | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // System-wide screenshot hotkey, stored by the desktop backend rather than in vlx-settings.
+  const [shot, setShot] = useState<ScreenshotShortcutStatus | null>(null);
+  const [shotErr, setShotErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isTauri) return;
+    void screenshotShortcutGet().then(setShot).catch(() => setShot(null));
+  }, []);
 
   const eff = (a: ShortcutAction) => overrides[a] || DEFAULT_BINDINGS[a];
 
@@ -125,8 +158,25 @@ export function ShortcutsPanel() {
       setErr(t("settings.scConflict", t(SC_LABEL[clash])));
       return;
     }
+    if (shot && sameChord(combo, shot.shortcut)) {
+      setErr(t("settings.scConflict", t("settings.scScreenshot")));
+      return;
+    }
     setErr(null);
     setShortcut(action, combo);
+  };
+
+  const applyShot = (accel: string) => {
+    setRecording(null);
+    const clash = accel ? inAppConflict(accel, overrides) : null;
+    if (clash) {
+      setShotErr(clash === "tabs" ? t("settings.scConflictTabs") : t("settings.scConflict", t(SC_LABEL[clash])));
+      return;
+    }
+    setShotErr(null);
+    screenshotShortcutSet(accel)
+      .then(setShot)
+      .catch(() => setShotErr(t("settings.scInUse")));
   };
 
   // New browser tabs are desktop-only, so hide this row in browser and remote clients.
@@ -173,6 +223,7 @@ export function ShortcutsPanel() {
             setErr(null);
             setRecording(null);
             resetShortcuts();
+            if (shot && shot.shortcut !== shot.defaultShortcut) applyShot(shot.defaultShortcut);
           }}
           style={{
             flex: "none",
@@ -188,6 +239,36 @@ export function ShortcutsPanel() {
           {t("settings.scReset")}
         </button>
       </div>
+      {shot?.supported && (
+        <>
+          <SectionTitle>{t("settings.scScreenshotSection")}</SectionTitle>
+          <ShortcutRow
+            label={t("settings.scScreenshot")}
+            combo={shot.shortcut}
+            recording={recording === "screenshot"}
+            onStart={() => {
+              setShotErr(null);
+              setRecording("screenshot");
+            }}
+            onCancel={() => setRecording(null)}
+            onCapture={applyShot}
+            onClear={() => applyShot("")}
+            fromEvent={acceleratorFromEvent}
+            format={formatAccelerator}
+            emptyLabel={t("settings.scOff")}
+          />
+          <div
+            style={{
+              marginTop: 6,
+              fontSize: 11,
+              lineHeight: 1.5,
+              color: shotErr || shot.error ? "#e5484d" : "var(--text-dim)",
+            }}
+          >
+            {shotErr ?? (shot.error ? t("settings.scInUse") : t("settings.scScreenshotHint"))}
+          </div>
+        </>
+      )}
     </>
   );
 }
@@ -220,28 +301,12 @@ const AGENT_DEFAULT_KINDS: {
   { kind: "omp", label: "OMP", yolo: "--yolo", permVia: "flag" },
   // Crush injects `--yolo` only in skip mode; default mode retains native staged approval.
   { kind: "crush", label: "Crush", yolo: "--yolo", permVia: "flag" },
-  { kind: "kimi", label: "Kimi Code (K3)", yolo: "--yolo", permVia: "flag" },
+  { kind: "kimi", label: "Kimi Code", yolo: "--yolo", permVia: "flag" },
   { kind: "kiro", label: "Kiro", yolo: "--trust-all-tools", permVia: "flag" },
-  { kind: "grok", label: "Grok Build (Grok 4.5)", yolo: "--always-approve", permVia: "flag" },
+  { kind: "grok", label: "Grok Build", yolo: "--always-approve", permVia: "flag" },
   // Zoo auto-approves natively; VelaTerm injects --require-approval in default mode and no skip flag.
   { kind: "zoo", label: "Zoo Code", yolo: "", permVia: "inverse" },
 ];
-
-/** Agent picker: each row carries the agent's own icon so the list reads at a glance. */
-function AgentSelect({
-  value,
-  onChange,
-}: {
-  value: SessionKind;
-  onChange: (v: SessionKind) => void;
-}) {
-  const options = AGENT_DEFAULT_KINDS.map((a) => ({
-    value: a.kind,
-    label: a.label,
-    icon: <span style={{ display: "inline-flex", flex: "none" }}>{kindIconEl(a.kind, 15)}</span>,
-  }));
-  return <Select value={value} onChange={onChange} options={options} width={200} align="right" />;
-}
 
 /** Multiline default-arguments field with a label above a full-width textarea. Edits remain local until
  * blur to avoid writing localStorage on every keystroke. Each line may contain one or more flags; the
@@ -458,7 +523,8 @@ export function AgentsPanel() {
       <SectionTitle>{t("settings.agentDefaultsTitle")}</SectionTitle>
 
       <Field label={t("resume.agentType")}>
-        <AgentSelect value={selKind} onChange={setSelKind} />
+        <AgentSelect value={selKind} onChange={kind => { if (kind) setSelKind(kind); }} width={200} align="right"
+          options={AGENT_DEFAULT_KINDS.map(agent => ({ id: agent.kind, label: agent.label }))} />
       </Field>
 
       {/* The key includes selKind so switching agents rebuilds the input, resetting the draft to the new agent's current value. */}
@@ -479,35 +545,40 @@ export function AgentsPanel() {
       />
 
       <Field label={t("info.permission")}>
-        <div style={{ marginBottom: 8, color: "var(--text-dim)", fontSize: 12 }}>{t("permission.defaultHint")}</div>
-        {["claude", "codex", "opencode"].includes(selKind) ? (
-          <AgentPermissionSelect key={selKind} kind={selKind} value={cfg.permissionMode}
-            onChange={mode => savePermissionDefault(selKind, mode)} />
-        ) : supportsYolo ? (
-          <Seg<"default" | "skip">
-            value={skip ? "skip" : "default"}
-            options={[
-              ["default", t("settings.permDefault")],
-              ["skip", t("settings.permYolo")],
-            ]}
-            onChange={(v) => setAgentDefault(selKind, { permissionMode: v })}
-          />
-        ) : (
-          // With neither a flag nor environment injection, show disabled guidance instead of a toggle.
-          <span
-            style={{
-              fontSize: 11,
-              lineHeight: 1.45,
-              color: "var(--text-dim)",
-              maxWidth: 260,
-              textAlign: "right",
-            }}
-          >
-            {meta?.permVia === "none"
-              ? t("tree.permissionUnsupportedPi")
-              : t("tree.permissionUnsupported")}
-          </span>
-        )}
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", gap: "var(--space-4, 16px)" }}>
+          <div style={{ flex: "1 1 160px", minWidth: 0, color: "var(--text-dim)", fontSize: 12, lineHeight: 1.5 }}>{t("permission.defaultHint")}</div>
+          <div style={{ flex: "none", maxWidth: "100%" }}>
+            {["claude", "codex", "opencode"].includes(selKind) ? (
+              <AgentPermissionSelect key={selKind} kind={selKind} value={cfg.permissionMode}
+                onChange={mode => savePermissionDefault(selKind, mode)} />
+            ) : supportsYolo ? (
+              <Seg<"default" | "skip">
+                value={skip ? "skip" : "default"}
+                options={[
+                  ["default", t("settings.permDefault")],
+                  ["skip", t("settings.permYolo")],
+                ]}
+                onChange={(v) => setAgentDefault(selKind, { permissionMode: v })}
+              />
+            ) : (
+              // With neither a flag nor environment injection, show disabled guidance instead of a toggle.
+              <span
+                style={{
+                  display: "block",
+                  fontSize: 11,
+                  lineHeight: 1.45,
+                  color: "var(--text-dim)",
+                  maxWidth: 260,
+                  textAlign: "right",
+                }}
+              >
+                {meta?.permVia === "none"
+                  ? t("tree.permissionUnsupportedPi")
+                  : t("tree.permissionUnsupported")}
+              </span>
+            )}
+          </div>
+        </div>
       </Field>
 
       {/* Choosing YOLO shows a notice: flag-based agents display the exact CLI flag, env-based ones explain that it is injected through configuration. */}

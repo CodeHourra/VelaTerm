@@ -212,7 +212,7 @@ const ptBR: typeof en = {
   "memory.collectionConversation": "Conversa",
   "memory.collectionEmptyEntries": "Esta conversa ainda não tem artigos de conhecimento.",
   "memory.title": "Base de conhecimento",
-  "memory.add": "Organizar na base de conhecimento de sessões",
+  "memory.add": "Adicionar à base de conhecimento",
   "memory.intro": "Organize o conhecimento por projeto e sessão. Os artigos salvos permanecem independentes das fontes e podem ser editados manualmente.",
   "memory.entries": "Artigos de conhecimento",
   "memory.emptyJobs": "Ainda não há registros de organização.",
@@ -294,11 +294,25 @@ const ptBR: typeof en = {
   "chat.sync.loading": "Sincronizando conversa…",
   "chat.sync.failed": "Não foi possível sincronizar. As mensagens carregadas continuam disponíveis.",
   "chat.sync.history": "Carregar mensagens anteriores",
+  "chat.rail.title": "Suas mensagens",
+  "chat.rail.imageMessage": "Mensagem com imagem",
+  "chat.rail.emptyMessage": "Mensagem vazia",
+  "chat.rail.loading": "Carregando mensagens anteriores…",
+  "chat.rail.unavailable": "Esta mensagem não está mais disponível.",
+  "chat.rail.failed": "Não foi possível carregar esta mensagem.",
   "chat.submission.updateRequired": "Atualize o servidor antes de enviar mensagens por este cliente.",
   "chat.submission.sending": "Enviando…",
   "chat.submission.sent": "Enviado",
   "chat.submission.queued": "Na fila",
   "chat.submission.failed": "Falha no envio",
+  "chat.recovery.savedSubmission": "Envio salvo (ainda sem correspondência com a mensagem nativa)",
+  "chat.recovery.saveError": "Não foi possível salvar neste dispositivo a mensagem que aguarda confirmação.",
+  "chat.recovery.readError": "Não foi possível restaurar as mensagens que aguardam confirmação neste dispositivo.",
+  "chat.recovery.writerBlocked": "Não foi possível verificar quem controla esta sessão. Antes de continuar, confirme que nenhuma outra instância do aplicativo nem nenhum agente anterior esteja usando a sessão.",
+  "chat.recovery.interrupted": "O agente parou antes que a conclusão do trabalho fosse confirmada. Revise o histórico antes de continuar.",
+  "chat.recovery.paused": "As mensagens na fila foram preservadas e permanecerão pausadas até você optar por retomar o envio.",
+  "chat.recovery.resumeQueue": "Retomar fila",
+  "chat.recovery.continue": "Continuar o trabalho interrompido",
   "chat.submission.unknown": "Entrega não confirmada",
   "chat.submission.check": "Verificar status",
   "common.retry": "Tentar novamente", // Retry
@@ -338,6 +352,7 @@ const ptBR: typeof en = {
   "titlebar.themeSystem": (resolved) =>
     `Seguir o sistema (atualmente ${resolved})`, // Follow system (currently {resolved})
   "titlebar.themeDark": "Escuro", // Dark
+  "titlebar.themeClassicDark": "Escuro clássico", // Classic Dark
   "titlebar.themeLight": "Claro", // Light
   "titlebar.gameCenter": "Central de jogos",
   "titlebar.browser": "Navegador integrado", // Built-in Browser
@@ -700,8 +715,33 @@ const ptBR: typeof en = {
   "settings.scRecording": "Pressione as teclas…", // Press keys…
   "settings.scHint":
     "Clique em um atalho e pressione uma nova combinação (Cmd/Ctrl obrigatório).", // hint
+  "settings.scScreenshotSection": "Captura de tela",
+  "settings.scScreenshot": "Capturar a tela",
+  "settings.scOff": "Desativado",
+  "settings.scScreenshotHint":
+    "Funciona em qualquer app, mesmo com o VelaTerm em segundo plano. Para desativar, clique no atalho e pressione Delete.",
+  "settings.scConflictTabs": "Já usado para alternar entre abas",
+  "settings.scInUse": "Outro app já está usando este atalho",
   "settings.scReset": "Restaurar padrões", // Restore defaults
   "settings.scConflict": (label: string) => `Já usado por "${label}"`, // conflict
+
+  // ── Screenshot overlay ──
+  "screenshot.hint": "Arraste para selecionar uma área ou clique para capturar a tela inteira",
+  "screenshot.rect": "Retângulo",
+  "screenshot.ellipse": "Elipse",
+  "screenshot.arrow": "Seta",
+  "screenshot.pen": "Caneta",
+  "screenshot.mosaic": "Mosaico",
+  "screenshot.text": "Texto",
+  "screenshot.undo": "Desfazer",
+  "screenshot.save": "Salvar",
+  "screenshot.cancel": "Cancelar",
+  "screenshot.done": "Concluir",
+  "screenshot.doneTip": "Copiar para a área de transferência (Enter)",
+  "screenshot.small": "Pequeno",
+  "screenshot.medium": "Médio",
+  "screenshot.large": "Grande",
+  "screenshot.failed": (detail: string) => `Não foi possível exportar a captura de tela: ${detail}`,
 
   // ── Remote access panel ──
   "remote.title": "Acesso remoto (navegador)", // Remote Access (Browser)
@@ -825,6 +865,7 @@ const ptBR: typeof en = {
   "tree.moveToSession": "Mover para baixo de uma sessão (como filha)", // Move under a session (as child)
   "tree.moveTo": "Mover para…", // Move to…
   "tree.openNewTab": "Abrir em nova aba", // Open in New Tab
+  "tree.openInSplit": "Abrir em painel dividido", // Open in Split
   "tree.openSplitRight": "Abrir em divisão à direita", // Open in Split Right
   "tree.openSplitDown": "Abrir em divisão abaixo", // Open in Split Down
   "tree.openInFocusedPane": "Abrir no painel ativo", // Open in Focused Pane
@@ -832,6 +873,18 @@ const ptBR: typeof en = {
   "tree.tileSelectedTooMany": "Organizar lado a lado (até 4 sessões)", // Tile Selected Sessions (up to 4)
   "tree.forkSession": "Bifurcar sessão", // Fork Session
   "tree.exportSession": "Exportar sessão…", // Export Session…
+  "sessionTitle.rename": "Renomeação inteligente",
+  "sessionTitle.chooseAgentHint": "O agente desta sessão está indisponível. Selecione outro agente; serão usadas as configurações padrão dele.",
+  "sessionTitle.agentUnavailable": "O agente selecionado está indisponível. Selecione outro agente ou verifique as configurações dele.",
+  "sessionTitle.generating": "Gerando título…",
+  "sessionTitle.unavailable": "Esta sessão não tem uma conversa disponível para leitura.",
+  "sessionTitle.noAgent": "Nenhum agente compatível está instalado. Instale Claude, Codex, OpenCode, Pi, OMP ou Grok para gerar títulos.",
+  "sessionTitle.busy": "Já está sendo gerado um título para esta sessão.",
+  "sessionTitle.tooLarge": "A conversa é longa demais para gerar um título. O título atual foi mantido.",
+  "sessionTitle.timeout": "O tempo limite para gerar o título foi excedido. Tente novamente.",
+  "sessionTitle.invalid": "O agente retornou um título inválido. Tente novamente.",
+  "sessionTitle.changed": "A sessão foi alterada durante a geração do título, por isso ele não foi atualizado.",
+  "sessionTitle.failed": "O agente não conseguiu gerar um título. Tente novamente.",
   "tree.sessionInfo": "Informações da sessão", // Session Info
   "tree.groupInfo": "Informações do grupo", // Group Info
   "tree.collectionInfo": "Informações da coleção", // Collection Info
@@ -850,7 +903,6 @@ const ptBR: typeof en = {
   "tree.persistDoc": "Salvar no disco…", // Save to Disk…
   "tree.closeScratch": "Fechar rascunho", // Close Scratch
   "tree.importProject": "Importar projeto", // Import Project
-  "tree.openInSplit": "Abrir em painel dividido", // Open in Split
   "tree.createProject": "Criar projeto",
   "tree.dropFoldersHint": "Solte pastas aqui para adicioná-las como projetos",
   // New Collection / Collection name / research / Create Collection / No directory / Delete Collection
@@ -860,30 +912,20 @@ const ptBR: typeof en = {
   "collection.name": "Nome da coleção",
   "collection.namePlaceholder": "research",
   "collection.submit": "Criar coleção",
+  "collection.duplicateName": "Já existe uma coleção com este nome.",
   "collection.tag": "Sem diretório",
   "collection.deleteTitle": "Excluir coleção",
   "collection.deleteBody": (name) =>
-    `Excluir a coleção "${name}"? Todos os seus grupos e sessões também serão excluídos. Isso não pode ser desfeito.`,
-  "folder.projectCount": (count) => (count === 1 ? "1 projeto" : `${count} projetos`), // {count} projects
-  "folder.new": "Nova pasta", // New Folder
-  "folder.createTitle": "Nova pasta", // New Folder
-  "folder.renameTitle": "Renomear pasta", // Rename Folder
-  "folder.name": "Nome da pasta", // Folder name
-  "folder.namePlaceholder": "pagamentos", // payments
-  "folder.create": "Criar pasta", // Create Folder
-  "folder.delete": "Excluir pasta", // Delete Folder
-  "folder.deleteTitle": "Excluir pasta", // Delete Folder
-  "folder.deleteBody": (name) =>
-    `Excluir a pasta "${name}"? Os projetos dentro dela são mantidos e saem da pasta.`, // Delete folder "{name}"? The projects inside are kept and moved out of the folder.
-  "folder.moveTo": "Mover para pasta", // Move to Folder
-  "folder.none": "Sem pasta", // No Folder
+    `Excluir a coleção "${name}"? Seus projetos serão movidos para o nível superior com todo o conteúdo preservado. Os grupos e as sessões não arquivadas vinculados diretamente à coleção serão excluídos; as sessões arquivadas serão mantidas.`,
+  "collection.projectCount": (count) => (count === 1 ? "1 projeto" : `${count} projetos`), // {count} projects
+  "collection.renameTitle": "Renomear coleção",
+  "collection.moveTo": "Mover para coleção",
+  "collection.none": "Nível superior",
   "tree.cloneProject": "Clonar do Git", // Clone from Git
   "createProject.title": "Criar projeto",
   "createProject.name": "Nome do projeto",
   "createProject.namePlaceholder": "meu-projeto",
-  "createProject.into": "Criar em",
   "createProject.choose": "Escolher…",
-  "createProject.noParent": "Escolha uma pasta principal",
   "createProject.invalidName": "Digite um único nome de pasta sem / ou \\.",
   "createProject.creating": "Criando…",
   "createProject.submit": "Criar projeto",
@@ -894,9 +936,6 @@ const ptBR: typeof en = {
   "clone.branchPlaceholder": "Branch padrão se vazio", // Default branch if empty
   "clone.folder": "Nome da pasta", // Folder name
   "clone.folderPlaceholder": "Automático pela URL", // Auto from URL
-  "clone.into": "Clonar em", // Clone into
-  "clone.choose": "Escolher…", // Choose…
-  "clone.noParent": "Escolha uma pasta principal", // Choose a parent folder
   "clone.cloning": "Clonando…", // Cloning…
   "clone.cancelling": "Cancelando…",
   "clone.stageStarting": "Iniciando o Git…",
@@ -918,6 +957,7 @@ const ptBR: typeof en = {
   "tree.filterWorking": "Em andamento", // Working
   "tree.filterAsking": "Pendente", // Pending
   "tree.filterWaiting": "Visto", // Viewed
+  "tree.filterBackground": "Tarefas ativas", // Tasks running
   "tree.filterStatus": "Filtrar por status", // Filter by status
   "tree.refreshStatusFilter": "Atualizar filtro de status",
   "tree.refreshStatusMatch": "Atualizar status",
@@ -944,7 +984,6 @@ const ptBR: typeof en = {
   "mark.urgent": "Urgente", // Urgent
   "mark.important": "Importante", // Important
   "mark.bug": "Bug", // Bug
-  "tree.filterBackground": "Tarefas ativas", // Tasks running
   "mark.done": "Concluído", // Done
   "mark.wip": "Em andamento", // In progress
   "mark.pinned": "Fixado", // Pinned
@@ -1140,6 +1179,7 @@ const ptBR: typeof en = {
     "Escolha uma sessão na barra lateral ou pressione ", // Pick a session from the sidebar, or press
   "center.noSessionHintPost": " para criar um terminal", // to create a terminal
   "center.createTerminal": "Criar terminal", // Create Terminal
+  "center.splitHint": "Abra uma sessão para dividi-la com estes atalhos:",
   "tab.unsavedDot": "Alterações não salvas", // Unsaved changes
   "tab.newTerminal": "Novo terminal", // New terminal
   "tab.newDocument": "Novo documento", // New document
@@ -1412,19 +1452,60 @@ const ptBR: typeof en = {
   "login.authFailed":
     "Falha na autenticação. Verifique a senha de acesso ou abra um novo link de emparelhamento se ele foi gerado novamente.", // Authentication failed, check password or use a new pairing link
   "dir.title": "Escolher diretório do projeto", // Choose Project Directory
-  "dir.pathPlaceholder":
-    "Pesquise, ou digite um caminho e pressione Enter (aceita ~)", // Search, or type a path and press Enter (supports ~)
   "dir.up": "Um nível acima", // Up one level
   "dir.newFolder": "Nova pasta", // New Folder
   "dir.newFolderPlaceholder": "Nome da pasta", // Folder name
-  "dir.goInput": "Ir ao caminho digitado", // Go to typed path
-  "dir.noSubdirs": "(sem subdiretórios)", // (no subdirectories)
   "dir.empty": "(pasta vazia)", // (empty folder)
   "dir.noMatch": "Nenhum item correspondente", // No matching items
-  "dir.target": "Pasta de destino", // Target
   "dir.showHidden": "Mostrar itens ocultos", // Show hidden items
   "dir.importing": "Importando…", // Importing…
-  "dir.choose": "Escolher este diretório", // Choose This Directory
+  "dir.choose": "Escolher", // Choose
+  "dir.back": "Voltar", // Back
+  "dir.forward": "Avançar", // Forward
+  "dir.editPath": "Digitar um caminho", // Type a Path
+  "dir.pathLabel": "Caminho da pasta", // Folder path
+  "dir.filter": "Filtrar", // Filter
+  "dir.places": "Atalhos", // Places
+  "dir.sectionLocations": "Locais", // Locations
+  "dir.sectionDrives": "Este computador", // This PC
+  "dir.sectionProjects": "Projetos", // Projects
+  "dir.sectionRecent": "Recentes", // Recent
+  "dir.placeHome": "Pasta pessoal", // Home
+  "dir.placeComputer": "Computador", // Computer
+  "dir.placeFileSystem": "Sistema de arquivos", // File System
+  "dir.cantOpen": "Não é possível abrir esta pasta.", // This folder cannot be opened.
+  "dir.backTo": (path: string) => `Voltar para ${path}`, // Back to ${path}
+  "dir.goHome": "Ir para a pasta pessoal", // Go to Home
+  "dir.folder": "Pasta", // Folder
+  "location.label": "Local", // Location
+  "location.browse": "Procurar…", // Browse…
+  "location.pickerTitle": "Escolher local", // Choose Location
+  "location.ready": "Uma nova pasta será criada aqui.", // A new folder will be created here.
+  "location.checking": "Verificando…", // Checking…
+  "location.missing": (path: string) => `${path} não existe ou não pode ser aberto.`, // ${path} does not exist or cannot be opened.
+  "location.notAbsolute": "Digite um caminho completo.", // Enter a full path.
+  "location.exists": "Já existe um arquivo ou uma pasta com este nome.", // A file or folder with this name already exists.
+  "dir.go": "Ir", // Go
+  "dir.pathPending": "Pressione Enter ou clique em Ir para abrir este caminho.", // Press Enter or Go to open this path.
+  "dir.selectedFolder": "Pasta selecionada", // Selected folder
+  "dir.openFolder": "Abrir pasta", // Open Folder
+  "location.local": "Local", // Local
+  "location.server": "Servidor", // Server
+  "location.host": "Host desconhecido", // Unknown host
+  "location.unknownOs": "Sistema desconhecido", // Unknown system
+  "location.hostUnavailable": "As informações do host não estão disponíveis.", // Host information is unavailable.
+  "location.invalidName": "Este nome não pode ser usado.", // This name cannot be used.
+  "location.validationFailed": "Não foi possível verificar este local.", // This location could not be checked.
+  "location.enterTarget": "Digite um local e um nome.", // Enter a location and a name.
+  "location.createTo": "Criar em", // Create at
+  "clone.destination": "Clonar em", // Clone to
+  "clone.ready": "Pronto para clonar", // Ready to clone
+  "clone.defaultBranch": "Branch padrão", // Default branch
+  "createProject.createdRetry": "A pasta foi criada, mas não foi possível importar o projeto.", // The folder was created, but the project could not be imported.
+  "createProject.retryImport": "Tentar importar novamente", // Retry Import
+  "doc.saveTo": "Salvar em", // Save to
+  "doc.saveAsReopen": "Abra Salvar como novamente no documento para salvá-lo.", // Open Save As again from the document to save it.
+  "clone.cancelClone": "Cancelar clonagem", // Cancel Clone
   "conn.reconnecting": "Conexão perdida, reconectando…", // Connection lost, reconnecting…
   "conn.reconnectNow": "Reconectar agora", // Reconnect now
   "conn.retrying": "Reconectando…", // Reconnecting…
@@ -1752,6 +1833,7 @@ const ptBR: typeof en = {
   "chat.catalogChecked": (time: string) => `Última verificação: ${time}`,
   "chat.catalogFailed": "Falha na atualização. O catálogo anterior continua disponível.",
   "chat.catalogRefresh": "Atualizar",
+  "chat.modelsCliOutdated": "Esta versão do Claude Code não consegue listar seus modelos. Atualize o Claude Code para ver todos os modelos disponíveis.",
   "chat.modelDefault": "Modelo padrão",
   "chat.mode.default": "Sempre perguntar",
   "chat.mode.agentDefault": "Padrão do agente",
@@ -2013,6 +2095,9 @@ const ptBR: typeof en = {
   "chat.tasks.command": "Comando",
   "chat.tasks.output": "Saída",
   "chat.tasks.noOutput": "Ainda não há saída.",
+  "chat.tasks.conversation": "Conversa",
+  "chat.tasks.noConversation": "Ainda não há nada registrado.",
+  "chat.tasks.conversationUnavailable": "Esta conversa não está disponível.",
   "chat.tasks.outputTruncated": "Apenas a saída mais recente é exibida.",
   "chat.tasks.phases": "Fases",
   "chat.tasks.noProgress": "Esta tarefa não informa o progresso de cada agente.",
@@ -2134,6 +2219,10 @@ const ptBR: typeof en = {
   "term.runs.logFinished": (code) => `Concluído com código de saída ${code}`,
   "term.runs.logEnded": "Concluído",
   "term.runs.logEmpty": "Ainda não há saída",
+  "chat.antigravity.placeholder": "Escreva para o Antigravity ou use @arquivos para fazer referência a arquivos",
+  "chat.antigravity.textOnly": "A visualização de conversa do Antigravity atualmente aceita apenas mensagens de texto.",
+  "chat.antigravity.permissionsHint": "Ferramentas que exigem aprovação devem ser autorizadas nas configurações do Antigravity ou usadas na visualização de terminal.",
+  "chat.antigravity.settingsHint": "Altere o modelo, o nível de raciocínio ou as permissões entre os turnos.",
 };
 
 export default ptBR;

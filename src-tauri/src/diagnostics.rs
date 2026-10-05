@@ -339,6 +339,7 @@ pub fn safe_fields(data: &Value) -> Value {
             continue;
         }
         let allowed = match key.as_str() {
+            "operation" => matches!(s,"copy"|"move"|"rename"|"trash"|"restore"|"purge"|"compress"|"extract"),
             "requestId" | "operationId" | "sessionId" | "jobId" | "entryId" | "parentSessionId" | "vaultId"
             | "tabId" => identity(s),
             "sha256" | "stderrSha256" => s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()),
@@ -383,18 +384,23 @@ pub fn safe_fields(data: &Value) -> Value {
             ),
             "interface" => matches!(
                 s,
-                "claude CLI" | "codex CLI" | "claude local CLI" | "codex local CLI"
+                "claude CLI" | "codex CLI" | "opencode CLI" | "pi CLI" | "omp CLI" | "grok CLI"
+                    | "claude local CLI" | "codex local CLI"
             ),
-            "goal" => matches!(s, "compile_thematic_memory" | "codex_security_scan"),
+            "agent" => matches!(s, "claude" | "codex" | "opencode" | "pi" | "omp" | "grok"),
+            "field" => s == "title",
+            "goal" => matches!(s, "compile_thematic_memory" | "codex_security_scan" | "rename_session_from_conversation"),
             "inputType" => matches!(s, "text" | "image" | "mixed"),
-            "schema" => matches!(s, "memory-wiki-v1" | "codex-security/1.0"),
+            "schema" => matches!(s, "memory-wiki-v1" | "codex-security/1.0" | "session-title-v1"),
             "preview" => matches!(
                 s,
                 "[source and memory content redacted]"
                     | "[candidate content redacted]"
                     | "[audit context redacted]"
+                    | "[conversation content redacted]"
+                    | "[title content redacted]"
             ),
-            "entityType" => matches!(s, "memory_entry" | "security_finding"),
+            "entityType" => matches!(s, "memory_entry" | "security_finding" | "session_title"),
             "effort" => matches!(
                 s,
                 "configured_default" | "low" | "medium" | "high" | "xhigh" | "max"

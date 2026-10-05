@@ -1,239 +1,151 @@
-//! Shared context menu with a full-screen dismissal backdrop and hover submenus. After rendering,
-//! its measured position is clamped to the viewport so menus near the bottom or right stay visible.
-
-import { type ReactNode, type Ref, useLayoutEffect, useRef, useState } from "react";
+//! Shared pointer and keyboard menus. Pointer interaction preserves the editor's selection;
+//! keyboard navigation moves focus into the menu and restores its invoking control on dismissal.
+import { type ReactNode, type Ref, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useSuspendNativeViews } from "../hooks/nativeViewSuspend";
 
 export interface MenuItem {
   label: string;
-  /**
-   * Click callback receives the mouse event so actions can inspect modifiers such as Option/Alt.
-   * Existing `() => void` handlers remain assignable because TypeScript permits fewer parameters.
-   */
   onClick?: (e: React.MouseEvent) => void;
   /** A stable target for navigational items, including opening in another tab. */
   href?: string;
   danger?: boolean;
   separator?: boolean;
   disabled?: boolean;
-  /** Optional leading icon, such as an agent-specific mark; omitted icons reserve no space. */
   icon?: ReactNode;
-  /** When present, this is a non-clickable parent item that opens a submenu on hover. */
+  /** Submenus open on hover, click, or the right arrow key. */
   submenu?: MenuItem[];
+  shortcut?: string;
+  checked?: boolean;
 }
-
-/** Shared fixed-size, centered wrapper for leading menu icons. */
-function ItemIcon({ icon }: { icon: ReactNode }) {
-  return <span style={{ display: "grid", flex: "none", color: "var(--text-secondary)" }}>{icon}</span>;
-}
-
-/** Minimum gap between a menu and the viewport edge. */
 const MARGIN = 8;
+const enabled = (items: MenuItem[]) => items.flatMap((item, i) => item.separator || item.disabled ? [] : [i]);
+const same = (a: number[], b: number[]) => a.length === b.length && a.every((n, i) => b[i] === n);
+const branch = (items: MenuItem[], path: number[]) => path.reduce((list, i) => list[i]?.submenu ?? [], items);
 
-export function ContextMenu({
-  x,
-  y,
-  items,
-  onClose,
-}: {
-  x: number;
-  y: number;
-  items: MenuItem[];
-  onClose: () => void;
-}) {
-  // Suspend native browser views while the menu is visible so they cannot cover it.
+export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; items: MenuItem[]; onClose: () => void }) {
   useSuspendNativeViews();
-  const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ left: number; top: number }>({
-    left: x,
-    top: y,
+  const id = useId(); const overlay = useRef<HTMLDivElement>(null); const panel = useRef<HTMLDivElement>(null);
+  const origin = useRef(document.activeElement as HTMLElement | null);
+  const [active, setActive] = useState<number[]>([]); const [open, setOpen] = useState<number[]>([]);
+  const [pos, setPos] = useState({ left: x, top: y });
+  const search = useRef({ text: "", time: 0 });
+  const close = useCallback(() => {
+    if (overlay.current?.contains(document.activeElement) && origin.current?.isConnected) origin.current.focus({ preventScroll: true });
+    onClose();
+  }, [onClose]);
+  const move = (path: number[]) => {
+    setActive(path);
+    requestAnimationFrame(() => {
+      const row = document.getElementById(`${id}-${path.join("-")}`);
+      row?.focus({ preventScroll: true }); row?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
+  };
+  useEffect(() => {
+    const keydown = (event: KeyboardEvent) => {
+      if (event.isComposing) return;
+      const key = event.key;
+      const handled = () => { event.preventDefault(); event.stopPropagation(); };
+      if (key === "Tab") { event.stopPropagation(); close(); return; }
+      if (key === "Escape") {
+        handled();
+        if (open.length) { const parent = [...open]; setOpen(open.slice(0, -1)); move(parent); }
+        else close();
+        return;
+      }
+      const parent = active.length ? active.slice(0, -1) : [];
+      const list = branch(items, parent); const choices = enabled(list); const current = active.at(-1) ?? -1;
+      const item = list[current];
+      if (["ArrowDown", "ArrowUp", "Home", "End"].includes(key)) {
+        handled(); if (!choices.length) return;
+        const index = choices.indexOf(current);
+        const next = key === "Home" ? choices[0] : key === "End" ? choices.at(-1)! : choices[(index + (key === "ArrowDown" ? 1 : index < 0 ? 0 : -1) + choices.length) % choices.length];
+        setOpen(parent); move([...parent, next]);
+      } else if (key === "ArrowRight" || key === "Enter" || key === " ") {
+        handled();
+        if (!item) { if (choices.length) move([...parent, choices[0]]); return; }
+        if (item.disabled) return;
+        if (item.submenu) { setOpen(active); const first = enabled(item.submenu)[0]; if (first !== undefined) move([...active, first]); }
+        else if (key !== "ArrowRight") document.getElementById(`${id}-${active.join("-")}`)?.click();
+      } else if (key === "ArrowLeft") {
+        handled(); if (parent.length) { setOpen(parent.slice(0, -1)); move(parent); }
+      } else if (key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        handled(); const now = Date.now(); const letter = key.toLocaleLowerCase();
+        search.current = { text: now - search.current.time < 700 ? search.current.text + letter : letter, time: now };
+        const query = [...search.current.text].every(c => c === letter) ? letter : search.current.text;
+        const ordered = [...choices.filter(i => i > current), ...choices.filter(i => i <= current)];
+        const found = ordered.find(i => list[i].label.trim().toLocaleLowerCase().startsWith(query));
+        if (found !== undefined) { setOpen(parent); move([...parent, found]); }
+      }
+    };
+    window.addEventListener("keydown", keydown, true);
+    return () => window.removeEventListener("keydown", keydown, true);
   });
-
-  // Measure before paint and clamp viewport overflow so the full menu remains visible.
   useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const { width, height } = el.getBoundingClientRect();
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    let left = x;
-    let top = y;
-    if (left + width > vw - MARGIN) left = Math.max(MARGIN, vw - MARGIN - width);
-    if (top + height > vh - MARGIN) top = Math.max(MARGIN, vh - MARGIN - height);
-    setPos((p) => (p.left === left && p.top === top ? p : { left, top }));
+    if (!panel.current) return;
+    const rect = panel.current.getBoundingClientRect();
+    setPos({ left: Math.max(MARGIN, Math.min(x, innerWidth - rect.width - MARGIN)), top: Math.max(MARGIN, Math.min(y, innerHeight - rect.height - MARGIN)) });
   }, [x, y, items]);
-
-  return (
-    <div
-      style={{ position: "fixed", inset: 0, zIndex: 1000 }}
-      onClick={onClose}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        onClose();
-      }}
-    >
-      <div style={{ position: "fixed", left: pos.left, top: pos.top }}>
-        {/* Attach the ref to the actual min-width panel. Near the right edge, measuring the outer
-            wrapper would return a width constrained by remaining space and prevent correct clamping. */}
-        <MenuPanel panelRef={ref} items={items} onClose={onClose} />
-      </div>
+  return <div ref={overlay} className="context-menu-layer" style={{ position: "fixed", inset: 0, zIndex: 1250 }} onClick={close} onContextMenu={e => { e.preventDefault(); close(); }}>
+    <div style={{ position: "fixed", ...pos }}>
+      <MenuPanel panelRef={panel} items={items} path={[]} active={active} open={open} id={id} setActive={setActive} setOpen={setOpen} onClose={close} />
     </div>
-  );
+  </div>;
 }
 
+interface PanelProps {
+  panelRef?: Ref<HTMLDivElement>; items: MenuItem[]; path: number[]; active: number[]; open: number[]; id: string;
+  setActive: (path: number[]) => void; setOpen: (path: number[]) => void; onClose: () => void;
+}
 const panelStyle: React.CSSProperties = {
-  background: "var(--bg-elevated)",
-  border: "1px solid var(--border)",
-  borderRadius: 6,
-  padding: 4,
-  minWidth: 160,
-  maxHeight: "60vh",
-  overflowX: "hidden",
-  overflowY: "auto",
-  boxShadow: "0 6px 24px rgba(0,0,0,0.4)",
+  background: "var(--bg-elevated)", border: "1px solid var(--border-strong)", borderRadius: 8, padding: 4,
+  minWidth: 188, maxWidth: "calc(100vw - 16px)", maxHeight: "min(70vh, calc(100vh - 16px))", overflowY: "auto",
+  boxShadow: "var(--shadow)",
 };
-
-function MenuPanel({
-  panelRef,
-  items,
-  onClose,
-}: {
-  panelRef?: Ref<HTMLDivElement>;
-  items: MenuItem[];
-  onClose: () => void;
-}) {
-  const [openSub, setOpenSub] = useState<number | null>(null);
-  // Record the parent row's viewport rectangle for Submenu positioning: open right, flip left when
-  // needed, then clamp vertically. Fixed positioning avoids clipping by the panel's overflow rules.
+function MenuPanel(props: PanelProps) {
+  const { panelRef, items, path, active, open, id, setActive, setOpen, onClose } = props;
   const [anchor, setAnchor] = useState<DOMRect | null>(null);
-
-  return (
-    <div
-      ref={panelRef}
-      style={panelStyle}
-      onClick={(e) => e.stopPropagation()}
-      // Preserve focus and the underlying DOM selection on pointerdown. Editor copy/cut/paste actions
-      // depend on that selection; preventDefault blocks focus transfer without suppressing click.
-      onMouseDown={(e) => e.preventDefault()}
-    >
-      {items.map((item, i) =>
-        item.separator ? (
-          <div
-            key={i}
-            style={{ height: 1, background: "var(--border)", margin: "4px 0" }}
-          />
-        ) : item.submenu ? (
-          <div
-            key={i}
-            style={{ position: "relative" }}
-            onMouseEnter={(e) => {
-              setAnchor(e.currentTarget.getBoundingClientRect());
-              setOpenSub(i);
-            }}
-            onMouseLeave={() => setOpenSub((s) => (s === i ? null : s))}
-          >
-            <div
-              className="menu-item"
-              style={{
-                color: "var(--text-primary)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 12,
-              }}
-            >
-              <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                {item.icon && <ItemIcon icon={item.icon} />}
-                <span>{item.label}</span>
-              </span>
-              <span style={{ color: "var(--text-muted)", fontSize: 10 }}>▸</span>
-            </div>
-            {openSub === i && anchor && (
-              <Submenu anchor={anchor} items={item.submenu} onClose={onClose} />
-            )}
-          </div>
-        ) : item.href && !item.disabled ? (
-          <a key={i} className="menu-item" href={item.href}
-            style={{ color: "var(--text-primary)", display: "flex", alignItems: "center", gap: 8, textDecoration: "none" }}
-            onClick={(e) => {
-              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-              e.preventDefault(); item.onClick?.(e); onClose();
-            }}>
-            {item.icon && <ItemIcon icon={item.icon} />}{item.label}
-          </a>
-        ) : (
-          <div
-            key={i}
-            className="menu-item"
-            style={{
-              color: item.disabled
-                ? "var(--text-muted)"
-                : item.danger
-                  ? "var(--status-error)"
-                  : "var(--text-primary)",
-              opacity: item.disabled ? 0.5 : 1,
-              cursor: item.disabled ? "default" : "pointer",
-            }}
-            onClick={(e) => {
-              if (item.disabled) return;
-              item.onClick?.(e);
-              onClose();
-            }}
-          >
-            {item.icon ? (
-              <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <ItemIcon icon={item.icon} />
-                <span>{item.label}</span>
-              </span>
-            ) : (
-              item.label
-            )}
-          </div>
-        ),
-      )}
-    </div>
-  );
+  const aligned = items.some(i => i.icon || i.checked !== undefined);
+  return <div ref={panelRef} role="menu" style={panelStyle} onClick={e => e.stopPropagation()}
+    onMouseDown={e => e.preventDefault()}>
+    {items.map((item, i) => {
+      if (item.separator) return <div key={i} role="separator" style={{ height: 1, background: "var(--border)", margin: "5px 4px" }} />;
+      const itemPath = [...path, i]; const isActive = same(active, itemPath); const expanded = item.submenu && open[path.length] === i && same(open.slice(0, path.length), path);
+      const style: React.CSSProperties = { display: "flex", alignItems: "center", gap: 8, minHeight: 30, padding: "5px 8px", borderRadius: 5,
+        color: item.disabled ? "var(--text-muted)" : item.danger ? "var(--status-error)" : "var(--text-primary)",
+        opacity: item.disabled ? .45 : 1, cursor: item.disabled ? "default" : "pointer", textDecoration: "none", outline: "none",
+        background: isActive ? "var(--accent-soft)" : undefined };
+      const activate = (e: React.MouseEvent) => {
+        if (item.disabled) { e.preventDefault(); return; }
+        if (item.submenu) { e.preventDefault(); setAnchor(e.currentTarget.getBoundingClientRect()); setActive(itemPath); setOpen(expanded ? path : itemPath); return; }
+        if (item.href && (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)) { onClose(); return; }
+        if (item.onClick) e.preventDefault(); onClose(); item.onClick?.(e);
+      };
+      const attrs = { id: `${id}-${itemPath.join("-")}`, className: "menu-item", role: item.checked !== undefined ? "menuitemcheckbox" : "menuitem", tabIndex: -1,
+        "aria-disabled": item.disabled || undefined, "aria-checked": item.checked, "aria-haspopup": item.submenu ? "menu" as const : undefined,
+        "aria-expanded": item.submenu ? !!expanded : undefined, style, onClick: activate,
+        onMouseEnter: (e: React.MouseEvent<HTMLElement>) => {
+          if (item.disabled) return;
+          setActive(itemPath); setAnchor(e.currentTarget.getBoundingClientRect()); setOpen(item.submenu ? itemPath : path);
+        },
+        onFocus: (e: React.FocusEvent<HTMLElement>) => { setAnchor(e.currentTarget.getBoundingClientRect()); },
+      };
+      const content = <>{aligned && <span aria-hidden style={{ width: 16, flex: "0 0 16px", display: "grid", placeItems: "center", color: item.checked ? "var(--accent)" : "inherit" }}>{item.checked ? "✓" : item.icon}</span>}<span style={{ flex: 1, overflowWrap: "anywhere" }}>{item.label}</span>{item.shortcut && <span aria-hidden style={{ color: "var(--text-muted)", fontSize: 10, whiteSpace: "nowrap", paddingLeft: 16 }}>{item.shortcut}</span>}{item.submenu && <span aria-hidden style={{ color: "var(--text-muted)" }}>›</span>}</>;
+      return <div key={i} onMouseLeave={() => { if (expanded) { setOpen(path); setActive(itemPath); } }}>
+        {item.href && !item.submenu ? <a {...attrs} href={item.disabled ? undefined : item.href}>{content}</a> : <div {...attrs}>{content}</div>}
+        {expanded && anchor && <Submenu {...props} panelRef={undefined} path={itemPath} items={item.submenu!} anchor={anchor} />}
+      </div>;
+    })}
+  </div>;
 }
-
-/** Submenu that opens to the right, flips left when necessary, and clamps vertically. */
-function Submenu({
-  anchor,
-  items,
-  onClose,
-}: {
-  anchor: DOMRect;
-  items: MenuItem[];
-  onClose: () => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ left: number; top: number }>({
-    left: anchor.right,
-    top: anchor.top - 4,
-  });
-
+function Submenu({ anchor, ...props }: PanelProps & { anchor: DOMRect }) {
+  const ref = useRef<HTMLDivElement>(null); const [pos, setPos] = useState({ left: anchor.right, top: anchor.top - 4, flip: false });
   useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const { width, height } = el.getBoundingClientRect();
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    // Flip left when the right side is too narrow, then clamp if neither side fully fits.
-    let left = anchor.right;
-    if (left + width > vw - MARGIN) {
-      left = anchor.left - width;
-      if (left < MARGIN) left = Math.max(MARGIN, vw - MARGIN - width);
-    }
-    let top = anchor.top - 4;
-    if (top + height > vh - MARGIN) top = Math.max(MARGIN, vh - MARGIN - height);
-    setPos((p) => (p.left === left && p.top === top ? p : { left, top }));
+    if (!ref.current) return;
+    const { width, height } = ref.current.getBoundingClientRect();
+    const flip = anchor.right + width + 8 > innerWidth - MARGIN;
+    const left = flip ? anchor.left - width - 8 : anchor.right;
+    setPos({ left: Math.max(MARGIN, Math.min(left, innerWidth - width - 8 - MARGIN)), top: Math.max(MARGIN, Math.min(anchor.top - 4, innerHeight - height - MARGIN)), flip });
   }, [anchor]);
-
-  return (
-    <div
-      ref={ref}
-      style={{ position: "fixed", left: pos.left, top: pos.top, zIndex: 1001 }}
-    >
-      <MenuPanel items={items} onClose={onClose} />
-    </div>
-  );
+  // Transparent padding bridges the visible gap so pointer travel does not dismiss the submenu.
+  return <div style={{ position: "fixed", left: pos.left, top: pos.top, paddingLeft: pos.flip ? 0 : 8, paddingRight: pos.flip ? 8 : 0, zIndex: 1251 }}><MenuPanel {...props} panelRef={ref} /></div>;
 }

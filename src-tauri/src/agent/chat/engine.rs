@@ -27,11 +27,12 @@ use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use serde_json::{json, Value};
 
+mod antigravity;
 mod auth;
 mod codex;
 mod generation;
@@ -626,6 +627,9 @@ pub struct ChatWindow {
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatSnapshot {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_messages: Option<Vec<super::user_messages::UserMessage>>,
+    pub recovery: super::recovery::Recovery,
     pub positions: HashMap<String, usize>,
     pub page_kind: &'static str,
     pub has_more: bool,
@@ -849,6 +853,9 @@ pub struct ClaudeExtras {
     pub background_tasks: Vec<BackgroundTask>,
     /// Whether fast mode was switched on for this process.
     pub fast_mode: bool,
+    /// The Claude CLI answered `list_models` as an unknown request: it predates live model listing, so the
+    /// composer falls back to the built-in catalogue and suggests updating.
+    pub list_models_unsupported: bool,
     /// A failed API call being retried right now; cleared by the next frame that says the call went through.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_retry: Option<Value>,
@@ -880,6 +887,16 @@ impl ClaudeExtras {
 /// The environment every process this engine starts for a session gets: the agent itself, and a shell
 /// command run from the conversation view, which must see exactly what the agent would.
 pub(crate) fn agent_environment(app: &AppCtx, session_id: &str, cmd: &mut std::process::Command) {
+    agent_environment_in_shell(app, session_id, cmd, None);
+}
+
+pub(crate) fn agent_environment_in_shell(app: &AppCtx, session_id: &str, cmd: &mut std::process::Command, shell: Option<&str>) {
+    let session = app.db().conn.lock().ok()
+        .and_then(|conn| crate::db::repo::get_session(&conn, session_id).ok().flatten());
+    let stored_shell = session.as_ref().map(|session| {
+        crate::pty::manager::resolve_shell(session.kind, session.shell.clone(), app.data_dir().ok().as_deref()).0
+    });
+    if let Some(environment) = crate::login_env::latest_environment_in(shell.or(stored_shell.as_deref()), cmd.get_current_dir()) { environment.apply_command(cmd); }
     // The same reasoning as for PTY sessions: an agent we start is a session of its own, never a
     // continuation of whatever harness happened to launch VelaTerm.
     for key in crate::pty::manager::AGENT_HARNESS_MARKERS {
@@ -897,19 +914,15 @@ pub(crate) fn agent_environment(app: &AppCtx, session_id: &str, cmd: &mut std::p
     // Give a spawned session the id of whoever spawned it, matching pty/manager.rs. Absent for
     // top-level sessions; `vself` expands the id into the full ancestry when more than the parent is
     // needed.
-    if let Ok(conn) = app.db().conn.lock() {
-        if let Ok(Some(parent)) = crate::db::repo::get_session(&conn, session_id)
-            .map(|s| s.and_then(|s| s.parent_session_id))
-        {
-            cmd.env("VLX_PARENT_SESSION_ID", parent);
-        }
-    }
+    if let Some(parent) = session.and_then(|session| session.parent_session_id) { cmd.env("VLX_PARENT_SESSION_ID", parent); }
     if let Ok(exe) = std::env::current_exe() {
         cmd.env("VLX_EXE", exe.as_os_str());
     }
     if let Ok(data_dir) = app.data_dir() {
         let bin = crate::agent::spawn_cli::bin_dir(&data_dir);
-        let existing = crate::appimage::clean_var("PATH").unwrap_or_default();
+        let existing = cmd.get_envs().find(|(key, _)| *key == "PATH")
+            .and_then(|(_, value)| value.map(|path| path.to_string_lossy().into_owned()))
+            .or_else(|| crate::appimage::clean_var("PATH")).unwrap_or_default();
         let sep = if cfg!(windows) { ';' } else { ':' };
         cmd.env("PATH", format!("{}{sep}{existing}", bin.display()));
         cmd.env("VLX_BIN_DIR", bin.as_os_str());
@@ -925,6 +938,10 @@ pub(crate) fn agent_environment(app: &AppCtx, session_id: &str, cmd: &mut std::p
 }
 
 struct ChatProcess {
+    callbacks: RwLock<()>,
+    expected_native: Option<String>,
+    identity_checked: AtomicBool,
+    owner: Mutex<Option<super::ownership::Owner>>,
     kind: SessionKind,
     cwd: Option<String>,
     bin: String,
@@ -953,6 +970,7 @@ struct ChatProcess {
     opencode: Mutex<opencode::OpencodeState>,
     /// The Pi/OMP side of this conversation: its variant, model catalogue, and pending extension dialogs.
     pi: Mutex<pi::PiState>,
+    antigravity: Mutex<super::antigravity_protocol::StreamState>,
     /// Codex service tier (`fast`, or another id from its model catalogue) for subsequent turns. None
     /// keeps whatever the thread was opened with.
     service_tier: Mutex<Option<String>>,
@@ -1012,7 +1030,7 @@ struct ChatProcess {
     alive: AtomicBool,
     /// A view let go of this conversation while a turn was running: stop as soon as it is idle.
     shell_running: AtomicBool,
-    release_when_idle: AtomicBool,
+    release_when_idle: Arc<AtomicBool>,
     /// This process was stopped on purpose. The exit that follows is then reported as asked-for, so no
     /// client draws it as the agent failing.
     released: AtomicBool,
@@ -1051,6 +1069,7 @@ struct TurnQueue {
     running: bool,
     /// Messages waiting for that turn to end, in the order they will be sent.
     waiting: Vec<QueuedMessage>,
+    paused: bool,
     /// Pause automatic queue draining while native steering acceptance is pending.
     steering: bool,
     /// Whether the running turn was stopped on purpose. The agent reports an interrupted turn as a failed
@@ -1159,6 +1178,8 @@ pub struct ChatManager {
     sessions: Mutex<HashMap<String, Arc<ChatProcess>>>,
     permission_restarts: Mutex<HashSet<String>>,
     auth_change: Mutex<()>,
+    starts: Mutex<()>,
+    closing: AtomicBool,
     /// The shell command running for each session, at most one per conversation.
     shell_runs: Mutex<HashMap<String, Arc<super::shell::ShellRun>>>,
 }
@@ -1176,6 +1197,43 @@ impl SubmissionFailure {
 }
 
 impl ChatManager {
+    pub fn queue_paused(&self, session_id: &str) -> bool {
+        self.sessions.lock().unwrap().get(session_id).is_some_and(|p| { let turn=p.turn.lock().unwrap(); turn.paused && !turn.waiting.is_empty() })
+    }
+
+    pub fn resume_queue(&self, app: &AppCtx, session_id: &str) -> Result<(), String> {
+        let proc = self.get(session_id)?;
+        let _action = proc.action.lock().unwrap();
+        let _callbacks = proc.callbacks.read().unwrap();
+        if !self.owns_process(session_id,&proc) || !proc.alive.load(Ordering::Relaxed) {
+            return Err("The agent changed. Refresh the conversation before changing its queue.".into());
+        }
+        proc.turn.lock().unwrap().paused = false;
+        start_waiting_message(app,session_id,&proc);
+        emit_queue(app,session_id,&proc);
+        Ok(())
+    }
+
+    /// Application exit preserves queued work, unlike the user's explicit Stop or engine handoff.
+    pub fn shutdown(&self, app: &AppCtx) {
+        self.closing.store(true,Ordering::Relaxed);
+        let _start=self.starts.lock().unwrap();
+        let runs: Vec<_> = self.shell_runs.lock().unwrap().drain().map(|(_,run)|run).collect();
+        for run in runs { run.abandon(); }
+        let processes: Vec<_> = self.sessions.lock().unwrap().iter().map(|(s,p)|(s.clone(),p.clone())).collect();
+        for (session,proc) in processes {
+            let _action = proc.action.lock().unwrap();
+            let _callbacks = proc.callbacks.write().unwrap();
+            let _ = super::recovery::interrupt(app,&session);
+            proc.released.store(true,Ordering::Relaxed);
+            proc.alive.store(false,Ordering::Relaxed);
+            *proc.stdin.lock().unwrap() = None;
+            let mut child = proc.child.lock().unwrap();
+            terminate_owned(&mut child); let _ = child.wait();
+            if let Some(owner) = proc.owner.lock().unwrap().take() { owner.retire(app,&session); }
+        }
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -1214,6 +1272,7 @@ impl ChatManager {
     pub fn run_shell(&self, app: &AppCtx, session_id: &str, command: &str, message_id: &str) -> Result<(), String> {
         let proc = self.get(session_id)?;
         let _action = proc.action.lock().unwrap();
+        if self.closing.load(Ordering::Relaxed) { return Err("The application is shutting down.".into()); }
         if !proc.alive.load(Ordering::Relaxed) || !self.owns_process(session_id, &proc) {
             return Err("This session has no running agent".into());
         }
@@ -1387,11 +1446,32 @@ impl ChatManager {
         // Claude only: switch fast mode on once the handshake completes.
         fast_mode: bool,
     ) -> Result<(), String> {
+        let _start = self.starts.lock().unwrap();
+        if self.closing.load(Ordering::Relaxed) { return Err("The application is shutting down.".into()); }
+        {
+            let session=crate::db::repo::get_session(&app.db().conn.lock().unwrap(),session_id)?
+                .ok_or("Session not found")?;
+            if session.engine!="chat" || session.archived_at.is_some() {
+                return Err("Restore this conversation in the chat view before starting its agent.".into());
+            }
+            if session.kind!=kind || session.agent_session_id.as_deref()!=resume {
+                return Err("The conversation identity changed during startup. Refresh it before continuing.".into());
+            }
+        }
         {
             let running = self.sessions.lock().unwrap();
             if running.get(session_id).is_some_and(|p| p.alive.load(Ordering::Relaxed)) {
                 return Ok(());
             }
+        }
+
+        let previous = self.sessions.lock().unwrap().get(session_id).cloned();
+        let _old_callbacks = previous.as_ref().map(|p|p.callbacks.write().unwrap());
+        if let Some(previous) = &previous {
+            let mut child = previous.child.lock().unwrap();
+            if child.try_wait().map_err(|e|e.to_string())?.is_none() { terminate_owned(&mut child); }
+            child.wait().map_err(|e|e.to_string())?;
+            if let Some(owner) = previous.owner.lock().unwrap().take() { owner.retire(app,session_id); }
         }
 
         // Native 1M models such as Opus 5 have no second selectable `[1m]` entry in Paseo, so old saved
@@ -1419,6 +1499,10 @@ impl ChatManager {
             SessionKind::Claude => {
                 cmd.args(protocol::launch_args(resume, fork, model, effort, &mode));
                 cmd.args(extra_args);
+            }
+            SessionKind::Antigravity => {
+                if fork { return Err("Antigravity does not support conversation forks".into()); }
+                cmd.args(super::antigravity_protocol::launch_args(resume, model, effort, &mode, extra_args)?);
             }
             SessionKind::Codex => {
                 cmd.arg("app-server").arg("--stdio");
@@ -1469,9 +1553,40 @@ impl ChatManager {
             crate::db::repo::codex_chat_settings(&conn, session_id)?
         };
 
+        let (mut initial_turn, release_when_idle) = if kind == SessionKind::Antigravity {
+            antigravity::restart_state(self.sessions.lock().unwrap().get(session_id).cloned())
+        } else { (TurnQueue::default(), Arc::new(AtomicBool::new(false))) };
+        if initial_turn.waiting.is_empty() {
+            initial_turn.waiting = super::recovery::queued(&app.db().conn.lock().unwrap(),session_id)?;
+            initial_turn.paused = !initial_turn.waiting.is_empty();
+        }
         crate::agent::executable::prepare_command(&mut cmd, bin);
-        let mut child = cmd.spawn().map_err(|e| spawn_failure(kind, bin, cwd, &e))?;
+        let mut owner = super::ownership::Owner::acquire(app, session_id,
+            resume.filter(|_| !fork).map(|id|format!("{}:{id}",kind.as_str())))?;
+        // Read again under the writer lease: another client may have completed a view switch.
+        let session=crate::db::repo::get_session(&app.db().conn.lock().unwrap(),session_id)?
+            .ok_or("Session not found")?;
+        if session.engine!="chat" || session.archived_at.is_some() {
+            owner.retire(app,session_id);
+            return Err("Restore this conversation in the chat view before starting its agent.".into());
+        }
+        if session.kind!=kind || session.agent_session_id.as_deref()!=resume {
+            owner.retire(app,session_id);
+            return Err("The conversation identity changed during startup. Refresh it before continuing.".into());
+        }
+        #[cfg(unix)] {
+            use std::os::unix::process::CommandExt;
+            cmd.process_group(0);
+            owner.inherit(&mut cmd);
+        }
+        let mut child = match cmd.spawn() {
+            Ok(child) => child,
+            Err(error) => { owner.retire(app,session_id); return Err(spawn_failure(kind,bin,cwd,&error)); }
+        };
         let pid = child.id();
+        if let Err(error) = owner.launched(app,session_id,pid) {
+            terminate_owned(&mut child); let _ = child.wait(); owner.retire(app,session_id); return Err(error);
+        }
         let stdin = child.stdin.take().ok_or("The agent has no input stream")?;
         let stdout = child.stdout.take().ok_or("The agent has no output stream")?;
         let stderr = child.stderr.take();
@@ -1479,6 +1594,10 @@ impl ChatManager {
         let bypass_capable = kind == SessionKind::Claude
             && permission_restart::claude_bypass_capable(Some(&mode), extra_args);
         let proc = Arc::new(ChatProcess {
+            callbacks: RwLock::new(()),
+            expected_native: resume.filter(|_| !fork).map(str::to_owned),
+            identity_checked: AtomicBool::new(false),
+            owner: Mutex::new(Some(owner)),
             kind,
             bin: bin.to_string(),
             auth_settings_args: auth::claude::settings_args(extra_args),
@@ -1496,6 +1615,7 @@ impl ChatManager {
             codex_pending_child_events: Mutex::new(HashMap::new()),
             opencode: Mutex::new(opencode::OpencodeState::default()),
             pi: Mutex::new(pi::PiState::default()),
+            antigravity: Mutex::new(crate::agent::chat::antigravity_protocol::StreamState::default()),
             service_tier: Mutex::new(service_tier),
             personality: Mutex::new(personality),
             codex_turn_error: Mutex::new(None),
@@ -1528,7 +1648,7 @@ impl ChatManager {
             }),
             collaboration_modes: Mutex::new(Vec::new()),
             current_turn: Mutex::new(None),
-            ready: AtomicBool::new(kind == SessionKind::Claude),
+            ready: AtomicBool::new(matches!(kind, SessionKind::Claude | SessionKind::Antigravity)),
             codex_initialized: AtomicBool::new(false),
             buffers: Mutex::new(HashMap::new()),
             current_message: Mutex::new(None),
@@ -1537,11 +1657,11 @@ impl ChatManager {
             waiters: Mutex::new(HashMap::new()),
             user_targets: Mutex::new(HashMap::new()),
             pending_user_rows: Mutex::new(Vec::new()),
-            turn: Mutex::new(TurnQueue::default()),
+            turn: Mutex::new(initial_turn),
             stderr: Mutex::new(String::new()),
             alive: AtomicBool::new(true),
             shell_running: AtomicBool::new(false),
-            release_when_idle: AtomicBool::new(false),
+            release_when_idle,
             released: AtomicBool::new(false),
             next_request: AtomicU64::new(1),
             pid,
@@ -1553,7 +1673,8 @@ impl ChatManager {
         // timeline so a pending submission never becomes the only visible message during replay.
         if let Some(id) = resume {
             match super::history::replay(kind, id) {
-                Ok(rows) => {
+                Ok(mut rows) => {
+                    if super::recovery::restore_rows(app,session_id,&mut rows).is_err() { crate::diagnostic_warn!("chat recovery: could not merge saved attachments into history"); }
                     let mut timeline = proc.timeline.lock().unwrap();
                     timeline.replace_all(rows);
                 }
@@ -1609,6 +1730,7 @@ impl ChatManager {
 
         let init_id = proc.request_id("initialize");
         match kind {
+            SessionKind::Antigravity => start_waiting_message(app, session_id, &proc),
             SessionKind::Claude => {
                 // Ask for the command catalogue straight away; the composer's completions come from the answer.
                 let _ = proc.write(&protocol::control_request(&init_id, protocol::initialize()));
@@ -1705,7 +1827,9 @@ impl ChatManager {
         images: Vec<ChatImage>, behavior: &str, message_id: Option<&str>,
     ) -> Result<&'static str, String> {
         self.send_identified_checked(app, session_id, text, images, behavior, message_id)
-            .map_err(SubmissionFailure::into_string)
+            .map_err(|error| if message_id.is_some() && matches!(&error,SubmissionFailure::Uncertain(_)) {
+                "chat_submission_pending".into()
+            } else { error.into_string() })
     }
 
     /// A typed failure distinguishes a proven pre-dispatch rejection from a write or queue insertion
@@ -1717,7 +1841,12 @@ impl ChatManager {
         let proc = self.get(session_id).map_err(SubmissionFailure::Rejected)?;
         let mut attempted = false;
         self.send_on_process(app, session_id, &proc, text, images, behavior, message_id, &mut attempted)
-            .map_err(|error| if attempted { SubmissionFailure::Uncertain(error) } else { SubmissionFailure::Rejected(error) })
+            .map_err(|error| {
+                // After the action returns, an intact prepared record proves the provider boundary was
+                // never reached. A failed database probe cannot make that promise.
+                let unwritten=message_id.is_some_and(|id|super::recovery::not_dispatched(&app.db().conn.lock().unwrap(),session_id,id));
+                if attempted && !unwritten { SubmissionFailure::Uncertain(error) } else { SubmissionFailure::Rejected(error) }
+            })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1727,17 +1856,32 @@ impl ChatManager {
     ) -> Result<&'static str, String> {
         crate::diagnostics::record("INFO","agent_submission",json!({"sessionId":session_id,"originalChars":text.chars().count(),"imageCount":images.len(),"status":"started"}));
         let _action = proc.action.lock().unwrap();
+        let _callbacks = proc.callbacks.read().unwrap();
         self.check_permission_restart(session_id)?;
+        if self.closing.load(Ordering::Relaxed) { return Err("The application is shutting down.".into()); }
         if !self.owns_process(session_id, proc) || !proc.alive.load(Ordering::Relaxed) {
             return Err("This session has no running agent".into());
         }
         if auth::active(&proc) {
             return Err("Finish or cancel Codex sign-in before sending a message.".into());
         }
+        if proc.kind!=SessionKind::Opencode && proc.ready.load(Ordering::Relaxed) && proc.stdin.lock().unwrap().is_none() {
+            return Err("The agent's input stream has closed. Restart its process before sending a message.".into());
+        }
+        if proc.kind == SessionKind::Antigravity {
+            super::antigravity_protocol::validate(text, images.len(), behavior)?;
+        }
         // Steering is a prompt, never a local command or a queued replacement.
-        if proc.kind == SessionKind::Opencode && behavior != "steer" && proc.ready.load(Ordering::Relaxed) {
+        if proc.kind == SessionKind::Opencode && behavior != "steer" && proc.ready.load(Ordering::Relaxed) && opencode::is_local_command(text.trim()) {
+            claim_native_writer(app,proc)?;
+            if let Some(id) = message_id {
+                super::recovery::before_dispatch(app,session_id,id,proc.kind,proc.agent_session_id.lock().unwrap().as_deref(),text)?;
+            }
             *attempted = true;
             if let Some(handled) = opencode::local_command(app, session_id, &proc, text)? {
+                if let Some(id) = message_id {
+                    super::submissions::finish_dispatch(&app.db().conn.lock().unwrap(),session_id,id,"command")?;
+                }
                 return Ok(if message_id.is_some() { "command" } else { handled });
             }
         }
@@ -1748,8 +1892,7 @@ impl ChatManager {
             if proc.ready.load(Ordering::Relaxed) && turn.running && !turn.interrupted {
                 drop(turn);
                 *attempted = true;
-                dispatch_steer(app, session_id, &proc, text, &images, message_id)
-                    .map_err(|error| if message_id.is_some() { "chat_submission_pending".into() } else { error })?;
+                dispatch_steer(app, session_id, &proc, text, &images, message_id)?;
                 // A turn stopped on a permission question is still running, so the message is written
                 // into it as usual. Its agent, though, is blocked waiting for that answer and reads
                 // nothing until someone gives it. The sender is told which of the two happened.
@@ -1762,13 +1905,14 @@ impl ChatManager {
                 text: text.to_string(),
                 images,
             };
+            super::recovery::queue(&app.db().conn.lock().unwrap(), session_id, &item, false)?;
             *attempted = true;
             turn.waiting.push(item);
             drop(turn);
             emit_queue(app, session_id, &proc);
             return Ok("queued");
         }
-        if turn.running {
+        if turn.running || turn.paused {
             let item = QueuedMessage {
                 id: message_id.map(str::to_owned).unwrap_or_else(|| format!("q-{}", proc.next_request.fetch_add(1, Ordering::Relaxed))),
                 text: text.to_string(),
@@ -1776,6 +1920,7 @@ impl ChatManager {
             };
             // Interrupting means "do this instead of what you are doing", so this message goes ahead of
             // anything already waiting rather than behind it.
+            super::recovery::queue(&app.db().conn.lock().unwrap(), session_id, &item, behavior == "interrupt")?;
             *attempted = true;
             if behavior == "interrupt" {
                 turn.waiting.insert(0, item);
@@ -1794,7 +1939,7 @@ impl ChatManager {
             emit_queue(app, session_id, &proc);
             // The prompt is already queued even if stopping the previous turn failed.
             // An identified retry must not enqueue it again under a new identifier.
-            stopped.map_err(|error| if message_id.is_some() { "chat_submission_pending".into() } else { error })?;
+            stopped?;
             return Ok("queued");
         }
         turn.running = true;
@@ -1805,22 +1950,33 @@ impl ChatManager {
         }
         *attempted = true;
         if let Err(e) = dispatch(app, session_id, &proc, text, &images, message_id) {
-            // Nothing was written, so nothing will report a result to clear this again.
+            // A lost receipt cannot end a turn whose provider write completed successfully.
+            if e.written {
+                emit(app,session_id,json!({"type":"recoveryChanged"}));
+                return Err(e.message);
+            }
+            // A failed provider write has no running clock; its uncertain queue remains paused.
             let mut turn = proc.turn.lock().unwrap();
             turn.running = false;
             turn.started_at = None;
+            if message_id.is_some_and(|id|super::recovery::dispatch_pending(&app.db().conn.lock().unwrap(),session_id,id)) { turn.paused=true; }
             drop(turn);
             // A snapshot may have observed the clock in the brief interval before the failed write.
             emit(app, session_id, json!({"type":"turnCompleted"}));
-            return Err(if message_id.is_some() { "chat_submission_pending".into() } else { e });
+            emit_state(app, session_id, AgentState::Waiting);
+            return Err(e.message);
         }
         Ok("sent")
     }
 
-    /// Promote a queued message into the current turn, preserving it on native refusal.
+    /// Preserve a queued prompt before dispatch; uncertain writes move from the queue to recovery.
     pub fn queue_steer(&self, app: &AppCtx, session_id: &str, id: &str) -> Result<(), String> {
         let proc = self.get(session_id)?;
         let _action = proc.action.lock().unwrap();
+        let _callbacks = proc.callbacks.read().unwrap();
+        if !self.owns_process(session_id,&proc) || !proc.alive.load(Ordering::Relaxed) {
+            return Err("The agent changed. Refresh the conversation before changing its queue.".into());
+        }
         let item = {
             let mut turn = proc.turn.lock().unwrap();
             if !proc.ready.load(Ordering::Relaxed) || !turn.running || turn.interrupted {
@@ -1832,14 +1988,21 @@ impl ChatManager {
             item
         };
         let result = dispatch_steer(app, session_id, &proc, &item.text, &item.images, Some(&item.id));
+        let (unknown,confirmed)={
+            let conn=app.db().conn.lock().unwrap();
+            (result.is_err() && super::recovery::dispatch_pending(&conn,session_id,id),
+                result.is_err() && super::recovery::dispatch_confirmed(&conn,session_id,id))
+        };
         {
             let mut turn = proc.turn.lock().unwrap();
             turn.steering = false;
-            if result.is_ok() {
+            if result.is_ok() || unknown || confirmed {
                 turn.waiting.retain(|item| item.id != id);
+                if turn.waiting.is_empty() { turn.paused=false; }
             }
         }
         emit_queue(app, session_id, &proc);
+        if unknown || confirmed { emit(app,session_id,json!({"type":"recoveryChanged"})); }
         // A completion received while awaiting acceptance deferred the next queued turn.
         start_waiting_message(app, session_id, &proc);
         release_if_idle(app, session_id, &proc);
@@ -1850,11 +2013,17 @@ impl ChatManager {
     pub fn queue_remove(&self, app: &AppCtx, session_id: &str, id: &str) -> Result<(), String> {
         let proc = self.get(session_id)?;
         let _action = proc.action.lock().unwrap();
+        let _callbacks = proc.callbacks.read().unwrap();
+        if !self.owns_process(session_id,&proc) || !proc.alive.load(Ordering::Relaxed) {
+            return Err("The agent changed. Refresh the conversation before changing its queue.".into());
+        }
         {
             let mut turn = proc.turn.lock().unwrap();
             if turn.waiting.iter().any(|item| item.id == id) {
                 crate::agent::spawn_requests::cancel_queued(app, session_id, id)?;
+                super::recovery::cancel(&app.db().conn.lock().unwrap(), session_id, id)?;
                 turn.waiting.retain(|item| item.id != id);
+                if turn.waiting.is_empty() { turn.paused=false; }
             }
         }
         emit_queue(app, session_id, &proc);
@@ -1872,6 +2041,10 @@ impl ChatManager {
     ) -> Result<(), String> {
         let proc = self.get(session_id)?;
         let _action = proc.action.lock().unwrap();
+        let _callbacks = proc.callbacks.read().unwrap();
+        if !self.owns_process(session_id,&proc) || !proc.alive.load(Ordering::Relaxed) {
+            return Err("The agent changed. Refresh the conversation before changing its queue.".into());
+        }
         {
             let mut turn = proc.turn.lock().unwrap();
             for item in turn.waiting.iter_mut() {
@@ -1879,6 +2052,7 @@ impl ChatManager {
                     // A delayed editor from another client must not rewrite completed execution facts.
                     if item.images.is_empty() && super::shell::parse_context(&item.text).is_some() { continue; }
                     crate::agent::spawn_requests::edit_queued(app, session_id, id, text, &item.images)?;
+                    super::recovery::edit(&app.db().conn.lock().unwrap(), session_id, id, text)?;
                     item.text = text.to_string();
                 }
             }
@@ -2111,6 +2285,23 @@ impl ChatManager {
             std::thread::sleep(Duration::from_millis(50));
         }
         opencode::prepare_terminal(&proc, selection)
+    }
+
+    /// Commit launch-only settings while no submission can race the process release.
+    pub fn update_launch_settings<T>(&self, app: &AppCtx, session_id: &str,
+        apply: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+        let proc = self.sessions.lock().unwrap().get(session_id).cloned();
+        let Some(proc) = proc else { return apply(); };
+        let _action = proc.action.lock().unwrap();
+        if !proc.alive.load(Ordering::Relaxed) { return apply(); }
+        let turn = proc.turn.lock().unwrap();
+        if turn.running || !turn.waiting.is_empty() || proc.shell_running.load(Ordering::Relaxed)
+            || crate::security::session_active(session_id) || crate::agent::plan_execute::active(app, session_id) {
+            return Err("Wait for Antigravity to finish before changing its launch settings".into());
+        }
+        let value = apply()?;
+        release_process(app, session_id, &proc);
+        Ok(value)
     }
 
     /// Change the model of the running conversation. `None` restores the default.
@@ -2478,8 +2669,10 @@ impl ChatManager {
     pub fn snapshot_window(&self, session_id: &str, window: Option<&ChatWindow>) -> ChatSnapshot {
         let Some(proc) = self.sessions.lock().unwrap().get(session_id).cloned() else {
             return ChatSnapshot {
+                user_messages: Some(Vec::new()),
                 positions: HashMap::new(), page_kind: "full", has_more: false, total_rows: 0,
                 submission_receipts: true,
+                recovery: super::recovery::Recovery::default(),
                 rows_revision: 0,
                 queue_revision: 0,
                 rewind_scopes: Vec::new(),
@@ -2510,7 +2703,7 @@ impl ChatManager {
         // Read every field into a local first: building the struct inline would keep the lock guards alive
         // past the point where `proc` itself is dropped.
         let running = proc.alive.load(Ordering::Relaxed);
-        let (rows, positions, rows_revision, page_kind, has_more, total_rows) = {
+        let (rows, positions, rows_revision, page_kind, has_more, total_rows, user_messages) = {
             let mut timeline = proc.timeline.lock().unwrap();
             timeline.revision += 1;
             let total = timeline.rows.len();
@@ -2536,7 +2729,8 @@ impl ChatManager {
                 timeline.rows[start..].iter().filter(|row| timeline.row_versions.get(row.id()).copied().unwrap_or(0) > since).cloned().collect()
             } else { timeline.rows[start..end].to_vec() };
             let positions = selected.iter().filter_map(|row| timeline.at.get(row.id()).map(|index| (row.id().to_owned(), *index))).collect();
-            (selected, positions, timeline.revision, kind, start > 0, total)
+            let user_messages = if kind == "history" { None } else { Some(super::user_messages::outline(&timeline.rows)) };
+            (selected, positions, timeline.revision, kind, start > 0, total, user_messages)
         };
         let (queue, turn_started_at, queue_revision) = {
             let mut turn = proc.turn.lock().unwrap();
@@ -2556,8 +2750,10 @@ impl ChatManager {
         let personality = proc.personality.lock().unwrap().clone();
         let extras = proc.extras.lock().unwrap().published();
         ChatSnapshot {
+            user_messages,
             positions, page_kind, has_more, total_rows,
             submission_receipts: true,
+                recovery: super::recovery::Recovery::default(),
             rows_revision,
             queue_revision,
             rewind_scopes: rewind_scopes(proc.kind),
@@ -2727,34 +2923,44 @@ impl ChatManager {
         }))
     }
 
-    /// End the conversation and let the process go.
-    pub fn stop_for_handoff(&self, app: &AppCtx, session_id: &str) -> Result<(), String> {
+    /// Serialize a view switch with both Chat starts and terminal launches.
+    pub fn engine_guard(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.starts.lock().unwrap()
+    }
+
+    /// Hold the returned lease until the new engine is committed; descendants must be drained too.
+    pub fn stop_for_handoff(&self, app: &AppCtx, session_id: &str) -> Result<Vec<std::fs::File>, String> {
         let proc = self.sessions.lock().unwrap().get(session_id).cloned();
         self.stop(app, session_id)?;
         if let Some(proc) = proc {
             proc.child.lock().unwrap().wait().map_err(|e| format!("Failed to stop the conversation engine: {e}"))?;
+            if let Some(owner) = proc.owner.lock().unwrap().take() { owner.retire(app,session_id); }
         }
-        Ok(())
+        super::ownership::handoff_guard(app,session_id)
     }
 
     /// End the conversation and let the process go.
     pub fn stop(&self, app: &AppCtx, session_id: &str) -> Result<(), String> {
         self.check_permission_restart(session_id)?;
-        // A command still running would otherwise report to an agent that has just been let go, and
-        // start it again only to do so.
-        if let Some(run) = self.shell_runs.lock().unwrap().remove(session_id) {
-            run.abandon();
-        }
-        let Some(proc) = self.sessions.lock().unwrap().get(session_id).cloned() else {
+        let proc = self.sessions.lock().unwrap().get(session_id).cloned();
+        let Some(proc) = proc else {
+            let _owner = super::ownership::idle_guard(app,session_id)?;
+            cancel_persisted_queue(app,session_id)?;
+            super::recovery::end_turn(app,session_id);
+            if let Some(run) = self.shell_runs.lock().unwrap().remove(session_id) { run.abandon(); }
             return Ok(());
         };
         let _action = proc.action.lock().unwrap();
+        let _callbacks = proc.callbacks.write().unwrap();
         // Keep removal and its terminal notifications ordered before a replacement can be installed.
         // Acquire the process action first, matching permission restart's lock order.
         let mut sessions = self.sessions.lock().unwrap();
         if !sessions.get(session_id).is_some_and(|current| Arc::ptr_eq(current, &proc)) {
             return Ok(());
         }
+        cancel_persisted_queue(app,session_id)?;
+        super::recovery::end_turn(app,session_id);
+        if let Some(run) = self.shell_runs.lock().unwrap().remove(session_id) { run.abandon(); }
         {
             let mut turn = proc.turn.lock().unwrap();
             let ids = turn.waiting.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
@@ -2772,10 +2978,15 @@ impl ChatManager {
         emit_extras(app, session_id, &proc);
         // Closing stdin asks the agent to finish; killing is the fallback for one that does not.
         *proc.stdin.lock().unwrap() = None;
-        let _ = proc.child.lock().unwrap().kill();
+        {
+            let mut child = proc.child.lock().unwrap();
+            terminate_owned(&mut child);
+            child.wait().map_err(|e|e.to_string())?;
+        }
+        if let Some(owner) = proc.owner.lock().unwrap().take() { owner.retire(app,session_id); }
         // The stdout reader skips removed processes, so explicit stop owns these notifications.
         emit(app, session_id, json!({"type":"exited","code":-1,"stderr":"","released":true}));
-        emit_state(app, session_id, AgentState::Waiting);
+        emit_state_with(app, session_id, AgentState::Waiting, true);
         Ok(())
     }
 
@@ -2801,10 +3012,11 @@ impl ChatManager {
         let Some(proc) = self.sessions.lock().unwrap().get(session_id).cloned() else {
             return;
         };
+        // A replacement may be starting while the previous pipe has already closed.
+        proc.release_when_idle.store(true, Ordering::Relaxed);
         if !proc.alive.load(Ordering::Relaxed) {
             return;
         }
-        proc.release_when_idle.store(true, Ordering::Relaxed);
         release_if_idle(app, session_id, &proc);
     }
 }
@@ -2822,7 +3034,7 @@ fn release_if_idle(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
         && !turn.running
         && !proc.shell_running.load(Ordering::Relaxed)
         && !auth::active(proc)
-        && turn.waiting.is_empty()
+        && (turn.waiting.is_empty() || turn.paused)
         && turn.active_tasks.is_empty()
         && turn.background_tasks.is_empty()
         && turn.settling.is_empty()
@@ -2851,6 +3063,8 @@ fn settle_background_state(app: &AppCtx, session_id: &str, proc: &Arc<ChatProces
     let (app, session_id, proc) = (app.clone(), session_id.to_string(), proc.clone());
     std::thread::spawn(move || loop {
         std::thread::sleep(WAKE_GRACE);
+        let _callback = proc.callbacks.read().unwrap();
+        if proc.owner.lock().unwrap().is_some() && !app.chat().owns_process(&session_id,&proc) { return; }
         let turn = proc.turn.lock().unwrap();
         if turn.running || !turn.background_tasks.is_empty() || !proc.alive.load(Ordering::Relaxed) {
             return;
@@ -2858,6 +3072,7 @@ fn settle_background_state(app: &AppCtx, session_id: &str, proc: &Arc<ChatProces
         if background_pending(&turn) || turn.waking.is_some_and(|since| since.elapsed() < WAKE_LIMIT) {
             continue;
         }
+        super::recovery::end_turn(&app,&session_id);
         emit_state(&app, &session_id, AgentState::Waiting);
         return;
     });
@@ -3122,7 +3337,7 @@ fn release_process(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
     proc.alive.store(false, Ordering::Relaxed);
     crate::session_state::set_alive(app, session_id, false);
     *proc.stdin.lock().unwrap() = None;
-    let _ = proc.child.lock().unwrap().kill();
+    terminate_owned(&mut proc.child.lock().unwrap());
 }
 
 /// Serialize a timeline row for a snapshot without embedding image bytes.
@@ -3424,11 +3639,18 @@ fn spawn_stdout_reader(
     std::thread::spawn(move || {
         for line in BufReader::new(stdout).lines() {
             let Ok(line) = line else { break };
-            if !proc.released.load(Ordering::Relaxed) {
+            let _callback = proc.callbacks.read().unwrap();
+            if !proc.released.load(Ordering::Relaxed) && app.chat().owns_process(&session_id,&proc) {
                 handle_line(&app, &session_id, &proc, &line);
             }
         }
+        auth::claude::exited(&app, &session_id, &proc);
+        let _exit_callback = proc.callbacks.read().unwrap();
+        if proc.kind == SessionKind::Antigravity { antigravity::finish_rows(&proc); }
         proc.alive.store(false, Ordering::Relaxed);
+        if app.chat().owns_process(&session_id,&proc) && !proc.released.load(Ordering::Relaxed) && super::recovery::interrupt(&app,&session_id).is_err() {
+            crate::diagnostic_warn!("chat recovery: failed to record process interruption");
+        }
         for (_, waiter) in proc.waiters.lock().unwrap().drain() {
             let _ = waiter.send(Err("The agent exited before answering the request".to_string()));
         }
@@ -3438,9 +3660,9 @@ fn spawn_stdout_reader(
             let mut turn = proc.turn.lock().unwrap();
             turn.running = false;
             turn.started_at = None;
-            if !proc.auth_restart.load(Ordering::Relaxed) { turn.waiting.clear(); }
+            if !proc.auth_restart.load(Ordering::Relaxed)
+                && !(proc.kind == SessionKind::Antigravity && turn.interrupted) { turn.waiting.clear(); }
         }
-        auth::claude::exited(&app, &session_id, &proc);
         let code = proc
             .child
             .lock()
@@ -3449,6 +3671,7 @@ fn spawn_stdout_reader(
             .ok()
             .and_then(|s| s.code())
             .unwrap_or(-1);
+        if let Some(owner) = proc.owner.lock().unwrap().take() { owner.retire(&app,&session_id); }
         // A process that was released or stopped can be replaced before its pipe closes — the pane sends
         // again, and `start` puts a new process in its place. What this one has to say about itself must
         // not then be read as being about the new one: its exit would mark the fresh conversation dead.
@@ -3467,13 +3690,25 @@ fn spawn_stdout_reader(
         emit_extras(&app, &session_id, &proc);
         emit_queue(&app, &session_id, &proc);
         let stderr = proc.stderr.lock().unwrap().clone();
-        let released = proc.released.load(Ordering::Relaxed);
+        let agy_interrupted = proc.kind == SessionKind::Antigravity && proc.turn.lock().unwrap().interrupted;
+        let released = proc.released.load(Ordering::Relaxed) || agy_interrupted;
+        if agy_interrupted {
+            emit(&app, &session_id, json!({"type":"turnInterrupted"}));
+            emit(&app, &session_id, json!({"type":"turnCompleted"}));
+        }
         emit(
             &app,
             &session_id,
             json!({"type":"exited","code":code,"stderr":stderr,"released":released}),
         );
-        emit_state(&app, &session_id, AgentState::Waiting);
+        // An intentional release settles lifecycle state without announcing another reply.
+        emit_state_with(&app, &session_id, AgentState::Waiting, released);
+        drop(_exit_callback);
+        if agy_interrupted && !proc.turn.lock().unwrap().waiting.is_empty() {
+            if let Err(message) = crate::command_core::chat_start(&app, &session_id, None, None, false) {
+                emit(&app, &session_id, json!({"type":"error","message":message}));
+            }
+        }
     });
 }
 
@@ -3486,7 +3721,8 @@ fn spawn_config_lookup(
 ) {
     std::thread::spawn(move || {
         let keys = config_schema::lookup(&bin, cwd.as_deref());
-        if keys.is_empty() {
+        let _callback = proc.callbacks.read().unwrap();
+        if keys.is_empty() || !app.chat().owns_process(&session_id,&proc) {
             return;
         }
         *proc.config_keys.lock().unwrap() = keys.clone();
@@ -3515,6 +3751,7 @@ fn reset_event(proc: &ChatProcess) -> Value {
     let positions: HashMap<_, _> = rows.iter().enumerate()
         .map(|(index, row)| (row.id(), start + index)).collect();
     json!({"type":"reset", "epoch":proc.started_at, "revision":timeline.revision,
+        "userMessages":super::user_messages::outline(&timeline.rows),
         "rows":rows.iter().map(snapshot_row).collect::<Vec<_>>(),
         "positions":positions, "hasMore":start > 0})
 }
@@ -3523,6 +3760,8 @@ fn spawn_flusher(app: AppCtx, session_id: String, proc: Arc<ChatProcess>) {
     std::thread::spawn(move || {
         loop {
             std::thread::sleep(FLUSH_INTERVAL);
+            let _callback = proc.callbacks.read().unwrap();
+            if proc.released.load(Ordering::Relaxed) || !app.chat().owns_process(&session_id,&proc) { return; }
             let (flush, revision, positions) = {
                 let mut timeline = proc.timeline.lock().unwrap();
                 timeline.revision += 1;
@@ -3538,7 +3777,7 @@ fn spawn_flusher(app: AppCtx, session_id: String, proc: Arc<ChatProcess>) {
                 }
                 TimelineFlush::Replace(rows) => {
                     let start = rows.len().saturating_sub(SNAPSHOT_PAGE_ROWS);
-                    emit(&app, &session_id, json!({"type":"replaceRows","positions":positions,"rows":rows[start..].iter().map(snapshot_row).collect::<Vec<_>>(),"hasMore":start > 0,"revision":revision,"epoch":proc.started_at}));
+                    emit(&app, &session_id, json!({"type":"replaceRows","userMessages":super::user_messages::outline(&rows),"positions":positions,"rows":rows[start..].iter().map(snapshot_row).collect::<Vec<_>>(),"hasMore":start > 0,"revision":revision,"epoch":proc.started_at}));
                 }
             }
             if !proc.alive.load(Ordering::Relaxed) {
@@ -3552,6 +3791,10 @@ fn spawn_flusher(app: AppCtx, session_id: String, proc: Arc<ChatProcess>) {
 // ─────────────────────────── Line handling ───────────────────────────
 
 fn handle_line(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, line: &str) {
+    if proc.kind == SessionKind::Antigravity {
+        antigravity::handle_line(app, session_id, proc, line);
+        return;
+    }
     if proc.kind == SessionKind::Opencode {
         return;
     }
@@ -3582,6 +3825,7 @@ fn handle_line(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, line: &s
     }
     match protocol::parse_line(line) {
         Incoming::Init { session_id: agent_id, model } => {
+            if !verify_native_identity(app,session_id,proc,&agent_id) { return; }
             // Claude opens every turn with this frame. Outside a turn it is answering something of its own,
             // such as a finished background task, and the response follows once its request is served.
             {
@@ -4002,12 +4246,14 @@ fn handle_codex_response(
         // replaced when the new thread's start response is remembered.
         if matches!(kind, Some("thread_resume" | "thread_fork_open"))
             && message.to_lowercase().contains("no rollout")
+            && app.db().conn.lock().unwrap().query_row("SELECT NOT EXISTS(SELECT 1 FROM chat_recovery_items WHERE session_id=?1 AND phase IN ('dispatching','sent')) AND NOT EXISTS(SELECT 1 FROM chat_submissions WHERE session_id=?1 AND (outcome IS NULL OR (outcome!='{\"Ok\":\"queued\"}' AND json_extract(outcome,'$.rejected') IS NULL)))",[session_id],|r|r.get::<_,bool>(0)).unwrap_or(false)
         {
             let abandoned = proc.agent_session_id.lock().unwrap().take();
             crate::diagnostic_warn!(
                 "chat: Codex could not resume thread {}; starting a new one",
                 abandoned.as_deref().unwrap_or("?")
             );
+            proc.identity_checked.store(true,Ordering::Relaxed);
             open_codex_thread(app, session_id, proc);
             return;
         }
@@ -4141,6 +4387,7 @@ fn handle_codex_response(
                 .or_else(|| thread.get("reasoningEffort"))
                 .and_then(Value::as_str)
                 .map(str::to_string);
+            if !verify_native_identity(app,session_id,proc,&thread_id) { return; }
             remember_codex_thread(app, session_id, proc, &thread_id, model, effort);
             proc.ready.store(true, Ordering::Relaxed);
             start_waiting_message(app, session_id, proc);
@@ -4165,7 +4412,7 @@ fn fail_codex_start(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
     }
     emit_queue(app, session_id, &proc);
     *proc.stdin.lock().unwrap() = None;
-    let _ = proc.child.lock().unwrap().kill();
+    terminate_owned(&mut proc.child.lock().unwrap());
     emit_state(app, session_id, AgentState::Waiting);
 }
 
@@ -4251,11 +4498,21 @@ fn adopt_agent_turn(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
     emit_state(app, session_id, AgentState::Working);
 }
 
+fn restore_unwritten_queue(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, item: &QueuedMessage) {
+    if super::recovery::still_queued(&app.db().conn.lock().unwrap(),session_id,&item.id) {
+        let mut turn=proc.turn.lock().unwrap();
+        if !turn.waiting.iter().any(|v|v.id==item.id) { turn.waiting.insert(0,item.clone()); }
+        turn.paused=true;
+        drop(turn);
+        emit_queue(app,session_id,proc);
+    }
+}
+
 fn start_waiting_message(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
-    if auth::blocks_queue(proc) { return; }
+    if app.chat().closing.load(Ordering::Relaxed) || auth::blocks_queue(proc) { return; }
     let next = {
         let mut turn = proc.turn.lock().unwrap();
-        if turn.running || turn.steering || turn.waiting.is_empty() {
+        if !proc.ready.load(Ordering::Relaxed) || turn.paused || turn.running || turn.steering || turn.waiting.is_empty() {
             return;
         }
         turn.running = true;
@@ -4266,11 +4523,18 @@ fn start_waiting_message(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>
     }
     emit_queue(app, session_id, &proc);
     if let Err(message) = dispatch(app, session_id, proc, &next.text, &next.images, Some(&next.id)) {
+        emit(app,session_id,json!({"type":"recoveryChanged"}));
+        if message.written {
+            emit(app, session_id, json!({"type":"error","message":message.message}));
+            return;
+        }
         let mut turn = proc.turn.lock().unwrap();
         turn.running = false;
         turn.started_at = None;
+        if super::recovery::dispatch_pending(&app.db().conn.lock().unwrap(),session_id,&next.id) { turn.paused=true; }
         drop(turn);
-        emit(app, session_id, json!({"type":"error","message":message}));
+        restore_unwritten_queue(app,session_id,proc,&next);
+        emit(app, session_id, json!({"type":"error","message":message.message}));
         emit(app, session_id, json!({"type":"turnCompleted"}));
         emit_state(app, session_id, AgentState::Waiting);
     }
@@ -5111,7 +5375,7 @@ fn handle_turn_end(
         for id in foreground_tasks.drain() {
             active_tasks.remove(&id);
         }
-        let next = if turn.steering || turn.waiting.is_empty() || auth::blocks_queue(proc) {
+        let next = if app.chat().closing.load(Ordering::Relaxed) || turn.paused || turn.steering || turn.waiting.is_empty() || auth::blocks_queue(proc) {
             turn.running = false;
             None
         } else {
@@ -5120,6 +5384,7 @@ fn handle_turn_end(
         };
         (next, interrupted, started_at, background_pending(&turn))
     };
+    if !background { super::recovery::end_turn(app,session_id); }
     if let Some(duration_ms) = reported_duration_ms.or_else(|| {
         started_at.map(|started| completed_at.saturating_sub(started))
     }) {
@@ -5154,11 +5419,18 @@ fn handle_turn_end(
     };
     emit_queue(app, session_id, &proc);
     if let Err(e) = dispatch(app, session_id, proc, &item.text, &item.images, Some(&item.id)) {
+        emit(app,session_id,json!({"type":"recoveryChanged"}));
+        if e.written {
+            emit(app, session_id, json!({"type":"error","message":e.message}));
+            return;
+        }
         let mut turn = proc.turn.lock().unwrap();
         turn.running = false;
         turn.started_at = None;
+        if super::recovery::dispatch_pending(&app.db().conn.lock().unwrap(),session_id,&item.id) { turn.paused=true; }
         drop(turn);
-        emit(app, session_id, json!({"type":"error","message":e}));
+        restore_unwritten_queue(app,session_id,proc,&item);
+        emit(app, session_id, json!({"type":"error","message":e.message}));
         emit(app, session_id, json!({"type":"turnCompleted"}));
         emit_state(app, session_id, AgentState::Waiting);
     }
@@ -5195,12 +5467,16 @@ fn report_auto_continue(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>,
             }
             // The app-server did not report the exhausted window; ask the account directly, off this reader.
             let (app, session_id) = (app.clone(), session_id.to_string());
+            let expected = Arc::clone(proc);
             std::thread::spawn(move || {
                 let usage = crate::agent::usage_store::refresh(&app, Some(crate::agent::usage_store::Provider::Codex), true);
                 let reset = usage.codex.data.as_ref().and_then(|data| {
                     auto_continue::codex_reset(data.primary.iter().chain(data.secondary.iter()), true)
                 });
-                auto_continue::turn_ended(&app, &session_id, TurnOutcome::LimitReached(reset));
+                let _callback = expected.callbacks.read().unwrap();
+                if app.chat().owns_process(&session_id,&expected) && !expected.released.load(Ordering::Relaxed) {
+                    auto_continue::turn_ended(&app, &session_id, TurnOutcome::LimitReached(reset));
+                }
             });
         }
         _ => auto_continue::turn_ended(app, session_id, TurnOutcome::Other),
@@ -5221,6 +5497,18 @@ fn interrupt_locked(proc: &Arc<ChatProcess>, turn: &mut TurnQueue) -> Result<(),
 
 fn send_interrupt_locked(proc: &Arc<ChatProcess>, turn: &mut TurnQueue) -> Result<(), String> {
     turn.interrupted = turn.running;
+    if proc.kind == SessionKind::Antigravity {
+        if !turn.running { return Ok(()); }
+        #[cfg(unix)]
+        {
+            let result = unsafe { libc::kill(proc.pid as libc::pid_t, libc::SIGINT) };
+            if result != 0 { return Err(format!("Failed to interrupt Antigravity: {}", std::io::Error::last_os_error())); }
+        }
+        #[cfg(not(unix))]
+        proc.child.lock().unwrap().kill().map_err(|e| format!("Failed to interrupt Antigravity: {e}"))?;
+        proc.ready.store(false, Ordering::Relaxed);
+        return Ok(());
+    }
     if proc.kind == SessionKind::Opencode {
         if !turn.running {
             return Ok(());
@@ -5257,7 +5545,7 @@ fn send_interrupt_locked(proc: &Arc<ChatProcess>, turn: &mut TurnQueue) -> Resul
 
 /// The row for a message the user sends: a bubble, or the command row when the text is the context
 /// message shell mode hands the agent. The one place that decides, so tags never reach a bubble.
-fn user_row(id: String, text: &str, images: Vec<ChatImage>, at: Option<i64>) -> ChatRow {
+pub(super) fn user_row(id: String, text: &str, images: Vec<ChatImage>, at: Option<i64>) -> ChatRow {
     if images.is_empty() {
         if let Some(ctx) = super::shell::parse_context(text) {
             let mut row = super::shell::row(id, at, &ctx, ctx.status());
@@ -5266,6 +5554,47 @@ fn user_row(id: String, text: &str, images: Vec<ChatImage>, at: Option<i64>) -> 
         }
     }
     ChatRow::User { id, text: text.to_string(), images, at }
+}
+
+/// Probe under the Child mutex before signalling: an unreaped child cannot have its PID recycled.
+fn terminate_owned(child: &mut std::process::Child) {
+    if child.try_wait().is_ok_and(|status|status.is_none()) { crate::host::kill_process_tree(child); }
+}
+
+fn cancel_persisted_queue(app: &AppCtx, session_id: &str) -> Result<(),String> {
+    let items=super::recovery::queued(&app.db().conn.lock().unwrap(),session_id)?;
+    for item in items {
+        crate::agent::spawn_requests::cancel_queued(app,session_id,&item.id)?;
+        super::recovery::cancel(&app.db().conn.lock().unwrap(),session_id,&item.id)?;
+    }
+    Ok(())
+}
+
+fn verify_native_identity(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: &str) -> bool {
+    if proc.identity_checked.load(Ordering::Relaxed) { return true; }
+    if proc.expected_native.as_ref().is_some_and(|expected|expected!=id) {
+        emit(app,session_id,json!({"type":"error","message":"The agent opened a different native conversation. Recovery was stopped to preserve the original history."}));
+        fail_codex_start(app,session_id,proc);
+        return false;
+    }
+    if let Some(owner) = proc.owner.lock().unwrap().as_mut() {
+        if let Err(error) = owner.native(app,&format!("{}:{id}",proc.kind.as_str())) {
+            emit(app,session_id,json!({"type":"error","message":error}));
+            fail_codex_start(app,session_id,proc);
+            return false;
+        }
+    }
+    proc.identity_checked.store(true,Ordering::Relaxed);
+    true
+}
+
+fn claim_native_writer(app: &AppCtx, proc: &ChatProcess) -> Result<(), String> {
+    if let Some(native) = proc.agent_session_id.lock().unwrap().as_ref() {
+        if let Some(owner) = proc.owner.lock().unwrap().as_mut() {
+            owner.native(app,&format!("{}:{native}",proc.kind.as_str()))?;
+        }
+    }
+    Ok(())
 }
 
 /// Submit a prompt to the active turn without changing its clock or draining its queue.
@@ -5277,12 +5606,28 @@ fn dispatch_steer(
     images: &[ChatImage],
     message_id: Option<&str>,
 ) -> Result<(), String> {
+    if app.chat().closing.load(Ordering::Relaxed) { return Err("The application is shutting down.".into()); }
+    if proc.kind == SessionKind::Antigravity {
+        super::antigravity_protocol::validate(text, images.len(), "steer")?;
+    }
     let commands = proc.commands.lock().unwrap().clone();
     let normalized = skills::native_text(text, &commands);
     let text = normalized.as_ref();
     let row_id = message_id.map(str::to_owned).unwrap_or_else(|| format!("u-{}", proc.next_request.fetch_add(1, Ordering::Relaxed)));
     let sent_at = now_ms();
-    if let Some(id) = message_id { super::submissions::begin_dispatch(&app.db().conn.lock().unwrap(), session_id, id)?; }
+    if proc.kind==SessionKind::Codex {
+        if proc.agent_session_id.lock().unwrap().is_none() { return Err("Codex has not opened its thread yet".into()); }
+        if proc.current_turn.lock().unwrap().is_none() { return Err("Codex is still starting its turn. Retry steering once the turn has started.".into()); }
+    }
+    claim_native_writer(app,proc)?;
+    if let Some(id) = message_id {
+        super::recovery::before_dispatch(app, session_id, id, proc.kind, proc.agent_session_id.lock().unwrap().as_deref(), text)?;
+        if super::recovery::dispatch_pending(&app.db().conn.lock().unwrap(),session_id,id) {
+            // Another client may reconcile delivery before the wire response arrives. Keep its body
+            // visible even if that response is later lost or refused.
+            proc.timeline.lock().unwrap().upsert(user_row(row_id.clone(),text,images.to_vec(),Some(sent_at as i64)));
+        }
+    }
     match proc.kind {
         SessionKind::Codex => {
             let thread_id = proc.agent_session_id.lock().unwrap().clone()
@@ -5297,7 +5642,7 @@ fn dispatch_steer(
                 message_id: turn_id.clone(), last_message_id: None, turn_id: Some(turn_id), text: text.to_string(),
             });
         }
-        SessionKind::Opencode => opencode::steer(proc, &row_id, text, images)?,
+        SessionKind::Opencode => opencode::steer(app, session_id, proc, &row_id, text, images)?,
         SessionKind::Pi | SessionKind::Omp => pi::steer(proc, text, images)?,
         _ => proc.write(&protocol::user_message(text, images))?,
     }
@@ -5313,6 +5658,20 @@ fn dispatch_steer(
     Ok(())
 }
 
+// A lost receipt does not end a turn that was already written to the provider.
+struct DispatchFailure {
+    message: String,
+    written: bool,
+}
+
+impl From<String> for DispatchFailure {
+    fn from(message: String) -> Self { Self { message, written:false } }
+}
+
+impl From<&str> for DispatchFailure {
+    fn from(message: &str) -> Self { message.to_string().into() }
+}
+
 /// Write a user turn and show it immediately, without waiting for the agent to echo it back.
 ///
 /// The caller has already marked the turn running; this only puts the message on the wire.
@@ -5323,11 +5682,13 @@ fn dispatch(
     text: &str,
     images: &[ChatImage],
     message_id: Option<&str>,
-) -> Result<(), String> {
+) -> Result<(), DispatchFailure> {
+    if app.chat().closing.load(Ordering::Relaxed) { return Err("The application is shutting down.".into()); }
     let commands = proc.commands.lock().unwrap().clone();
     let normalized = skills::native_text(text, &commands);
     let text = normalized.as_ref();
     let sent_at = now_ms();
+    claim_native_writer(app,proc)?;
     let (turn_started_at, newly_started) = {
         let mut turn = proc.turn.lock().unwrap();
         match turn.started_at {
@@ -5340,9 +5701,20 @@ fn dispatch(
     };
     if newly_started { proc.extras.lock().unwrap().generation = generation::GenerationTiming::default(); }
     let row_id = message_id.map(str::to_owned).unwrap_or_else(|| format!("u-{}", proc.next_request.fetch_add(1, Ordering::Relaxed)));
+    if let Some(id) = message_id {
+        super::recovery::before_dispatch(app, session_id, id, proc.kind, proc.agent_session_id.lock().unwrap().as_deref(), text)?;
+    }
     proc.timeline.lock().unwrap().upsert(user_row(row_id.clone(), text, images.to_vec(), Some(sent_at as i64)));
-    if let Some(id) = message_id { super::submissions::begin_dispatch(&app.db().conn.lock().unwrap(), session_id, id)?; }
-    if proc.kind == SessionKind::Opencode {
+    // Publish the clock before a fast provider can complete the turn on its reader thread.
+    if newly_started {
+        emit(app, session_id, json!({"type":"turnStarted","startedAt":turn_started_at}));
+    }
+    emit_state(app, session_id, AgentState::Working);
+    if proc.kind == SessionKind::Antigravity {
+        super::antigravity_protocol::validate(text, images.len(), "queue")?;
+        proc.antigravity.lock().unwrap().begin_turn();
+        proc.write(&super::antigravity_protocol::user_message(text))?;
+    } else if proc.kind == SessionKind::Opencode {
         opencode::dispatch(app, session_id, proc, &row_id, text, images)?;
     } else if matches!(proc.kind, SessionKind::Pi | SessionKind::Omp) {
         pi::dispatch(proc, text, images)?;
@@ -5400,24 +5772,15 @@ fn dispatch(
     } else {
         proc.write(&protocol::user_message(text, images))?;
     }
-    if let Some(id) = message_id {
-        super::submissions::finish_dispatch(&app.db().conn.lock().unwrap(), session_id, id, "sent")?;
-    }
+    let receipt = message_id.map(|id|super::submissions::finish_dispatch(&app.db().conn.lock().unwrap(), session_id, id, "sent"))
+        .transpose().map_err(|message|DispatchFailure { message, written:true });
     // Direct sends and dequeued messages share this path. Rename only after a successful write;
     // OpenCode supplies its own title through session.updated and must retain its placeholder until then.
     // A shell-mode context message is not a title either: the next real prompt names the session.
     if proc.kind != SessionKind::Opencode && !super::shell::is_tagged(text) {
         crate::agent::server::try_auto_rename(app, session_id, text);
     }
-    if newly_started {
-        emit(
-            app,
-            session_id,
-            json!({"type":"turnStarted","startedAt":turn_started_at}),
-        );
-    }
-    emit_state(app, session_id, AgentState::Working);
-    Ok(())
+    receipt.map(|_|())
 }
 
 /// Mark the conversation as summarized, and replace that mark once the summary is in place.
@@ -5753,6 +6116,13 @@ fn handle_control_response(
 ) {
     let kind = proc.pending.lock().unwrap().remove(request_id);
     if auth::claude::response(app, session_id, proc, request_id, kind, &response, error.as_deref()) { return; }
+    // An older CLI does not know `list_models`. The built-in catalogue still fills the model menu, so the
+    // refusal becomes an update hint there instead of an error in the conversation.
+    if kind == Some("list_models") && error.is_some() {
+        proc.extras.lock().unwrap().list_models_unsupported = true;
+        emit_extras(app, session_id, proc);
+        return;
+    }
     if let Some(waiter) = proc.waiters.lock().unwrap().remove(request_id) {
         let answer = match error {
             Some(message) => Err(message),
@@ -5854,6 +6224,7 @@ fn mcp_set_servers_error(response: &Value) -> Option<String> {
 /// Publish the whole `extras` object. See `ClaudeExtras`.
 fn emit_extras(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
     let extras = proc.extras.lock().unwrap().published();
+    if extras.background_tasks.iter().any(|task|!task.finished()) { super::recovery::background_work(app,session_id); }
     emit(app, session_id, json!({"type":"extras","extras":extras}));
 }
 
@@ -5884,12 +6255,12 @@ fn emit(app: &AppCtx, session_id: &str, mut payload: Value) {
 /// Publish the whole queue rather than one change to it. Every client showing this conversation has to
 /// agree on what is waiting, and a list is the only description that cannot drift.
 fn emit_queue(app: &AppCtx, session_id: &str, proc: &ChatProcess) {
-    let (waiting, revision) = {
+    let (waiting, revision, paused) = {
         let mut turn = proc.turn.lock().unwrap();
         turn.revision += 1;
-        (turn.waiting.clone(), turn.revision)
+        (turn.waiting.clone(), turn.revision, turn.paused && !turn.waiting.is_empty())
     };
-    emit(app, session_id, json!({"type":"queued","items":waiting,"revision":revision,"epoch":proc.started_at}));
+    emit(app, session_id, json!({"type":"queued","items":waiting,"paused":paused,"revision":revision,"epoch":proc.started_at}));
 }
 
 /// Report work state through the same channel PTY sessions use, so the sidebar, tab dots, and notifications
@@ -5899,13 +6270,18 @@ fn emit_queue(app: &AppCtx, session_id: &str, proc: &ChatProcess) {
 /// service records into it for terminal sessions, and a chat session has no hooks, so this is its only
 /// way in.
 fn emit_state(app: &AppCtx, session_id: &str, state: AgentState) {
+    emit_state_with(app, session_id, state, false);
+}
+
+/// Lifecycle corrections update every client without raising a new unread marker or notification.
+fn emit_state_with(app: &AppCtx, session_id: &str, state: AgentState, silent: bool) {
     // The session's `vrun` work keeps it on background past the end of a turn, exactly as for a terminal
     // session.
     let state = crate::agent::runs::hold(session_id, state);
     crate::agent::status_watch::record(session_id, state);
     app.emit(
         &StatusSignal::event_name(session_id),
-        StatusSignal::State { state, silent: false, authoritative: true },
+        StatusSignal::State { state, silent, authoritative: true },
     );
 }
 
@@ -6026,6 +6402,10 @@ mod tests {
 
     pub(super) fn inert_process(kind: SessionKind) -> Arc<ChatProcess> {
         Arc::new(ChatProcess {
+            callbacks: RwLock::new(()),
+            expected_native: None,
+            identity_checked: AtomicBool::new(false),
+            owner: Mutex::new(None),
             kind,
             bin: "true".into(),
             auth_settings_args: Vec::new(),
@@ -6043,6 +6423,7 @@ mod tests {
             codex_pending_child_events: Mutex::new(HashMap::new()),
             opencode: Mutex::new(opencode::OpencodeState::default()),
             pi: Mutex::new(pi::PiState::default()),
+            antigravity: Mutex::new(crate::agent::chat::antigravity_protocol::StreamState::default()),
             service_tier: Mutex::new(None),
             personality: Mutex::new(None),
             codex_turn_error: Mutex::new(None),
@@ -6072,7 +6453,7 @@ mod tests {
             stderr: Mutex::new(String::new()),
             alive: AtomicBool::new(true),
             shell_running: AtomicBool::new(false),
-            release_when_idle: AtomicBool::new(false),
+            release_when_idle: Arc::new(AtomicBool::new(false)),
             released: AtomicBool::new(false),
             next_request: AtomicU64::new(1),
             pid: 0,
@@ -6941,6 +7322,8 @@ mod tests {
         let manager = ChatManager::new();
         manager.sessions.lock().unwrap().insert("history".into(), proc.clone());
         let mut page = manager.snapshot_window("history", Some(&ChatWindow::default()));
+        assert_eq!(page.user_messages.as_ref().unwrap().len(), 1003);
+        assert_eq!(page.user_messages.as_ref().unwrap()[0].id, expected[0]);
         let revision = page.rows_revision;
         let mut ids: Vec<String> = Vec::new();
         loop {
@@ -6957,12 +7340,14 @@ mod tests {
                 before: Some(before), epoch: page.started_at, ..Default::default()
             }));
             assert_eq!(page.page_kind, "history");
+            assert!(page.user_messages.is_none(), "history pages do not repeat the whole directory");
         }
         assert_eq!(ids, expected, "every restored row appears exactly once and in order");
         let delta = manager.snapshot_window("history", Some(&ChatWindow {
             since: Some(revision), from: ids.first().cloned(), epoch: page.started_at, ..Default::default()
         }));
         assert_eq!(delta.rows.iter().map(ChatRow::id).collect::<Vec<_>>(), ["live"]);
+        assert_eq!(delta.user_messages.as_ref().unwrap().last().unwrap().id, "live");
         assert!(!delta.has_more);
     }
 
@@ -7162,6 +7547,10 @@ mod tests {
         let stdin = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
         let proc = Arc::new(ChatProcess {
+            callbacks: RwLock::new(()),
+            expected_native: None,
+            identity_checked: AtomicBool::new(false),
+            owner: Mutex::new(None),
             kind: SessionKind::Claude,
             bin: "true".into(),
             auth_settings_args: Vec::new(),
@@ -7179,6 +7568,7 @@ mod tests {
             codex_pending_child_events: Mutex::new(HashMap::new()),
             opencode: Mutex::new(opencode::OpencodeState::default()),
             pi: Mutex::new(pi::PiState::default()),
+            antigravity: Mutex::new(crate::agent::chat::antigravity_protocol::StreamState::default()),
             service_tier: Mutex::new(None),
             personality: Mutex::new(None),
             codex_turn_error: Mutex::new(None),
@@ -7208,7 +7598,7 @@ mod tests {
             stderr: Mutex::new(String::new()),
             alive: AtomicBool::new(true),
             shell_running: AtomicBool::new(false),
-            release_when_idle: AtomicBool::new(false),
+            release_when_idle: Arc::new(AtomicBool::new(false)),
             released: AtomicBool::new(false),
             next_request: AtomicU64::new(1),
             pid: 0,
@@ -7936,7 +8326,7 @@ mod tests {
         let req: menu::Request=serde_json::from_value(json!({"requestId":uuid::Uuid::new_v4().to_string(),"context":{"projectId":"p","groupId":"g","parentSessionId":"parent"},"prompt":"Task","images":[{"mimeType":"image/png","data":"AQID"}],"cwd":root,"worktree":true,
             "config":{"worktreeMode":mode,"plan":{"agent":"claude","model":"review-model","effort":"high"},"exec":{"agent":"claude","model":"execute-model","effort":"low"}}})).unwrap();
         let mut too_many:menu::Request=serde_json::from_value(serde_json::to_value(&req).unwrap()).unwrap();
-        too_many.images=vec![req.images[0].clone();5];
+        too_many.images=vec![req.images[0].clone();crate::command_core::MAX_IMAGES_PER_MESSAGE+1];
         assert!(menu::start(&app,&too_many).unwrap_err().contains("At most"));
         assert!(!root.join(".vlx-worktrees").exists());
         let first=menu::start(&app,&req).unwrap();
@@ -8017,6 +8407,7 @@ mod tests {
     #[test]
     fn replaying_a_submission_returns_its_receipt_without_a_second_prompt() {
         let (app, manager, _) = title_fixture("submission-receipt", SessionKind::Claude, "Test");
+        crate::db::repo::set_session_engine(&app.db().conn.lock().unwrap(),"s","chat").unwrap();
         app.chat().sessions.lock().unwrap().insert("s".into(), manager.get("s").unwrap());
         let id = format!("msg-{}", uuid::Uuid::new_v4());
         for _ in 0..2 {
@@ -8507,6 +8898,248 @@ mod tests {
         assert!(!proc.turn.lock().unwrap().steering);
     }
 
+    #[test]
+    fn a_lost_success_receipt_keeps_direct_and_dequeued_turns_running() {
+        for entry in ["direct","bootstrap","turn-end"] {
+            let app=ctx(&format!("receipt-loss-{entry}"));
+            app.db().conn.lock().unwrap().execute_batch("INSERT INTO projects(id,name,root_path,created_at) VALUES ('p','Recovery','/tmp',0); INSERT INTO sessions(id,project_id,name,kind,engine,created_at) VALUES ('s','p','Recovery','claude','chat',0);").unwrap();
+            let (proc,mut stdout)=cat_process();
+            app.chat().sessions.lock().unwrap().insert("s".into(),proc.clone());
+            app.db().conn.lock().unwrap().execute_batch("CREATE TRIGGER deny_success BEFORE UPDATE OF outcome ON chat_submissions WHEN json_extract(NEW.outcome,'$.Ok')='sent' BEGIN SELECT RAISE(ABORT,'fixture lost receipt'); END;").unwrap();
+            let first=format!("msg-{}",uuid::Uuid::new_v4());
+            let next=format!("msg-{}",uuid::Uuid::new_v4());
+            if entry=="bootstrap" { proc.ready.store(false,Ordering::Relaxed); }
+            if entry=="turn-end" { proc.turn.lock().unwrap().running=true; }
+            let result=crate::command_core::chat_send(&app,"s","first",Vec::new(),Some("queue"),Some(&first));
+            if entry=="direct" {
+                assert_eq!(result.unwrap_err(),"chat_submission_pending");
+            } else {
+                assert_eq!(result.unwrap(),"queued");
+                if entry=="bootstrap" {
+                    proc.ready.store(true,Ordering::Relaxed);
+                    start_waiting_message(&app,"s",&proc);
+                } else { handle_turn_end(&app,"s",&proc,"success",None); }
+            }
+            assert!(proc.turn.lock().unwrap().running);
+            assert!(proc.turn.lock().unwrap().started_at.is_some());
+            let mut line=String::new();
+            std::io::BufReader::new(&mut stdout).read_line(&mut line).unwrap();
+            assert!(line.contains("first"));
+            assert_eq!(crate::command_core::chat_send(&app,"s","first",Vec::new(),Some("queue"),Some(&first)).unwrap_err(),"chat_submission_pending");
+            let images=vec![ChatImage { mime_type:"image/png".into(),data:"AQID".into() }];
+            assert_eq!(crate::command_core::chat_send(&app,"s","next",images,Some("queue"),Some(&next)).unwrap(),"queued");
+            assert_eq!(said(app.chat(),"s"),vec!["first"]);
+            assert_eq!(queued(app.chat(),"s"),vec!["next"]);
+            assert_eq!(super::super::recovery::queued(&app.db().conn.lock().unwrap(),"s").unwrap()[0].images[0].data,"AQID");
+            let state=super::super::recovery::read(&app,"s").unwrap();
+            assert_eq!(state.items.iter().find(|item|item["id"]==first).unwrap()["status"],"unknown");
+            app.db().conn.lock().unwrap().execute_batch("DROP TRIGGER deny_success;").unwrap();
+            handle_turn_end(&app,"s",&proc,"success",None);
+            assert_eq!(said(app.chat(),"s"),vec!["first","next"]);
+            assert!(queued(app.chat(),"s").is_empty());
+            app.chat().stop(&app,"s").unwrap();
+            let dir=app.data_dir().unwrap();drop(app);std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn durable_queue_preserves_prewrite_failures_and_exposes_uncertain_steering() {
+        let app=ctx("durable-queue-write-boundaries");
+        app.db().conn.lock().unwrap().execute_batch("INSERT INTO projects(id,name,root_path,created_at) VALUES ('p','Recovery','/tmp',0); INSERT INTO sessions(id,project_id,name,kind,engine,created_at) VALUES ('s','p','Recovery','claude','chat',0);").unwrap();
+        let (proc,_stdout)=cat_process();
+        app.chat().sessions.lock().unwrap().insert("s".into(),proc.clone());
+        app.db().conn.lock().unwrap().execute_batch("CREATE TRIGGER deny_dispatch BEFORE UPDATE OF outcome ON chat_submissions WHEN NEW.outcome='{\"dispatching\":true}' BEGIN SELECT RAISE(ABORT,'fixture prewrite failure'); END;").unwrap();
+        let direct_id=format!("msg-{}",uuid::Uuid::new_v4());
+        assert!(crate::command_core::chat_send(&app,"s","not written",Vec::new(),Some("queue"),Some(&direct_id)).unwrap_err().contains("fixture prewrite failure"));
+        let rejected=super::super::recovery::read(&app,"s").unwrap();
+        assert_eq!(rejected.items.iter().find(|item|item["id"]==direct_id).unwrap()["status"],"failed");
+        assert!(said(app.chat(),"s").is_empty());
+        proc.turn.lock().unwrap().running=true;
+        let id=format!("msg-{}",uuid::Uuid::new_v4());
+        let images=vec![ChatImage { mime_type:"image/png".into(),data:"AQID".into() }];
+        let payload=serde_json::to_vec(&json!(["correction",images,"queue"])).unwrap();
+        super::super::submissions::claim(&app.db().conn.lock().unwrap(),"s",&id,&payload).unwrap();
+        assert_eq!(app.chat().send_identified(&app,"s","correction",images.clone(),"queue",Some(&id)).unwrap(),"queued");
+        proc.turn.lock().unwrap().running=false;
+        app.chat().resume_queue(&app,"s").unwrap();
+        assert_eq!(queued(app.chat(),"s"),vec!["correction"]);
+        assert!(app.chat().queue_paused("s"));
+        assert!(said(app.chat(),"s").is_empty());
+        assert!(super::super::recovery::still_queued(&app.db().conn.lock().unwrap(),"s",&id));
+        app.db().conn.lock().unwrap().execute_batch("DROP TRIGGER deny_dispatch;").unwrap();
+        proc.turn.lock().unwrap().running=true;
+        proc.stdin.lock().unwrap().take();
+        assert!(app.chat().queue_steer(&app,"s",&id).is_err());
+        assert!(queued(app.chat(),"s").is_empty());
+        let recovery=super::super::recovery::read(&app,"s").unwrap();
+        let item=recovery.items.iter().find(|item|item["id"]==id).unwrap();
+        assert_eq!(item["status"],"unknown");
+        assert_eq!(item["text"],"correction");
+        assert_eq!(item["images"].as_array().unwrap().len(),1);
+        assert!(super::super::submissions::claim_retry(&app.db().conn.lock().unwrap(),"s",&id,&payload).is_err());
+        proc.child.lock().unwrap().wait().unwrap();
+    }
+
+    #[test]
+    fn an_old_queue_editor_cannot_mutate_a_replacement_process() {
+        let app=ctx("queue-editor-replacement");
+        app.db().conn.lock().unwrap().execute_batch("INSERT INTO projects(id,name,root_path,created_at) VALUES ('p','Recovery','/tmp',0); INSERT INTO sessions(id,project_id,name,kind,engine,created_at) VALUES ('s','p','Recovery','claude','chat',0);").unwrap();
+        let (previous,_previous_stdout)=cat_process();
+        previous.turn.lock().unwrap().paused=true;
+        app.chat().sessions.lock().unwrap().insert("s".into(),previous.clone());
+        let id=format!("msg-{}",uuid::Uuid::new_v4());
+        let payload=serde_json::to_vec(&json!(["saved",[],"queue"])).unwrap();
+        super::super::submissions::claim(&app.db().conn.lock().unwrap(),"s",&id,&payload).unwrap();
+        app.chat().send_identified(&app,"s","saved",Vec::new(),"queue",Some(&id)).unwrap();
+        let action=previous.action.lock().unwrap();
+        let baseline_refs=Arc::strong_count(&previous);
+        let other=app.clone(); let edit_id=id.clone();
+        let (tx,rx)=mpsc::channel();
+        let worker=std::thread::spawn(move || { tx.send(other.chat().queue_update(&other,"s",&edit_id,"stale edit")).unwrap(); });
+        let deadline=std::time::Instant::now()+Duration::from_secs(5);
+        while Arc::strong_count(&previous)==baseline_refs {
+            assert!(std::time::Instant::now()<deadline,"the editor never acquired the old process");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let (next,_next_stdout)=cat_process();
+        next.turn.lock().unwrap().waiting=previous.turn.lock().unwrap().waiting.clone();
+        next.turn.lock().unwrap().paused=true;
+        let replacement=previous.callbacks.write().unwrap();
+        app.chat().sessions.lock().unwrap().insert("s".into(),next.clone());
+        drop(replacement); drop(action);
+        assert!(rx.recv_timeout(Duration::from_secs(5)).unwrap().unwrap_err().contains("agent changed"));
+        assert_eq!(next.turn.lock().unwrap().waiting[0].text,"saved");
+        assert_eq!(super::super::recovery::queued(&app.db().conn.lock().unwrap(),"s").unwrap()[0].text,"saved");
+        worker.join().unwrap();
+        terminate_owned(&mut previous.child.lock().unwrap());
+        app.chat().stop(&app,"s").unwrap();
+    }
+
+    #[test]
+    fn engine_switch_serializes_a_delayed_chat_start() {
+        let app=ctx("handoff-delayed-start");
+        app.db().conn.lock().unwrap().execute_batch("INSERT INTO projects(id,name,root_path,created_at) VALUES ('p','Recovery','/tmp',0); INSERT INTO sessions(id,project_id,name,kind,engine,created_at) VALUES ('s','p','Recovery','claude','chat',0);").unwrap();
+        let guard=app.chat().engine_guard();
+        let other=app.clone();
+        let (ready_tx,ready_rx)=mpsc::channel();
+        let (result_tx,result_rx)=mpsc::channel();
+        let worker=std::thread::spawn(move || {
+            ready_tx.send(()).unwrap();
+            let result=other.chat().start(&other,"s",SessionKind::Claude,None,"missing-fixture",None,None,None,None,None,&[],false);
+            result_tx.send(result).unwrap();
+        });
+        ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(result_rx.recv_timeout(Duration::from_millis(100)).is_err());
+        let lease=app.chat().stop_for_handoff(&app,"s").unwrap();
+        crate::db::repo::set_session_engine(&app.db().conn.lock().unwrap(),"s","tui").unwrap();
+        drop(lease); drop(guard);
+        assert!(result_rx.recv_timeout(Duration::from_secs(5)).unwrap().unwrap_err().contains("chat view"));
+        assert!(crate::command_core::chat_start(&app,"s",None,None,false).unwrap_err().contains("chat view"));
+        assert!(crate::command_core::chat_send(&app,"s","stale client",Vec::new(),Some("queue"),None).unwrap_err().contains("chat view"));
+        assert!(!app.chat().is_alive("s"));
+        worker.join().unwrap();
+        {
+            let conn=app.db().conn.lock().unwrap();
+            crate::db::repo::set_session_engine(&conn,"s","chat").unwrap();
+            crate::db::repo::set_agent_session_id(&conn,"s","new-native",SessionKind::Claude).unwrap();
+        }
+        assert!(app.chat().start(&app,"s",SessionKind::Claude,None,"missing-fixture",None,None,None,None,None,&[],false).unwrap_err().contains("identity changed"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn engine_handoff_refuses_a_descendant_after_its_root_exits() {
+        use std::os::unix::process::CommandExt;
+        struct Group(u32);
+        impl Drop for Group { fn drop(&mut self) { unsafe { libc::kill(-(self.0 as i32),libc::SIGKILL); } } }
+        let app=ctx("handoff-reaped-root");
+        app.db().conn.lock().unwrap().execute_batch("INSERT INTO projects(id,name,root_path,created_at) VALUES ('p','Recovery','/tmp',0); INSERT INTO sessions(id,project_id,name,kind,engine,created_at) VALUES ('s','p','Recovery','claude','chat',0);").unwrap();
+        let mut owner=super::super::ownership::Owner::acquire(&app,"s",None).unwrap();
+        let mut command=std::process::Command::new("sh");
+        command.args(["-c","sleep 30 & echo ready; read finish"]).process_group(0).stdin(Stdio::piped()).stdout(Stdio::piped());
+        owner.inherit(&mut command);
+        let mut child=command.spawn().unwrap(); let _cleanup=Group(child.id());
+        owner.launched(&app,"s",child.id()).unwrap();
+        let mut ready=String::new(); BufReader::new(child.stdout.take().unwrap()).read_line(&mut ready).unwrap();
+        assert_eq!(ready.trim(),"ready");
+        child.stdin.take().unwrap().write_all(b"finish\n").unwrap(); child.wait().unwrap();
+        let proc=inert_process(SessionKind::Claude);
+        *proc.child.lock().unwrap()=child;
+        *proc.owner.lock().unwrap()=Some(owner);
+        app.chat().sessions.lock().unwrap().insert("s".into(),proc);
+        assert!(crate::command_core::set_session_engine(&app,"s","tui").is_err());
+        assert_eq!(crate::db::repo::get_session(&app.db().conn.lock().unwrap(),"s").unwrap().unwrap().engine,"chat");
+    }
+
+    #[test]
+    fn application_shutdown_preserves_durable_queue_and_rejects_new_work() {
+        let app=ctx("durable-queue-shutdown");
+        app.db().conn.lock().unwrap().execute_batch("INSERT INTO projects(id,name,root_path,created_at) VALUES ('p','Recovery','/tmp',0); INSERT INTO sessions(id,project_id,name,kind,engine,created_at) VALUES ('s','p','Recovery','claude','chat',0);").unwrap();
+        let (proc,_stdout)=cat_process();
+        proc.turn.lock().unwrap().running=true;
+        app.chat().sessions.lock().unwrap().insert("s".into(),proc.clone());
+        let id=format!("msg-{}",uuid::Uuid::new_v4());
+        let images=vec![ChatImage { mime_type:"image/png".into(),data:"AQID".into() }];
+        let payload=serde_json::to_vec(&json!(["after restart",images,"queue"])).unwrap();
+        super::super::submissions::claim(&app.db().conn.lock().unwrap(),"s",&id,&payload).unwrap();
+        app.chat().send_identified(&app,"s","after restart",images,"queue",Some(&id)).unwrap();
+        app.chat().shutdown(&app);
+        assert!(!app.chat().is_alive("s"));
+        assert!(proc.child.lock().unwrap().try_wait().unwrap().is_some());
+        let restored=super::super::recovery::queued(&app.db().conn.lock().unwrap(),"s").unwrap();
+        assert_eq!(restored[0].id,id);
+        assert_eq!(restored[0].text,"after restart");
+        assert_eq!(restored[0].images[0].data,"AQID");
+        assert!(app.chat().start(&app,"s",SessionKind::Claude,None,"missing-fixture",None,None,None,None,None,&[],false).unwrap_err().contains("shutting down"));
+        assert!(app.chat().send(&app,"s","too late",Vec::new(),"queue").unwrap_err().contains("shutting down"));
+    }
+
+    #[test]
+    fn reconciled_steering_receipt_survives_a_late_native_error_without_requeueing() {
+        let (app,proc,mut reader)=codex_permission_fixture("queued-steer-reconciled");
+        *proc.current_turn.lock().unwrap()=Some("turn-test".into());
+        proc.turn.lock().unwrap().running=true;
+        let id=format!("msg-{}",uuid::Uuid::new_v4());
+        let images=vec![ChatImage { mime_type:"image/png".into(),data:"AQID".into() }];
+        let payload=serde_json::to_vec(&json!(["accepted body",images,"queue"])).unwrap();
+        super::super::submissions::claim(&app.db().conn.lock().unwrap(),"s",&id,&payload).unwrap();
+        app.chat().send_identified(&app,"s","accepted body",images,"queue",Some(&id)).unwrap();
+        let response_app=app.clone(); let responder=proc.clone(); let response_id=id.clone();
+        let worker=std::thread::spawn(move || {
+            let request=read_codex_request(&mut reader);
+            assert_eq!(request["method"],"turn/steer");
+            // Simulate a second client's native-history reconciliation while the caller awaits its reply.
+            super::super::submissions::finish_dispatch(&response_app.db().conn.lock().unwrap(),"s",&response_id,"sent").unwrap();
+            handle_codex_line(&response_app,"s",&responder,&json!({"id":request["id"],"error":{"message":"late native error"}}).to_string());
+        });
+        assert!(app.chat().queue_steer(&app,"s",&id).is_err()); worker.join().unwrap();
+        assert!(queued(app.chat(),"s").is_empty());
+        assert_eq!(said(app.chat(),"s"),vec!["accepted body"]);
+        assert!(matches!(super::super::submissions::claim_retry(&app.db().conn.lock().unwrap(),"s",&id,&payload).unwrap(),super::super::submissions::Claim::Complete(Ok(v)) if v=="sent"));
+        proc.child.lock().unwrap().kill().unwrap(); proc.child.lock().unwrap().wait().unwrap();
+    }
+
+    #[test]
+    fn codex_missing_rollout_never_replaces_a_delivered_or_unresolved_thread() {
+        for (tag,outcome) in [("legacy-pending",None),("legacy-blocked",Some(Ok("blocked".into()))),("legacy-opaque",Some(Err("chat_submission_pending".into())))] {
+            let app=ctx(tag);
+            app.db().conn.lock().unwrap().execute_batch("INSERT INTO projects(id,name,root_path,created_at) VALUES ('p','Recovery','/tmp',0); INSERT INTO sessions(id,project_id,name,kind,engine,created_at) VALUES ('s','p','Recovery','codex','chat',0);").unwrap();
+            let id=format!("msg-{}",uuid::Uuid::new_v4());
+            let conn=app.db().conn.lock().unwrap();
+            super::super::submissions::claim(&conn,"s",&id,&serde_json::to_vec(&json!(["previous",[],"queue"])).unwrap()).unwrap();
+            if let Some(outcome)=outcome { super::super::submissions::finish(&conn,"s",&id,&outcome).unwrap(); }
+            drop(conn);
+            let proc=inert_process(SessionKind::Codex);
+            *proc.agent_session_id.lock().unwrap()=Some("original-thread".into());
+            proc.pending.lock().unwrap().insert("resume".into(),"thread_resume");
+            app.chat().sessions.lock().unwrap().insert("s".into(),proc.clone());
+            handle_codex_line(&app,"s",&proc,&json!({"id":"resume","error":{"message":"no rollout found"}}).to_string());
+            assert_eq!(proc.agent_session_id.lock().unwrap().as_deref(),Some("original-thread"),"{tag}");
+            assert!(!proc.identity_checked.load(Ordering::Relaxed));
+            proc.child.lock().unwrap().wait().unwrap();
+        }
+    }
+
     /// A message dropped while it waited is never said.
     #[test]
     fn a_removed_message_is_never_sent() {
@@ -8805,8 +9438,20 @@ mod tests {
     }
 
     #[test]
+    fn claude_list_models_refusal_becomes_an_update_hint() {
+        let (app, proc, _reader) = claude_auth_fixture("claude-list-models-unsupported");
+        let id = proc.request_id("list_models");
+        handle_control_response(&app, "s", &proc, &id, Value::Null, Some("Unsupported control request subtype: list_models".into()));
+        let snapshot = serde_json::to_value(app.chat().snapshot("s")).unwrap();
+        assert_eq!(snapshot["listModelsUnsupported"], true);
+        assert!(app.chat().live_claude_models("s").is_none());
+        proc.child.lock().unwrap().kill().unwrap();
+        proc.child.lock().unwrap().wait().unwrap();
+    }
+
+    #[test]
     fn claude_auth_detects_provider_errors_without_matching_conversation_text() {
-        let (app, proc, _reader) = claude_auth_fixture("claude-auth-errors");
+        let (app, proc, mut reader) = claude_auth_fixture("claude-auth-errors");
         auth::claude::observe(&app, "s", &proc, &json!({"type":"assistant","message":{"content":[{"type":"text","text":"authentication_failed: please run /login"}]}}).to_string());
         assert!(proc.extras.lock().unwrap().auth.is_none());
         auth::claude::observe(&app, "s", &proc, &json!({"type":"result","is_error":true,"errors":["API Error: 401 authentication_error"]}).to_string());
@@ -8814,11 +9459,18 @@ mod tests {
         assert!(auth::blocks_queue(&proc));
         auth::turn_succeeded(&app, "s", &proc);
         assert!(proc.extras.lock().unwrap().auth.is_none());
+        // Valid credentials wait for background work, and the refusal names what to wait for.
+        proc.turn.lock().unwrap().active_tasks.insert("task".into());
+        assert!(app.chat().auth_start(&app, "s").unwrap_err().ends_with(": task"));
+        assert!(app.chat().auth_logout(&app, "s").is_err());
+        proc.turn.lock().unwrap().running = true;
         auth::claude::observe(&app, "s", &proc, &json!({"type":"assistant","error":"authentication_failed"}).to_string());
         assert_eq!(app.chat().snapshot("s").extras.auth.unwrap().status, "required");
-        proc.turn.lock().unwrap().active_tasks.insert("task".into());
         assert!(app.chat().auth_start(&app, "s").is_err());
-        assert!(app.chat().auth_logout(&app, "s").is_err());
+        // Rejected credentials no longer wait for background work that cannot reach the model anyway.
+        proc.turn.lock().unwrap().running = false;
+        app.chat().auth_start(&app, "s").unwrap();
+        assert_eq!(read_codex_request(&mut reader)["request"]["subtype"], "claude_authenticate");
         proc.child.lock().unwrap().kill().unwrap();
         proc.child.lock().unwrap().wait().unwrap();
     }
@@ -9748,6 +10400,30 @@ mod tests {
         assert!(proc.stdin.lock().unwrap().is_none());
     }
 
+    /// Paused recovery messages survive idle release without keeping an unused agent alive.
+    #[test]
+    fn detaching_with_a_paused_recovery_queue_releases_without_losing_its_payload() {
+        let app=ctx("detach-paused-recovery");
+        app.db().conn.lock().unwrap().execute_batch("INSERT INTO projects(id,name,root_path,created_at) VALUES ('p','Recovery','/tmp',0); INSERT INTO sessions(id,project_id,name,kind,engine,created_at) VALUES ('s','p','Recovery','claude','chat',0);").unwrap();
+        let (proc,_stdout)=cat_process();
+        proc.turn.lock().unwrap().paused=true;
+        app.chat().sessions.lock().unwrap().insert("s".into(),proc);
+        let id=format!("msg-{}",uuid::Uuid::new_v4());
+        let images=vec![ChatImage { mime_type:"image/png".into(),data:"AQID".into() }];
+        let payload=serde_json::to_vec(&json!(["saved",images,"queue"])).unwrap();
+        super::super::submissions::claim(&app.db().conn.lock().unwrap(),"s",&id,&payload).unwrap();
+        assert_eq!(app.chat().send_identified(&app,"s","saved",images,"queue",Some(&id)).unwrap(),"queued");
+        app.chat().detach(&app,"s");
+        assert!(!app.chat().is_alive("s"));
+        let queue=super::super::recovery::queued(&app.db().conn.lock().unwrap(),"s").unwrap();
+        assert_eq!(queue.len(),1);
+        assert_eq!(queue[0].id,id);
+        assert_eq!(queue[0].text,"saved");
+        assert_eq!(queue[0].images[0].data,"AQID");
+        assert!(app.chat().snapshot("s").rows.is_empty());
+        assert!(app.chat().queue_paused("s"));
+    }
+
     /// Closing the view mid-answer must not cut the answer off: the process stays until the turn ends.
     #[test]
     fn detaching_during_a_turn_waits_for_the_turn_to_end() {
@@ -9800,6 +10476,7 @@ mod tests {
     /// against the application's own manager, since that is where the reader looks the session up.
     #[test]
     fn a_released_process_reports_its_exit_as_released() {
+        let _state_guard = crate::session_state::test_lock();
         let app = ctx("release-exit");
         let events = Arc::new(Mutex::new(Vec::<Value>::new()));
         let captured = events.clone();
@@ -9828,6 +10505,57 @@ mod tests {
         };
         assert_eq!(exited.get("released"), Some(&Value::Bool(true)));
         assert!(!app.chat().snapshot("s").running);
+    }
+
+    #[test]
+    fn closing_chat_processes_preserves_unread_even_without_cached_status() {
+        let _state_guard = crate::session_state::test_lock();
+        for explicit in [false, true] {
+            for unread in [false, true] {
+                let app = ctx(&format!("close-unread-{explicit}-{unread}"));
+                let sid = format!("close-{}", uuid::Uuid::new_v4());
+                let (proc, stdout) = cat_process();
+                app.chat().sessions.lock().unwrap().insert(sid.clone(), proc.clone());
+                app.emit(&StatusSignal::event_name(&sid), StatusSignal::Agent {
+                    agent: Some("claude".into()), state_source: Some("chat".into()),
+                });
+                crate::session_state::set_alive(&app, &sid, true);
+                emit_state(&app, &sid, AgentState::Working);
+                if !explicit {
+                    emit_state(&app, &sid, AgentState::Waiting);
+                    assert!(crate::session_state::snapshot()[&sid].unread, "a real reply must notify");
+                }
+                crate::session_state::set_unread(&app, &sid, unread);
+                // Reproduce the old overflow path clearing a chat session's status cache via pty_kill.
+                app.pty().kill(&sid, "test", crate::pty::session::KillReason::Close).unwrap();
+                let states = Arc::new(Mutex::new(Vec::<Value>::new()));
+                let captured = states.clone();
+                app.listen(&StatusSignal::event_name(&sid), move |payload| {
+                    captured.lock().unwrap().push(serde_json::from_str(payload).unwrap());
+                });
+
+                if explicit {
+                    app.chat().stop(&app, &sid).unwrap();
+                } else {
+                    app.chat().detach(&app, &sid);
+                }
+                spawn_stdout_reader(app.clone(), sid.clone(), proc.clone(), stdout);
+                let deadline = std::time::Instant::now() + Duration::from_secs(5);
+                while states.lock().unwrap().is_empty() {
+                    assert!(std::time::Instant::now() < deadline, "the exit never settled its state");
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                let record = crate::session_state::snapshot()[&sid].clone();
+                assert!(!record.alive);
+                assert_eq!(record.agent_state.as_deref(), Some("waiting"));
+                assert_eq!(record.unread, unread, "closing must preserve the existing marker");
+                assert!(states.lock().unwrap().iter().all(|event| event["silent"] == true));
+                while Arc::strong_count(&proc) > if explicit { 1 } else { 2 } {
+                    assert!(std::time::Instant::now() < deadline, "the closed process reader did not exit");
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+        }
     }
 
     #[test]
@@ -9865,6 +10593,7 @@ mod tests {
             assert!(snapshot.turn_started_at.is_none());
             assert!(snapshot.queue.is_empty());
             assert!(!crate::session_state::snapshot()[&sid].alive);
+            assert!(!crate::session_state::snapshot()[&sid].unread, "stopping a turn is not a new reply");
             assert_eq!(crate::session_state::snapshot()[&sid].agent_state.as_deref(), Some("waiting"));
             let stopped = events.lock().unwrap().clone();
             assert_eq!(stopped.iter().filter(|event| event["type"] == "exited").count(), 1);

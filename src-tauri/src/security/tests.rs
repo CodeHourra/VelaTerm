@@ -30,6 +30,22 @@ impl Drop for Fixture {
         let _ = std::fs::remove_dir_all(&self.0);
     }
 }
+
+#[test]
+fn audit_ownership_rejects_both_chat_recovery_paths_before_startup() {
+    struct ActiveSession(String);
+    impl Drop for ActiveSession { fn drop(&mut self) { active().lock().unwrap().remove(&self.0); } }
+    let f=Fixture::new();
+    let db=crate::db::Db::open(&f.0.join("test.sqlite3")).unwrap();
+    let app=AppCtx::Headless(std::sync::Arc::new(crate::host::HeadlessHost::new(f.0.clone(),db)));
+    let session=uuid::Uuid::new_v4().to_string();
+    active().lock().unwrap().insert(session.clone());
+    let _active=ActiveSession(session.clone());
+    for offer in [None,Some("msg-unavailable")] {
+        assert_eq!(crate::command_core::chat_recovery_resume(&app,&session,offer).unwrap_err(),"security_audit_owns_conversation");
+        assert!(!app.chat().is_alive(&session));
+    }
+}
 #[test]
 fn scope_rejects_traversal_and_tracks_untracked_text() {
     let f = Fixture::new();

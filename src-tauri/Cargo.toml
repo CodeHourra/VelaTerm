@@ -1,6 +1,6 @@
 [package]
 name = "velaterm"
-version = "0.2.6"
+version = "0.2.7"
 description = "VelaTerm multi-session terminal manager"
 authors = ["vlinx"]
 edition = "2021"
@@ -27,6 +27,7 @@ gui = [
     "dep:tauri-plugin-updater",
     "dep:tauri-plugin-process",
     "dep:tauri-plugin-single-instance",
+    "dep:tauri-plugin-global-shortcut",
     # Pure-Rust russh transport required only by the GUI SSH client.
     "dep:russh",
     "dep:russh-sftp",
@@ -60,7 +61,7 @@ tao-macros = { version = "=0.1.4", registry = "crates-io" }
 font-kit = { version = "0.14.3", optional = true }
 # The built-in browser needs unstable Window::add_child multi-WebView APIs. Their signatures may change,
 # so the version is pinned within 2.11 and call sites are centralized.
-tauri = { version = "2", features = ["unstable"], optional = true }
+tauri = { version = "2", features = ["unstable", "image-png"], optional = true }
 tauri-plugin-opener = { version = "2", optional = true }
 tauri-plugin-dialog = { version = "2", optional = true }
 tauri-plugin-notification = { version = "2", optional = true }
@@ -72,6 +73,9 @@ tauri-plugin-updater = { version = "2", optional = true }
 tauri-plugin-process = { version = "2", optional = true }
 # A second `vela <path>` process forwards the path to the running window and exits immediately.
 tauri-plugin-single-instance = { version = "2", optional = true }
+# System-wide screenshot hotkey that works while another application has focus.
+# Pinned below 2.4, which requires Tauri 2.12; the built-in browser pins Tauri within 2.11.
+tauri-plugin-global-shortcut = { version = "~2.3.2", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Kimi hooks safely merge into existing config.toml only after parsing validates it.
@@ -176,6 +180,7 @@ windows = { version = "0.61", features = [
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_JobObjects",
     "Win32_System_Threading",
+    "Win32_System_Environment",
     "Win32_Security",
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Shell",
@@ -184,6 +189,9 @@ windows = { version = "0.61", features = [
     "Data_Xml_Dom",
     "UI_Notifications",
 ] }
+# Screen capture for the screenshot overlay. macOS uses the system `screencapture` tool instead, and Linux
+# is not supported: xcap's Linux backend would require PipeWire and XCB development libraries at build time.
+xcap = { version = "0.9", default-features = false }
 # Register AppUserModelId in HKCU so unbundled release executables without installer shortcuts can emit
 # Windows toasts, which the system otherwise drops. Reuse windows-rs already present through webview2-com.
 windows-registry = "0.6"

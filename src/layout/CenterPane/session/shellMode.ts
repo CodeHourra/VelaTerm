@@ -2,6 +2,7 @@
 //! prompt. The pure parts live here so the routing can be tested without rendering the pane.
 
 import type { I18nKey } from "../../../i18n";
+import { genId } from "../../../genId";
 
 /**
  * Read a composer submission as a shell command.
@@ -41,7 +42,7 @@ export function shellSubmissionFor(session: string, command: string): ShellSubmi
   if (current) return current;
   let id: string | null = null;
   try { id = sessionStorage.getItem(key); } catch { /* Storage can be unavailable in private views. */ }
-  if (!id || !/^sh-[0-9a-f-]{36}$/i.test(id)) id = `sh-${crypto.randomUUID()}`;
+  if (!id || !/^sh-[0-9a-f-]{36}$/i.test(id)) id = `sh-${genId()}`;
   const submission = { sessionId: session, command, id, pending: false };
   shellSubmissions.set(key, submission);
   try { sessionStorage.setItem(key, id); } catch { /* In-memory retries retain the same identity. */ }

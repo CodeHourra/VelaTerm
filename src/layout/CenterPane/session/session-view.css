@@ -1,7 +1,6 @@
 /* Session view — the conversation reading of an agent session.
  *
- * The view follows the global background, accent, density, and light/dark scheme. Dark-mode secondary
- * text is adjusted locally below so metadata and controls remain readable. */
+ * The view follows the global background, text hierarchy, accent, density, and light/dark scheme. */
 
 .sv {
   position: absolute;
@@ -23,15 +22,6 @@
   /* The inset of a message drawn on its own surface. It is also how far that surface reaches back into the
      gutter, which is what keeps the words inside it on the conversation's left edge. */
   --sv-pad: 12px;
-}
-
-/* Keep readable secondary text distinct from body text without changing surfaces or accent colors. */
-:root[data-theme="dark"] .sv {
-  --text-mid: oklch(0.82 0.004 260);
-  --text-dim: oklch(0.75 0.004 260);
-  --text-faint: oklch(0.68 0.004 260);
-  --text-secondary: var(--text-mid);
-  --text-muted: var(--text-dim);
 }
 
 /* Holds the scrolling conversation and the button that returns to the end of it. */
@@ -2161,7 +2151,7 @@ select.sv-pill {
 /* Stop button: the send button becomes one while a turn is running. */
 .sv-stop {
   background: var(--red);
-  color: #fff;
+  color: var(--text-on-accent);
 }
 .sv-stop-square {
   width: 9px;
@@ -2612,6 +2602,16 @@ select.sv-pill {
 .sv-model-catalog-refresh { flex-shrink: 0; padding: 4px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-panel); color: var(--text); cursor: pointer; }
 .sv-model-catalog-refresh:disabled { opacity: .5; cursor: default; }
 .sv-model-catalog-error { color: var(--text); }
+/* Update hint for a Claude CLI too old to list its models, in the same inset as the catalogue status. */
+.sv-model-cli-outdated {
+  margin: 8px 4px;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--bg-hover);
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.5;
+}
 
 /* Unresolved authentication is inline; manual account actions live in a popover. */
 .sv-auth {
@@ -2822,6 +2822,16 @@ select.sv-pill {
   font-size: calc(var(--ui-fs) - 1px);
   white-space: pre-wrap;
 }
+/* A subagent's own conversation, drawn with the conversation's rows. The task tab sits outside `.sv`, so
+   the column measures those rows rely on are declared here as well. */
+.sv-task-conversation {
+  --sv-gutter: 18px;
+  --sv-gutter-gap: 8px;
+  --sv-pad: 12px;
+  font-family: var(--chat-font);
+  font-kerning: none;
+  font-variant-ligatures: none;
+}
 
 .sv-task-tab-link {
   display: flex;
@@ -2832,3 +2842,7 @@ select.sv-pill {
   text-decoration: none;
 }
 a.sv-popover-open { color: inherit; text-decoration: none; }
+
+/* Recovery is a separate block with explicit spacing in every viewport. */
+.sv-recovery { display: grid; gap: 10px; padding: 12px; margin-block: 10px; border: 1px solid var(--border); border-radius: var(--r-md); color: var(--text-mid); }
+.sv-recovery-actions { display: flex; flex-wrap: wrap; gap: 8px; }

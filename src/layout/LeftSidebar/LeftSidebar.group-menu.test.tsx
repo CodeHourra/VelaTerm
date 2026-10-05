@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const menuMocks = vi.hoisted(() => ({
@@ -15,6 +15,7 @@ const menuMocks = vi.hoisted(() => ({
 const storeState = vi.hoisted(() => ({
   leftWidth: 280,
   importProject: vi.fn(),
+  addVirtualProject: vi.fn(),
   setCloneModalOpen: vi.fn(),
   renameNode: vi.fn(),
   openSession: vi.fn(),
@@ -123,9 +124,28 @@ import { LeftSidebar } from "./LeftSidebar";
 describe("LeftSidebar", () => {
   beforeEach(() => {
     menuMocks.newSessionItems.mockClear();
+    storeState.addVirtualProject.mockReset();
     storeState.statusFilter = null;
     storeState.dynamicStatusFilter = true;
     storeState.appendSidebarTreeViewStatusMatches.mockClear();
+  });
+
+  it("keeps failed collection creation open and closes only after a successful retry", async () => {
+    storeState.addVirtualProject
+      .mockRejectedValueOnce(new Error("A collection with this name already exists"))
+      .mockResolvedValueOnce(undefined);
+    render(<LeftSidebar />);
+    fireEvent.click(screen.getByRole("link", { name: "tree.newCollection" }));
+    const input = screen.getByRole("textbox", { name: /collection.name/ }) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "  Research  " } });
+    fireEvent.click(screen.getByRole("button", { name: "collection.submit" }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe("collection.duplicateName");
+    expect(input.value).toBe("  Research  ");
+    expect(storeState.addVirtualProject).toHaveBeenCalledWith("Research");
+    fireEvent.click(screen.getByRole("button", { name: "collection.submit" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(storeState.addVirtualProject).toHaveBeenCalledTimes(2);
   });
 
   it("adds dynamic matches and exposes only the requested downward split control", () => {

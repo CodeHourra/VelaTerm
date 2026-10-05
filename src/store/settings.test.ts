@@ -6,6 +6,39 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { COMPOSER_CHIP_IDS, DEFAULT_COMPOSER_INLINE_CHIPS, SETTINGS_KEY, defaultEngineFor, loadSettings, sanitizeComposerInlineChips } from "./settings";
 import { useTermStore } from "./termStore";
 
+describe("dark palette preference", () => {
+  beforeEach(() => localStorage.clear());
+
+  it.each([undefined, null, "unknown"])("opens old or invalid preference %s with classic dark", (darkStyle) => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ darkStyle, density: "compact" }));
+    expect(loadSettings().darkStyle).toBe("classic");
+    expect(loadSettings().density).toBe("compact");
+  });
+
+  it.each(["soft", "cool", "crisp", "classic"])("normalizes the saved %s preference to classic dark", (darkStyle) => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ darkStyle }));
+    expect(loadSettings().darkStyle).toBe("classic");
+  });
+
+  it("selects classic dark and retains it across light mode and hydration", () => {
+    const { theme, darkStyle } = useTermStore.getState();
+    try {
+      useTermStore.getState().setDarkTheme("classic");
+      expect(useTermStore.getState().theme).toBe("dark");
+      expect(JSON.parse(localStorage.getItem(SETTINGS_KEY)!).darkStyle).toBe("classic");
+      useTermStore.getState().setTheme("light");
+      const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY)!);
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...saved, darkStyle: "crisp" }));
+      useTermStore.getState().hydrateSettingsFromCache();
+      expect(useTermStore.getState().theme).toBe("light");
+      expect(useTermStore.getState().darkStyle).toBe("classic");
+      expect(document.documentElement.dataset.darkStyle).toBe("classic");
+    } finally {
+      useTermStore.setState({ theme, darkStyle });
+    }
+  });
+});
+
 describe("terminal renderer migration", () => {
   beforeEach(() => localStorage.clear());
 

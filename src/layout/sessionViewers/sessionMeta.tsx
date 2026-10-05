@@ -63,9 +63,9 @@ export const AGENT_KIND_LABEL: Partial<Record<SessionKind, string>> = {
   pi: "Pi",
   omp: "OMP",
   crush: "Crush",
-  kimi: "Kimi Code (K3)",
+  kimi: "Kimi Code",
   kiro: "Kiro",
-  grok: "Grok Build (Grok 4.5)",
+  grok: "Grok Build",
   zoo: "Zoo Code",
 };
 

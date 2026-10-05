@@ -72,7 +72,7 @@ describe("shell mode in the composer", () => {
     expect((args as { messageId: string }).messageId).toMatch(/^sh-/);
     expect(commands()).not.toContain("chat_send");
     expect(commands()).not.toContain("chat_start");
-    expect(input.value).toBe("");
+    await waitFor(() => expect(input.value).toBe(""));
   });
 
   it("starts the agent first when none is running, so the result has someone to react to it", async () => {

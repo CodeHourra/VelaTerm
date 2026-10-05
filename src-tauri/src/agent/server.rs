@@ -173,12 +173,14 @@ pub struct RunsRequest {
     pub session_id: String,
 }
 
-/// Request from `vself` for the calling session's own identity and ancestry.
+/// Request from `vself` for session properties and hierarchy; no target means the calling session.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WhoamiRequest {
-    /// The session asking about itself, injected as `VLX_SESSION_ID`.
+    /// Calling session identity, injected as `VLX_SESSION_ID`.
     pub session_id: String,
+    #[serde(default)]
+    pub target: Option<String>,
 }
 
 /// Handler for `/refer` and `/search`, returning `(status code, response body)`.
@@ -600,6 +602,14 @@ fn serve_with_app(
             let _ = request.respond(tiny_http::Response::from_string("Invalid spawn request").with_status_code(400));
             continue;
         } else if let Some((sid, signal)) = handle(&url, token) {
+            // Chat protocols own identity, naming, tooling and lifecycle state. Global hooks from a
+            // descendant CLI inherit the same VLX environment, but describe that CLI, not this chat.
+            // The source also protects stopped chat sessions against callbacks still in flight.
+            if app.as_ref().is_some_and(|app|
+                app.chat().is_alive(&sid) || crate::session_state::has_chat_source(&sid)) {
+                let _ = request.respond(tiny_http::Response::empty(200));
+                continue;
+            }
             // For a valid hook, capture any body session_id before reporting status. The callback
             // reports whether that ID belongs to the session's own foreground conversation.
             let mut id_is_foreground = false;
@@ -1689,46 +1699,40 @@ fn handle_stat(app: &AppCtx, req: StatRequest) -> (u16, String) {
     )
 }
 
-/// Handle `/whoami`: report the calling session and the ancestor chain that spawned it.
+/// Handle `/whoami`: report a session's saved properties, ancestry and direct children.
 ///
-/// Index 0 of `lineage` is the caller itself, index 1 its parent, and so on up to the top-level root.
-/// `parent` is a convenience shortcut to index 1. A caller that finds `parent` null is a top-level
-/// session that no `vspawn` created.
+/// The ancestry starts with the selected session's immediate parent. A null parent means top-level.
 fn handle_whoami(app: &AppCtx, req: WhoamiRequest) -> (u16, String) {
-    let lineage = {
-        let db = app.db();
-        let Ok(conn) = db.conn.lock() else {
-            return (500, error_body("database is unavailable"));
-        };
-        match crate::db::repo::session_lineage(&conn, &req.session_id) {
-            Ok(chain) => chain,
-            Err(e) => return (500, error_body(&e)),
+    match super::session_query::inspect(app, &req.session_id, req.target.as_deref()) {
+        Ok(result) => (200, result.to_string()),
+        Err(error) => {
+            let code = if matches!(error.as_str(), "Calling session not found" | "Target session not found") { 404 }
+                else if error.starts_with("Ambiguous target;") { 409 }
+                else if error == "Specify a target session" { 400 } else { 500 };
+            (code, error_body(&error))
         }
-    };
-    if lineage.is_empty() {
-        return (404, error_body("no such session"));
     }
-    let brief = |b: &crate::db::repo::SessionBrief| {
-        serde_json::json!({
-            "sessionId": b.session_id,
-            "name": b.name,
-            "kind": b.kind,
-            "cwd": b.cwd,
-            "archived": b.archived,
-        })
-    };
-    let session = brief(&lineage[0]);
-    let parent = lineage.get(1).map(brief);
-    let ancestors: Vec<serde_json::Value> = lineage[1..].iter().map(brief).collect();
-    (
-        200,
-        serde_json::json!({
-            "session": session,
-            "parent": parent,
-            "ancestors": ancestors,
-        })
-        .to_string(),
-    )
+}
+
+#[cfg(test)]
+#[test]
+fn self_query_http_retains_legacy_requests_and_resolves_other_sessions() {
+    let app = super::session_query::tests::fixture();
+    let req: WhoamiRequest = serde_json::from_value(serde_json::json!({"sessionId":"grandchild"})).unwrap();
+    assert!(req.target.is_none());
+    let (code, body) = handle_whoami(&app, req);
+    assert_eq!(code, 200);
+    let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(body["parent"]["sessionId"], "legacy-child");
+    assert_eq!(body["session"]["createdAt"], 123);
+    for (target, expected) in [("Ordinary parent",200),("child",409),("missing",404),(" ",400)] {
+        let (code, body) = handle_whoami(&app, WhoamiRequest { session_id:"caller".into(),target:Some(target.into()) });
+        assert_eq!(code, expected);
+        if code == 200 {
+            assert_eq!(serde_json::from_str::<serde_json::Value>(&body).unwrap()["children"].as_array().unwrap().len(), 2);
+        }
+    }
+    super::session_query::tests::cleanup(app);
 }
 
 /// Handle `/search`: run the existing cross-session FTS5 search, keep only conversation matches, and cap
@@ -3099,6 +3103,82 @@ mod tests {
             rx.recv_timeout(Duration::from_secs(3)).unwrap(),
             "prompt:vlx-codex:the current session title"
         );
+    }
+
+    /// Descendant CLI hooks must not change a chat's state, identity, title or active tool.
+    #[test]
+    fn serve_with_ignores_terminal_hooks_for_chat_sources() {
+        use std::sync::mpsc;
+        use serde_json::json;
+
+        let _state_guard = crate::session_state::test_lock();
+        let dir = std::env::temp_dir().join(format!("vlx-chat-hook-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = crate::db::Db::open(&dir.join("t.db")).unwrap();
+        let app = AppCtx::Headless(std::sync::Arc::new(crate::host::HeadlessHost::new(dir.clone(), db)));
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let port = server.server_addr().to_ip().unwrap().port();
+        let (tx, rx) = mpsc::channel();
+        let tx_prompt = tx.clone();
+        let tx_id = tx.clone();
+        let app_server = app.clone();
+        let app_signal = app.clone();
+        std::thread::spawn(move || serve_with_app(
+            server, "tok", Some(app_server),
+            move |sid, signal| {
+                if let StatusSignal::State { state, .. } = &signal {
+                    crate::agent::status_watch::record(&sid, *state);
+                }
+                app_signal.emit(&StatusSignal::event_name(&sid), &signal);
+                tx.send("signal").unwrap();
+            },
+            move |_, _| { tx_prompt.send("prompt").unwrap(); },
+            move |_, _| { tx_id.send("identity").unwrap(); true },
+            |_| {}, |_| {}, unused_read_handler(),
+        ));
+
+        for kind in ["claude", "codex", "opencode", "pi", "omp", "antigravity"] {
+            let sid = format!("chat-hook-{kind}-{}", Uuid::new_v4());
+            let event = StatusSignal::event_name(&sid);
+            app.emit(&event, StatusSignal::Agent { agent: Some(kind.into()), state_source: Some("chat".into()) });
+            app.emit(&event, StatusSignal::State { state: AgentState::Working, silent: false, authoritative: true });
+            crate::session_state::set_alive(&app, &sid, true);
+            crate::agent::status_watch::record(&sid, AgentState::Working);
+            let post = |state: &str, body: &str| {
+                let response = ureq::post(&format!("http://127.0.0.1:{port}/hook/{sid}?t=tok&e={state}"))
+                    .send_string(body).unwrap();
+                assert_eq!(response.status(), 200);
+            };
+            post("working", r#"{"session_id":"nested-cli","hook_event_name":"UserPromptSubmit","prompt":"nested request"}"#);
+            post("asking", r#"{"hook_event_name":"PreToolUse","tool_name":"NestedTool"}"#);
+            post("waiting", r#"{"conversationId":"nested-agy","hook_event_name":"Stop"}"#);
+            post("boot", r#"{"session_id":"nested-cli"}"#);
+            assert!(rx.try_recv().is_err(), "{kind}: no hook callback may reach chat consumers");
+            let record = crate::session_state::snapshot()[&sid].clone();
+            assert_eq!(record.agent_state.as_deref(), Some("working"));
+            assert!(!record.unread);
+            assert_eq!(crate::agent::status_watch::snapshot().1.into_iter()
+                .find(|row| row.session_id == sid).unwrap().state, AgentState::Working);
+
+            // A real protocol completion still updates the state; late hooks cannot restart it.
+            app.emit(&event, StatusSignal::State { state: AgentState::Waiting, silent: false, authoritative: true });
+            assert_eq!(crate::session_state::snapshot()[&sid].agent_state.as_deref(), Some("waiting"));
+            crate::session_state::set_stopped(&app, &sid);
+            post("working", r#"{"session_id":"late-cli"}"#);
+            assert!(rx.try_recv().is_err());
+            assert_eq!(crate::session_state::snapshot()[&sid].agent_state.as_deref(), Some("waiting"));
+
+            // Returning to a terminal declares another source and restores normal hook routing.
+            app.emit(&event, json!({"kind":"agent","agent":kind,"state_source":if kind == "codex" { Some("hooks") } else { None }}));
+            assert!(!crate::session_state::has_chat_source(&sid));
+            post("working", r#"{"session_id":"terminal-cli","hook_event_name":"UserPromptSubmit","prompt":"terminal request"}"#);
+            assert_eq!(rx.try_recv().unwrap(), "identity");
+            assert_eq!(rx.try_recv().unwrap(), "prompt");
+            assert_eq!(rx.try_recv().unwrap(), "signal");
+            assert_eq!(crate::session_state::snapshot()[&sid].agent_state.as_deref(), Some("working"));
+            crate::session_state::forget(&sid);
+        }
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     /// Codex notify is process-wide: an internal helper thread (title generation, guardian review)

@@ -1,3 +1,49 @@
+## v0.2.7 — 2026-10-05
+
+- 🪐 Antigravity ist als experimenteller Agent in der Gesprächsansicht verfügbar und unterstützt Text, Werkzeuge, Nachrichtenwarteschlangen und den nativen Verlauf; Bilder, zusätzliche Anweisungen während einer Antwort, interaktive Freigaben, Verzweigen und Zurückspulen werden noch nicht unterstützt, und die vollständige plattformübergreifende Prüfung der Wiederherstellung steht noch aus.
+
+- 🗂️ Sammlungen können Untersammlungen, Projekte und Sitzungsgruppen enthalten und im Arbeitsbereich erstellt oder importiert werden, wobei Projekte und archivierte Sitzungen beim Löschen einer Sammlung erhalten bleiben.
+
+- ⚠️ Frühere Versionen dürfen eine von Ordnern auf Sammlungen migrierte Datenbank nicht verwenden; für ein Downgrade muss eine Sicherung von vor der Migration wiederhergestellt werden.
+
+- 🏷️ Intelligentes Umbenennen benennt eine Sitzung anhand ihres Gesprächs mit den Einstellungen des aktuellen Agenten und bietet eine Agentenauswahl an, wenn diese Einstellungen nicht verwendet werden können.
+
+- 🌱 Neue Sitzungen verwenden die aktuelle Shell-Umgebung und neu installierte Agenten, ohne VelaTerm neu starten zu müssen.
+
+- 💾 Die experimentelle Gesprächswiederherstellung stellt gespeicherte Nachrichten, Bilder und wartende Eingaben nach einem Neustart wieder her und pausiert unterbrochene Arbeit bis zur ausdrücklichen Fortsetzung; die vollständige Abnahme in nativen Umgebungen und auf allen Plattformen steht noch aus.
+
+- 📸 Die experimentelle Bildschirmaufnahme in den Tauri-Desktop-Apps für macOS und Windows ermöglicht Bereichsauswahl, Anmerkungen, Kopieren und Speichern der ursprünglichen PNG-Datei; die native Desktop-Abnahme steht noch aus, und Electron, Browser und Remote-Ansichten werden nicht unterstützt.
+
+- 🧵 Die Tabs für Claude-Hintergrundaufgaben zeigen den vollständigen nativen Gesprächsverlauf einschließlich paralleler Werkzeugaufrufe.
+
+- 🖼️ Eine Gesprächsnachricht kann bis zu 20 Bilder enthalten, mit maximal 5 MiB pro Bild.
+
+- 📍 Nachrichtenmarkierungen zeigen Vorschauen und führen direkt zu früheren Benutzernachrichten.
+
+- 🧭 Die Verzeichnisauswahl für Projekte, Klonen und Speichern unter bietet einheitlich bearbeitbare Pfade und die Vervollständigung von Speicherorten.
+
+- 🪪 `vself` liest gespeicherte Sitzungseinstellungen und Eltern-Kind-Beziehungen, während `vflow list` zugehörige Planungs- und Ausführungsworkflows auflistet, ohne sie zu verändern.
+
+- ⌨️ Alles auswählen im Terminal lässt sich in den Tastenkürzeln konfigurieren, verwendet standardmäßig Cmd+A unter macOS und Ctrl+Shift+A auf anderen Plattformen und gilt nur bei fokussiertem Terminal.
+
+- 🐚 Die Bash-Vervollständigung unterstützt Pfade mit `~` am Anfang, und ältere Bash-Versionen öffnen Sitzungen ohne PS0-Fehler.
+
+- 🛑 Hooks von untergeordneten Aufgaben verändern den Gesprächsstatus ihrer übergeordneten Sitzung nicht mehr, und das Schließen eines Gesprächstabs beendet dessen aktiven Chat-Prozess.
+
+- 🪟 Windows stellt beim Zurückkehren zum Fenster den Tastaturfokus des Terminals wieder her und zeigt bei der chinesischen Texteingabe keine blaue Linie mehr.
+
+- 🎨 Klassisch Dunkel bietet klarere Kontraste, Desktop-Symbole folgen dem Systemdesign, Projektsymbole sind blau und Sammlungszeilen zeigen keine Projektanzahl mehr.
+
+- 📚 Die Menüs für Sitzungen und Sammlungen verwenden eine klarere Beschriftung für das Hinzufügen zur Wissensdatenbank.
+
+- 🌐 Der Browserzugriff auf VelaTerm über unverschlüsseltes HTTP im lokalen Netzwerk öffnet die Seite korrekt.
+
+- 🌍 Update-Prüfungen übermitteln die Oberflächensprache für passende Versionshinweise, und der Update-Dienst akzeptiert den Linux-Electron-Updater.
+
+- 🧰 Die Agentennamen Kimi Code und Grok Build erscheinen ohne Modellversionsnummern.
+
+---
+
 ## v0.2.6 — 2026-09-30
 
 - 🐧 Die Linux-Version basiert jetzt auf Electron. Das AppImage behält seinen Dateinamen und Ihre Daten, benötigt kein WebKitGTK und kein libfuse2 mehr, und bestehende Installationen lassen sich über die integrierte Aktualisierung darauf umstellen.

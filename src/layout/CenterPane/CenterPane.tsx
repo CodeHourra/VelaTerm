@@ -6,8 +6,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { useMemoryTab } from "../Memory/useMemoryTab";
 import Icons from "../../components/Icons";
 import { useT } from "../../i18n";
-import { IS_PLAIN_BROWSER } from "../../hooks/shortcutRegistry";
-import { isMac } from "../../ipc/transport";
+import { effectiveCombo, formatCombo } from "../../hooks/shortcutRegistry";
 import { isShareSurface } from "../../ipc/shareBase";
 import { remoteText } from "../../sharing/remoteApi";
 import { useTermStore } from "../../store/termStore";
@@ -162,6 +161,7 @@ export function CenterPane() {
   const closePane = useTermStore((s) => s.closePane);
   const splitNew = useTermStore((s) => s.splitNew);
   const newScratchTab = useTermStore((s) => s.newScratchTab);
+  const shortcutOverrides = useTermStore((s) => s.shortcutOverrides);
   const openSession = useTermStore((s) => s.openSession);
   const openSessionInSplit = useTermStore((s) => s.openSessionInSplit);
   const openSessionInPane = useTermStore((s) => s.openSessionInPane);
@@ -323,13 +323,26 @@ export function CenterPane() {
               <div>{t("center.noSession")}</div>
               {isShareSurface ? <div style={{color:"var(--text-faint)"}}>{remoteText("remote.select")}</div> : <><div style={{ color: "var(--text-faint)" }}>
                 {t("center.noSessionHintPre")}
-                <kbd>{isMac && !IS_PLAIN_BROWSER ? "⌘T" : "Ctrl Alt T"}</kbd>
+                <kbd>{formatCombo(effectiveCombo("newTab", shortcutOverrides))}</kbd>
                 {t("center.noSessionHintPost")}
               </div>
               <button className="empty-action" onClick={() => void newScratchTab()}>
                 <Icons.terminal size={14} />
                 {t("center.createTerminal")}
               </button>
+              <div className="empty-split-hints">
+                <div>{t("center.splitHint")}</div>
+                <div className="empty-split-keys">
+                  <span>
+                    {t("term.splitRight")}
+                    <kbd>{formatCombo(effectiveCombo("splitRight", shortcutOverrides))}</kbd>
+                  </span>
+                  <span>
+                    {t("term.splitDown")}
+                    <kbd>{formatCombo(effectiveCombo("splitDown", shortcutOverrides))}</kbd>
+                  </span>
+                </div>
+              </div>
               </>}
             </div>
           </div>

@@ -75,7 +75,7 @@ import { installWebkitImeFix, isWebkitEngine } from "../terminal/imeWebkitFix";
 import { installImeCaret } from "../terminal/imeCaret";
 import { detectAgentScreen, readScreenTail } from "../terminal/screenDetect";
 import { remapGrokDayCanvasToWhite } from "../terminal/grokBgRemap";
-import { fontStack, resolveTheme, XTERM_THEME } from "../theme";
+import { fontStack, resolveTheme, xtermTheme } from "../theme";
 import type { AgentKind, Session } from "../types";
 
 /** Size mode: fit owns the PTY grid; mirror pins the grid and observes it. */
@@ -254,7 +254,7 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
       rescaleOverlappingGlyphs: true,
       // Override OSC 8 links because xterm's confirm/window.open flow fails under Tauri.
       linkHandler: terminalLinkHandler,
-      theme: XTERM_THEME[resolveTheme(useTermStore.getState().theme)],
+      theme: xtermTheme(useTermStore.getState().theme),
     });
     const fitAddon = new FitAddon();
     const searchAddon = new SearchAddon();

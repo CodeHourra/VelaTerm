@@ -10,7 +10,9 @@ import { type MenuItem } from "../components/ContextMenu";
 import { FormModal, type FieldDef } from "../components/FormModal";
 import Icons from "../components/Icons";
 import { canExportContext, exportSessionToFile } from "../exportSession";
-import { t, useT } from "../i18n";
+import { t, useT, type I18nKey } from "../i18n";
+import { renameSessionWithAgent } from "../ipc/tree";
+import { navigateSmartRename } from "./SmartRename/navigation";
 import {
   createWorktree,
   downloadFullGitbash,
@@ -50,6 +52,7 @@ import {
 } from "../types";
 import { MARK_LABEL_KEYS, NODE_MARKS, normalizeMark } from "../marks";
 import { type TreeNodeRef } from "./LeftSidebar/ProjectTree";
+import { lockGroupNavigation, navigateNewGroup, useNewGroupRoute } from "./LeftSidebar/groupNavigation";
 import { kindIconEl } from "./sessionViewers/sessionMeta";
 import {
   ConfirmDelete,
@@ -69,6 +72,11 @@ import { navigatePlanExecute, planExecuteUrl } from "../components/planExecuteNa
 
 /** Number of direct agent shortcuts on the first New Session menu level. */
 const QUICK_AGENT_COUNT = 3;
+const TITLE_ERROR_KEYS: Record<string, I18nKey> = {
+  empty: "sessionTitle.unavailable", unavailable: "sessionTitle.unavailable", unsupported: "sessionTitle.unavailable",
+  no_agent: "sessionTitle.noAgent", busy: "sessionTitle.busy", too_large: "sessionTitle.tooLarge",
+  timeout: "sessionTitle.timeout", invalid: "sessionTitle.invalid", changed: "sessionTitle.changed",
+};
 /** Default shortcut order when no recent history exists. */
 const DEFAULT_QUICK_AGENTS: SessionKind[] = ["claude", "codex", "opencode"];
 /** Local agent kinds eligible for one-click first-level shortcuts. Separate from AGENT_ARGS_KINDS despite overlap. */
@@ -184,14 +192,14 @@ export interface SessionMenu {
   }) => MenuItem[];
   /** Opens a dialog, including batch and project/group deletion confirmation. */
   openDialog: (dialog: Dialog) => void;
-  /** Dialog rendering owned independently by each sidebar/tab-bar hook instance. */
+  /** Dialog rendering owned independently by each sidebar/tab-bar hook instance. The sidebar owns group URLs. */
   dialogs: React.ReactNode;
 }
 
 /**
- * Shared menu/dialog hook. Sidebar and tab bar each own independent dialog state and render their own `dialogs`.
+ * Shared menu/dialog hook. Each caller owns local dialog state; only the sidebar opts into group URL navigation.
  */
-export function useSessionMenu(): SessionMenu {
+export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMenu {
   const t = useT();
   const addSession = useTermStore((s) => s.addSession);
   const agentPresets = useTermStore((s) => s.agentPresets);
@@ -221,6 +229,35 @@ export function useSessionMenu(): SessionMenu {
   const sessions = useTermStore((s) => s.sessions);
 
   const [dialog, setDialog] = useState<Dialog | null>(null);
+  const groupRoute = useNewGroupRoute(!!opts?.groupNavigation);
+  const treeLoaded = useTermStore(s => s.treeLoaded);
+  const newGroup = groupRoute ? (treeLoaded ? groupRoute : null) : dialog?.type === "newGroup" ? dialog : null;
+  const closeNewGroup = () => {
+    if (groupRoute) { lockGroupNavigation(false); navigateNewGroup(null); }
+    else setDialog(null);
+  };
+  const [titleJobs, setTitleJobs] = useState<Record<string, string>>({});
+  const titleInFlight = useRef(new Set<string>());
+  const [titleError, setTitleError] = useState<string | null>(null);
+  const titleDialogId = useId();
+  const generateTitle = async (session: Session) => {
+    if (titleInFlight.current.has(session.id)) return;
+    titleInFlight.current.add(session.id);
+    setTitleJobs(jobs => ({ ...jobs, [session.id]: session.name }));
+    setTitleError(null);
+    try {
+      await renameSessionWithAgent(session.id);
+    } catch (error) {
+      const code = String(error).match(/session_title:([a-z_]+)/)?.[1] ?? "failed";
+      if (code === "agent_unavailable" || code === "timeout") navigateSmartRename(session.id);
+      else setTitleError(t(TITLE_ERROR_KEYS[code] ?? "sessionTitle.failed"));
+    } finally {
+      titleInFlight.current.delete(session.id);
+      setTitleJobs(jobs => {
+        const next = { ...jobs }; delete next[session.id]; return next;
+      });
+    }
+  };
   const [killError, setKillError] = useState<string | null>(null);
   const [killTarget, setKillTarget] = useState<{ id: string; name: string } | null>(null);
   const [killBusy, setKillBusy] = useState(false);
@@ -723,7 +760,7 @@ export function useSessionMenu(): SessionMenu {
           onClick: () => void handleNewSession(projectId, groupId, "crush", parentSessionId),
         },
         {
-          label: t("tree.newAgentSession", "Kimi Code (K3)"),
+          label: t("tree.newAgentSession", "Kimi Code"),
           icon: kindIconEl("kimi"),
           onClick: () => void handleNewSession(projectId, groupId, "kimi", parentSessionId),
         },
@@ -733,7 +770,7 @@ export function useSessionMenu(): SessionMenu {
           onClick: () => void handleNewSession(projectId, groupId, "kiro", parentSessionId),
         },
         {
-          label: t("tree.newAgentSession", "Grok Build (Grok 4.5)"),
+          label: t("tree.newAgentSession", "Grok Build"),
           icon: kindIconEl("grok"),
           onClick: () => void handleNewSession(projectId, groupId, "grok", parentSessionId),
         },
@@ -919,7 +956,8 @@ export function useSessionMenu(): SessionMenu {
       walk(null, 0);
       const rootItem: MenuItem = {
         label: t("tree.projectRoot"),
-        icon: <Icons.project size={14} />,
+        icon: isVirtualProject(useTermStore.getState().projects.find(p => p.id === node.projectId))
+          ? <Icons.layers size={14} /> : <Icons.project size={14} />,
         disabled: node.groupId === null,
         onClick: () => void moveNode("session", node.id, node.projectId, null, null, Date.now()),
       };
@@ -1070,6 +1108,14 @@ export function useSessionMenu(): SessionMenu {
       },
     ];
     if (renameItem) items.push(renameItem);
+    if (sessionRec && sessionRec.kind !== "terminal") {
+      items.push({
+        label: t(titleJobs[node.id] ? "sessionTitle.generating" : "sessionTitle.rename"),
+        icon: <Icons.sparkle size={14} />,
+        disabled: !!titleJobs[node.id] || (!sessionRec.agentSessionId && sessionRec.engine !== "chat"),
+        onClick: () => void generateTitle(sessionRec),
+      });
+    }
     items.push(sep, buildMoveTo(), sep);
     // Chat processes live outside the PTY manager. Closing their pane only releases them when idle,
     // so explicitly stop the owning engine before closing the view.
@@ -1113,7 +1159,8 @@ export function useSessionMenu(): SessionMenu {
 
     const rootItem: MenuItem = {
       label: t("tree.projectRoot"),
-      icon: <Icons.project size={14} />,
+      icon: isVirtualProject(useTermStore.getState().projects.find(p => p.id === projectId))
+        ? <Icons.layers size={14} /> : <Icons.project size={14} />,
       // Disable project root when every session is already ungrouped there.
       disabled: recs.every((s) => (s.groupId ?? null) === null),
       onClick: () => void moveMany(ids, projectId, null, null),
@@ -1224,6 +1271,32 @@ export function useSessionMenu(): SessionMenu {
 
   const dialogs = (
     <>
+      {Object.keys(titleJobs).length > 0 && (
+        <div role="status" style={{ position: "fixed", bottom: 40, right: 16, zIndex: 1400,
+          display: "flex", flexDirection: "column", gap: 8, maxWidth: "min(360px, calc(100vw - 32px))",
+          padding: 12, borderRadius: 8, background: "var(--bg-elevated)", color: "var(--text-primary)",
+          border: "1px solid var(--border)", boxShadow: "var(--shadow)", fontSize: 12 }}>
+          {Object.entries(titleJobs).map(([id, name]) => (
+            <span key={id} style={{ overflowWrap: "anywhere" }}>{t("sessionTitle.generating")} · {name}</span>
+          ))}
+        </div>
+      )}
+      {titleError !== null && (
+        <Backdrop onClose={() => setTitleError(null)}>
+          <div className="quit-card" role="alertdialog" aria-modal="true" aria-labelledby={`${titleDialogId}-title`}
+            aria-describedby={`${titleDialogId}-body`} onKeyDown={event => {
+              if (event.key === "Escape") { event.stopPropagation(); setTitleError(null); }
+            }}>
+            <div className="quit-head">
+              <div className="quit-title" id={`${titleDialogId}-title`}>{t("sessionTitle.rename")}</div>
+              <div className="quit-body" id={`${titleDialogId}-body`}>{titleError}</div>
+            </div>
+            <div className="quit-foot">
+              <button className="vlx-btn vlx-btn-primary" autoFocus onClick={() => setTitleError(null)}>{t("common.close")}</button>
+            </div>
+          </div>
+        </Backdrop>
+      )}
       {killTarget !== null && (
         <Backdrop onClose={cancelKill}>
           <div className="quit-card" role="alertdialog" aria-modal="true" aria-busy={killBusy}
@@ -1245,37 +1318,39 @@ export function useSessionMenu(): SessionMenu {
           </div>
         </Backdrop>
       )}
-      {dialog?.type === "newGroup" && (
+      {newGroup && (
         <NewGroup
-          projectId={dialog.projectId}
-          parentGroupId={dialog.parentGroupId}
-          onCancel={() => setDialog(null)}
+          key={`${newGroup.projectId}:${newGroup.parentGroupId}`}
+          projectId={newGroup.projectId}
+          parentGroupId={newGroup.parentGroupId}
+          urlBacked={!!groupRoute}
+          onCancel={closeNewGroup}
           onConfirm={async ({ name, worktree }) => {
             // Group worktree modes create normally, create an isolated worktree first, or bind an existing one.
             // Dialog remains open to show errors and closes only on success.
             if (worktree.mode === "new") {
               const st = useTermStore.getState();
-              const parentGroup = dialog.parentGroupId
-                ? st.groups.find((g) => g.id === dialog.parentGroupId)
+              const parentGroup = newGroup.parentGroupId
+                ? st.groups.find((g) => g.id === newGroup.parentGroupId)
                 : null;
-              const project = st.projects.find((p) => p.id === dialog.projectId);
+              const project = st.projects.find((p) => p.id === newGroup.projectId);
               // Use the parent group's worktree as repository root when nested, otherwise project root.
               const repoRoot = parentGroup?.worktreePath || project?.rootPath || null;
               if (!repoRoot) throw new Error(t("worktree.noRepoRoot"));
               const wt = await createWorktree(repoRoot, worktree.name);
-              await addGroup(dialog.projectId, dialog.parentGroupId, name, {
+              await addGroup(newGroup.projectId, newGroup.parentGroupId, name, {
                 worktreePath: wt.path,
                 worktreeBaseRef: wt.baseRef || null,
               });
             } else if (worktree.mode === "existing") {
-              await addGroup(dialog.projectId, dialog.parentGroupId, name, {
+              await addGroup(newGroup.projectId, newGroup.parentGroupId, name, {
                 worktreePath: worktree.path,
                 worktreeBaseRef: null,
               });
             } else {
-              await addGroup(dialog.projectId, dialog.parentGroupId, name);
+              await addGroup(newGroup.projectId, newGroup.parentGroupId, name);
             }
-            setDialog(null);
+            closeNewGroup();
           }}
         />
       )}
@@ -1454,14 +1529,13 @@ export function useSessionMenu(): SessionMenu {
           )}
           worktreePaths={dialog.worktreePaths}
           onCancel={() => setDialog(null)}
-          onConfirm={(removeWt) => {
+          onConfirm={async (removeWt) => {
             const { kind, id } = dialog.node;
             const paths = dialog.worktreePaths;
-            void deleteNode(kind, id).then(() => {
-              if (removeWt) {
-                for (const p of paths) void removeWorktree(p, false).catch(() => {});
-              }
-            });
+            await deleteNode(kind, id);
+            if (removeWt) {
+              for (const p of paths) void removeWorktree(p, false).catch(() => {});
+            }
             setDialog(null);
           }}
         />
@@ -1506,7 +1580,12 @@ export function useSessionMenu(): SessionMenu {
     buildMoveToMany,
     buildGitItems,
     buildMarkItem,
-    openDialog: setDialog,
+    openDialog: next => {
+      if (opts?.groupNavigation && next.type === "newGroup") {
+        setDialog(null);
+        navigateNewGroup(next.projectId, next.parentGroupId);
+      } else setDialog(next);
+    },
     dialogs,
   };
 }

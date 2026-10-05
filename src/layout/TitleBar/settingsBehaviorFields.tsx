@@ -239,7 +239,7 @@ export function NotificationField() {
                 borderRadius: 5,
                 border: "1px solid var(--accent)",
                 background: "var(--accent)",
-                color: "#fff",
+                color: "var(--text-on-accent)",
                 cursor: busy ? "default" : "pointer",
                 opacity: busy ? 0.6 : 1,
               }}

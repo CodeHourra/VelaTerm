@@ -3,6 +3,7 @@ import { Backdrop } from "../../components/Backdrop";
 import Icons from "../../components/Icons";
 import Select from "../../components/Select";
 import { useT } from "../../i18n";
+import { genId } from "../../genId";
 import { createAgentSession, prepareAgentSession } from "../../ipc/launch";
 import { setCollapsed } from "../../ipc/tree";
 import { useTermStore } from "../../store/termStore";
@@ -80,7 +81,7 @@ function NewAgentSessionPicker({ route }: { route: AgentPickerRoute }) {
   const update = (change: Partial<AgentPickerRoute>, replace = false) => {
     if (pending.current) return;
     setError("");
-    navigateAgentPicker(agentPickerUrl({ ...route, ...change, requestId: crypto.randomUUID() }), replace);
+    navigateAgentPicker(agentPickerUrl({ ...route, ...change, requestId: genId() }), replace);
   };
   const close = () => { if (!pending.current) navigateAgentPicker(agentPickerUrl(null)); };
   const create = async () => {
@@ -108,7 +109,7 @@ function NewAgentSessionPicker({ route }: { route: AgentPickerRoute }) {
   };
   const placement = (value: "sibling" | "child") => update({ placement: value });
   const placementUrls = useMemo(() => Object.fromEntries((["sibling", "child"] as const).map(value => [value,
-    agentPickerUrl({ ...route, placement: value, requestId: value === route.placement ? route.requestId : crypto.randomUUID() }),
+    agentPickerUrl({ ...route, placement: value, requestId: value === route.placement ? route.requestId : genId() }),
   ])), [route]);
   const targetLabel = anchor
     ? t(route.placement === "child" ? "agentPicker.targetChild" : "agentPicker.targetSibling", anchor.name, location)

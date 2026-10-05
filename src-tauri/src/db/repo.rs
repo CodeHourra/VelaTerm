@@ -9,8 +9,7 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 use uuid::Uuid;
 
 use crate::models::{
-    AgentPreset, Group, NodeKind, Project, ProjectFolder, Session, SessionKind, Tree,
-    AGENT_PRESET_ICON_MAX_BYTES,
+    AgentPreset, Group, NodeKind, Project, Session, SessionKind, Tree, AGENT_PRESET_ICON_MAX_BYTES,
 };
 
 /// Converts Windows verbatim paths returned by `std::fs::canonicalize` into the ordinary form used
@@ -71,7 +70,7 @@ fn map_project(row: &Row) -> rusqlite::Result<Project> {
         created_at: row.get(6)?,
         // Append the emoji marker at index 7 without shifting existing fields.
         mark: row.get(7)?,
-        folder_id: row.get(8)?,
+        collection_id: row.get(8)?,
     })
 }
 
@@ -155,7 +154,7 @@ pub fn import_project(conn: &Connection, root_path: &str) -> Result<Project, Str
     // root before comparison so the CLI switches to the project instead of importing a duplicate.
     let mut stmt = conn
         .prepare(
-            "SELECT id, name, root_path, color, sort_order, collapsed, created_at, mark, folder_id FROM projects",
+            "SELECT id, name, root_path, color, sort_order, collapsed, created_at, mark, collection_id FROM projects",
         )
         .map_err(|e| format!("Failed to inspect existing projects: {e}"))?;
     let existing = stmt
@@ -183,7 +182,7 @@ pub fn import_project(conn: &Connection, root_path: &str) -> Result<Project, Str
         sort_order: now_millis(),
         collapsed: false,
         mark: None,
-        folder_id: None,
+        collection_id: None,
         created_at: now_secs(),
     };
 
@@ -204,14 +203,18 @@ pub fn import_project(conn: &Connection, root_path: &str) -> Result<Project, Str
     Ok(project)
 }
 
-/// Create a collection: a top-level sidebar container with no folder behind it. `root_path` is stored as an
-/// empty string, which every reader already treats as "no directory" — sessions created inside fall back to
-/// their own `cwd`, and the PTY layer turns an unspecified spawn directory into the home directory.
-/// Names are free-form here because nothing on disk is created, so duplicates are allowed.
+/// Create a collection: a sidebar container for projects and direct groups/sessions, with no directory of its own.
+/// `root_path` is stored as an empty string, which every reader already treats as "no directory".
+/// Sessions created inside fall back to their own `cwd`, and the PTY layer turns an unspecified spawn directory
+/// into the home directory.
+/// Creation rejects names already used by a live collection (see `collection_name_taken`).
 pub fn create_virtual_project(conn: &Connection, name: &str) -> Result<Project, String> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
-        return Err("Group name must not be empty".to_string());
+        return Err("Collection name must not be empty".to_string());
+    }
+    if collection_name_taken(conn, trimmed, None)? {
+        return Err(DUPLICATE_COLLECTION_NAME.to_string());
     }
     let project = Project {
         id: new_id(),
@@ -221,7 +224,7 @@ pub fn create_virtual_project(conn: &Connection, name: &str) -> Result<Project, 
         sort_order: now_millis(),
         collapsed: false,
         mark: None,
-        folder_id: None,
+        collection_id: None,
         created_at: now_secs(),
     };
 
@@ -240,6 +243,27 @@ pub fn create_virtual_project(conn: &Connection, name: &str) -> Result<Project, 
     .map_err(|e| format!("Failed to write project: {e}"))?;
 
     Ok(project)
+}
+
+const DUPLICATE_COLLECTION_NAME: &str = "A collection with this name already exists";
+
+/// Whether another live collection already uses `name`. Comparison ignores surrounding whitespace and case, so
+/// "Research" and " research" count as the same name. `exclude_id` skips the collection being renamed.
+fn collection_name_taken(conn: &Connection, name: &str, exclude_id: Option<&str>) -> Result<bool, String> {
+    let wanted = name.trim().to_lowercase();
+    let mut stmt = conn
+        .prepare("SELECT id, name FROM projects WHERE root_path = '' AND deleted_at IS NULL")
+        .map_err(|e| format!("Failed to query collections: {e}"))?;
+    let rows = stmt
+        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .map_err(|e| format!("Failed to query collections: {e}"))?;
+    for r in rows {
+        let (id, existing) = r.map_err(|e| format!("Failed to read collection: {e}"))?;
+        if Some(id.as_str()) != exclude_id && existing.trim().to_lowercase() == wanted {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Create a group, top-level when parent_group_id is absent. Optional worktree fields establish the
@@ -477,14 +501,7 @@ pub fn create_fresh_chat_session(
     source: &Session,
     name: &str,
 ) -> Result<Session, String> {
-    if !matches!(
-        source.kind,
-        SessionKind::Claude
-            | SessionKind::Codex
-            | SessionKind::Opencode
-            | SessionKind::Pi
-            | SessionKind::Omp
-    ) || source.engine != "chat"
+    if !source.kind.supports_chat() || source.engine != "chat"
     {
         return Err("Only chat sessions can be cleared".to_string());
     }
@@ -1634,16 +1651,30 @@ pub fn worktree_paths_in_subtree(conn: &Connection, id: &str) -> Result<Vec<Stri
     Ok(out)
 }
 
-/// Rename a node.
+/// Rename a node. A collection may not take a name another live collection already uses.
 pub fn rename_node(conn: &Connection, kind: NodeKind, id: &str, name: &str) -> Result<(), String> {
+    let name = name.trim();
+    if name.is_empty() { return Err("Name must not be empty".into()); }
+    if matches!(kind, NodeKind::Project) {
+        let is_collection = conn
+            .query_row("SELECT root_path = '' FROM projects WHERE id = ?1", params![id], |row| row.get::<_, bool>(0))
+            .optional()
+            .map_err(|e| format!("Failed to query project: {e}"))?
+            .unwrap_or(false);
+        if is_collection && collection_name_taken(conn, name, Some(id))? {
+            return Err(DUPLICATE_COLLECTION_NAME.to_string());
+        }
+    }
     let table = match kind {
         NodeKind::Project => "projects",
         NodeKind::Group => "groups",
         NodeKind::Session => "sessions",
     };
-    let sql = format!("UPDATE {table} SET name = ?1 WHERE id = ?2");
-    conn.execute(&sql, params![name, id])
+    let live = if matches!(kind, NodeKind::Session) { "" } else { " AND deleted_at IS NULL" };
+    let sql = format!("UPDATE {table} SET name = ?1 WHERE id = ?2{live}");
+    let changed = conn.execute(&sql, params![name, id])
         .map_err(|e| format!("Failed to rename: {e}"))?;
+    if changed == 0 { return Err(format!("Node not found: {id}")); }
     Ok(())
 }
 
@@ -1731,7 +1762,14 @@ pub fn delete_node(conn: &Connection, kind: NodeKind, id: &str) -> Result<Vec<St
     match kind {
         NodeKind::Session => delete_session_node(conn, id),
         NodeKind::Group => delete_group_node(conn, id),
-        NodeKind::Project => delete_project_node(conn, id),
+        NodeKind::Project => {
+            let tx = conn.unchecked_transaction().map_err(|e| format!("Failed to begin project deletion: {e}"))?;
+            tx.execute("UPDATE projects SET collection_id = NULL WHERE collection_id = ?1", params![id])
+                .map_err(|e| format!("Failed to release collection projects: {e}"))?;
+            let deleted = delete_project_node(&tx, id)?;
+            tx.commit().map_err(|e| format!("Failed to commit project deletion: {e}"))?;
+            Ok(deleted)
+        },
     }
 }
 
@@ -2266,133 +2304,71 @@ pub fn set_collapsed(
         // Hierarchical sessions also have collapse state, meaningful only when they have children.
         NodeKind::Session => "sessions",
     };
-    let sql = format!("UPDATE {table} SET collapsed = ?1 WHERE id = ?2");
-    conn.execute(&sql, params![collapsed as i64, id])
+    let live = if matches!(kind, NodeKind::Session) { "" } else { " AND deleted_at IS NULL" };
+    let sql = format!("UPDATE {table} SET collapsed = ?1 WHERE id = ?2{live}");
+    let changed = conn.execute(&sql, params![collapsed as i64, id])
         .map_err(|e| format!("Failed to update collapsed state: {e}"))?;
+    if changed == 0 { return Err(format!("Node not found: {id}")); }
     Ok(())
 }
 
-fn map_project_folder(row: &Row) -> rusqlite::Result<ProjectFolder> {
-    Ok(ProjectFolder {
-        id: row.get(0)?,
-        name: row.get(1)?,
-        sort_order: row.get(2)?,
-        collapsed: row.get::<_, i64>(3)? != 0,
-        created_at: row.get(4)?,
-    })
-}
-
-fn check_folder_name(name: &str) -> Result<String, String> {
-    let trimmed = name.trim();
-    if trimmed.is_empty() {
-        return Err("Folder name must not be empty".to_string());
-    }
-    Ok(trimmed.to_string())
-}
-
-/// Create a sidebar folder appended after the existing ones. Duplicate names are allowed, as for collections.
-pub fn create_project_folder(conn: &Connection, name: &str) -> Result<ProjectFolder, String> {
-    let name = check_folder_name(name)?;
-    let sort_order: i64 = conn
-        .query_row(
-            "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM project_folders",
-            [],
-            |r| r.get(0),
-        )
-        .map_err(|e| format!("Failed to read folder order: {e}"))?;
-    let folder = ProjectFolder {
-        id: new_id(),
-        name,
-        sort_order,
-        collapsed: false,
-        created_at: now_secs(),
-    };
-    conn.execute(
-        "INSERT INTO project_folders (id, name, sort_order, collapsed, created_at)
-         VALUES (?1, ?2, ?3, 0, ?4)",
-        params![folder.id, folder.name, folder.sort_order, folder.created_at],
-    )
-    .map_err(|e| format!("Failed to write folder: {e}"))?;
-    Ok(folder)
-}
-
-pub fn rename_project_folder(conn: &Connection, id: &str, name: &str) -> Result<(), String> {
-    let name = check_folder_name(name)?;
-    let changed = conn
-        .execute(
-            "UPDATE project_folders SET name = ?1 WHERE id = ?2",
-            params![name, id],
-        )
-        .map_err(|e| format!("Failed to rename folder: {e}"))?;
-    if changed == 0 {
-        return Err(format!("Folder not found: {id}"));
-    }
-    Ok(())
-}
-
-/// Delete a folder and release its projects. The explicit clear keeps projects safe even where the
-/// `ON DELETE SET NULL` foreign key is not enforced, and a missing folder is not an error because another
-/// view may have deleted it first.
-pub fn delete_project_folder(conn: &Connection, id: &str) -> Result<(), String> {
-    let tx = conn
-        .unchecked_transaction()
-        .map_err(|e| format!("Failed to start transaction: {e}"))?;
-    tx.execute(
-        "UPDATE projects SET folder_id = NULL WHERE folder_id = ?1",
-        params![id],
-    )
-    .map_err(|e| format!("Failed to release folder projects: {e}"))?;
-    tx.execute("DELETE FROM project_folders WHERE id = ?1", params![id])
-        .map_err(|e| format!("Failed to delete folder: {e}"))?;
-    tx.commit()
-        .map_err(|e| format!("Failed to commit folder deletion: {e}"))?;
-    Ok(())
-}
-
-pub fn set_project_folder_collapsed(
-    conn: &Connection,
-    id: &str,
-    collapsed: bool,
-) -> Result<(), String> {
-    conn.execute(
-        "UPDATE project_folders SET collapsed = ?1 WHERE id = ?2",
-        params![collapsed as i64, id],
-    )
-    .map_err(|e| format!("Failed to update folder collapsed state: {e}"))?;
-    Ok(())
-}
-
-/// Put a project into a folder, or back at the top level with None. The folder is checked here rather than
-/// left to the foreign key, which is only enforced on connections that enable it.
-pub fn set_project_folder(
+/// Move a project into a live collection, or detach it to the top level. Membership changes presentation only:
+/// session ownership, working directories and running processes remain unchanged. Collections are project rows,
+/// so ancestor traversal rejects self-membership and cycles, including those involving existing collections.
+pub fn set_project_collection(
     conn: &Connection,
     project_id: &str,
-    folder_id: Option<&str>,
+    collection_id: Option<&str>,
 ) -> Result<(), String> {
-    if let Some(fid) = folder_id {
-        let exists = conn
-            .query_row(
-                "SELECT 1 FROM project_folders WHERE id = ?1",
-                params![fid],
-                |_| Ok(()),
-            )
-            .optional()
-            .map_err(|e| format!("Failed to read folder: {e}"))?
-            .is_some();
-        if !exists {
-            return Err(format!("Folder not found: {fid}"));
-        }
-    }
-    let changed = conn
-        .execute(
-            "UPDATE projects SET folder_id = ?1 WHERE id = ?2",
-            params![folder_id, project_id],
-        )
-        .map_err(|e| format!("Failed to move project to folder: {e}"))?;
-    if changed == 0 {
-        return Err(format!("Project not found: {project_id}"));
-    }
+    let tx = conn.unchecked_transaction().map_err(|e| format!("Failed to begin collection move: {e}"))?;
+    apply_project_collection(&tx, project_id, collection_id)?;
+    tx.commit().map_err(|e| format!("Failed to commit collection move: {e}"))?;
     Ok(())
+}
+
+fn apply_project_collection(conn: &Connection, project_id: &str, collection_id: Option<&str>) -> Result<(), String> {
+    let source = conn.query_row("SELECT 1 FROM projects WHERE id = ?1 AND deleted_at IS NULL",
+        params![project_id], |_| Ok(())).optional().map_err(|e| format!("Failed to read project: {e}"))?;
+    if source.is_none() { return Err(format!("Project not found: {project_id}")); }
+    let mut ancestor = collection_id.map(str::to_string);
+    let mut seen = HashSet::new();
+    while let Some(id) = ancestor {
+        if id == project_id || !seen.insert(id.clone()) {
+            return Err("A collection cannot contain itself or one of its ancestors".into());
+        }
+        let row = conn.query_row(
+            "SELECT root_path, collection_id FROM projects WHERE id = ?1 AND deleted_at IS NULL",
+            params![id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))
+            .optional().map_err(|e| format!("Failed to read collection: {e}"))?;
+        let Some((root, parent)) = row else { return Err(format!("Collection not found: {id}")); };
+        if !root.trim().is_empty() { return Err("The destination must be a collection".into()); }
+        ancestor = parent;
+    }
+    conn.execute("UPDATE projects SET collection_id = ?1 WHERE id = ?2", params![collection_id, project_id])
+        .map_err(|e| format!("Failed to move project to collection: {e}"))?;
+    Ok(())
+}
+
+/// Import and assign membership in one transaction; an invalid destination leaves the tree unchanged.
+pub fn import_project_into_collection(conn: &Connection, root_path: &str, collection_id: Option<&str>) -> Result<Project, String> {
+    let Some(collection_id) = collection_id else { return import_project(conn, root_path); };
+    let tx = conn.unchecked_transaction().map_err(|e| format!("Failed to begin project import: {e}"))?;
+    let mut project = import_project(&tx, root_path)?;
+    apply_project_collection(&tx, &project.id, Some(collection_id))?;
+    project.collection_id = Some(collection_id.to_string());
+    tx.commit().map_err(|e| format!("Failed to commit project import: {e}"))?;
+    Ok(project)
+}
+
+/// Create a child collection atomically, using the same live-parent and cycle validation as moves.
+pub fn create_virtual_project_in_collection(conn: &Connection, name: &str, collection_id: Option<&str>) -> Result<Project, String> {
+    let Some(collection_id) = collection_id else { return create_virtual_project(conn, name); };
+    let tx = conn.unchecked_transaction().map_err(|e| format!("Failed to begin collection creation: {e}"))?;
+    let mut project = create_virtual_project(&tx, name)?;
+    apply_project_collection(&tx, &project.id, Some(collection_id))?;
+    project.collection_id = Some(collection_id.to_string());
+    tx.commit().map_err(|e| format!("Failed to commit collection creation: {e}"))?;
+    Ok(project)
 }
 
 /// Return a complete three-table tree snapshot ordered by sort_order.
@@ -2400,7 +2376,7 @@ pub fn list_tree(conn: &Connection) -> Result<Tree, String> {
     // Exclude hidden deleted_at tombstones retained only because they contain archived sessions.
     let projects = query_all(
         conn,
-        "SELECT id, name, root_path, color, sort_order, collapsed, created_at, mark, folder_id
+        "SELECT id, name, root_path, color, sort_order, collapsed, created_at, mark, collection_id
          FROM projects WHERE deleted_at IS NULL ORDER BY sort_order",
         map_project,
     )?;
@@ -2420,18 +2396,10 @@ pub fn list_tree(conn: &Connection) -> Result<Tree, String> {
         map_session,
     )?;
 
-    let folders = query_all(
-        conn,
-        "SELECT id, name, sort_order, collapsed, created_at
-         FROM project_folders ORDER BY sort_order, created_at",
-        map_project_folder,
-    )?;
-
     Ok(Tree {
         projects,
         groups,
         sessions,
-        folders,
     })
 }
 
@@ -2864,6 +2832,60 @@ mod tests {
 
         // A blank name is rejected rather than creating an unnamed row.
         assert!(create_virtual_project(&conn, "   ").is_err());
+    }
+
+    /// Two collections may not share a name, ignoring case and surrounding whitespace. Renaming a collection
+    /// to its own name stays allowed, and folder-backed projects are not part of the check.
+    #[test]
+    fn collection_names_are_unique() {
+        let conn = mem_conn();
+        let research = create_virtual_project(&conn, "Research").unwrap();
+        assert!(create_virtual_project(&conn, " research ").is_err());
+        let notes = create_virtual_project(&conn, "Notes").unwrap();
+
+        assert!(rename_node(&conn, NodeKind::Project, &notes.id, "RESEARCH").is_err());
+        rename_node(&conn, NodeKind::Project, &research.id, "Research").unwrap();
+        rename_node(&conn, NodeKind::Project, &notes.id, "Archive").unwrap();
+
+        let dir = std::env::temp_dir();
+        let imported = import_project(&conn, dir.to_str().unwrap()).unwrap();
+        rename_node(&conn, NodeKind::Project, &imported.id, "Research").unwrap();
+    }
+
+    /// Tombstones retain archived sessions but must not reserve names for creation or rename.
+    #[test]
+    fn deleted_collection_names_can_be_reused_without_losing_archives() {
+        let conn = mem_conn();
+        let research = create_virtual_project(&conn, "Research").unwrap();
+        let archived = create_session(
+            &conn, &research.id, None, "Saved conversation", SessionKind::Claude,
+            None, None, None, None, None,
+        ).unwrap();
+        set_archived(&conn, &archived.id, true).unwrap();
+        delete_node(&conn, NodeKind::Project, &research.id).unwrap();
+        assert!(list_tree(&conn).unwrap().projects.is_empty());
+
+        let notes = create_virtual_project(&conn, "Notes").unwrap();
+        rename_node(&conn, NodeKind::Project, &notes.id, " RESEARCH ").unwrap();
+        assert!(create_virtual_project(&conn, "research").is_err());
+        rename_node(&conn, NodeKind::Project, &notes.id, "Notes").unwrap();
+        let replacement = create_virtual_project(&conn, " research ").unwrap();
+        assert_ne!(replacement.id, research.id);
+        assert_eq!(replacement.name, "research");
+        assert!(rename_node(&conn, NodeKind::Project, &notes.id, "Research").is_err());
+
+        let tree = list_tree(&conn).unwrap();
+        assert_eq!(tree.projects.len(), 2);
+        assert!(!tree.projects.iter().any(|p| p.id == research.id));
+        let archives = list_archived(&conn).unwrap();
+        assert_eq!(archives.len(), 1);
+        assert_eq!(archives[0].id, archived.id);
+        assert_eq!(archives[0].project_id, research.id);
+        let original_name: String = conn.query_row(
+            "SELECT name FROM projects WHERE id = ?1 AND deleted_at IS NOT NULL",
+            params![research.id], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(original_name, "Research");
     }
 
     /// `move_node` must refuse to make a session its own ancestor: `move_node` is reachable over the
@@ -4138,80 +4160,59 @@ mod tests {
 
     }
 
-    /// Folders only group projects, so names are trimmed, new folders append, and duplicate names are allowed
-    /// just like collections.
     #[test]
-    fn project_folders_create_rename_and_list_in_order() {
+    fn collection_membership_validates_targets_and_cycles() {
         let conn = mem_conn();
-        let first = create_project_folder(&conn, "  Payments  ").unwrap();
-        let second = create_project_folder(&conn, "Payments").unwrap();
-        assert_eq!(first.name, "Payments");
-        assert_ne!(first.id, second.id);
-        assert!(second.sort_order > first.sort_order);
-        assert!(!first.collapsed);
-
-        rename_project_folder(&conn, &second.id, " Billing ").unwrap();
-        assert!(rename_project_folder(&conn, &second.id, "   ").is_err());
-        assert!(rename_project_folder(&conn, "missing", "Name").is_err());
-        assert!(create_project_folder(&conn, "\t").is_err());
-
+        let parent = create_virtual_project(&conn, "Work").unwrap();
+        let child = create_virtual_project(&conn, "Research").unwrap();
+        set_project_collection(&conn, &child.id, Some(&parent.id)).unwrap();
+        assert!(set_project_collection(&conn, &parent.id, Some(&child.id)).is_err());
+        assert!(set_project_collection(&conn, &parent.id, Some(&parent.id)).is_err());
+        assert!(set_project_collection(&conn, &child.id, Some("missing")).is_err());
+        assert!(set_project_collection(&conn, "missing", None).is_err());
+        conn.execute("UPDATE projects SET root_path = '/tmp/repo' WHERE id = ?1", params![child.id]).unwrap();
+        assert!(set_project_collection(&conn, &parent.id, Some(&child.id)).is_err());
         let tree = list_tree(&conn).unwrap();
-        let names: Vec<&str> = tree.folders.iter().map(|f| f.name.as_str()).collect();
-        assert_eq!(names, ["Payments", "Billing"]);
+        assert_eq!(tree.projects.iter().find(|p| p.id == child.id).unwrap().collection_id.as_deref(), Some(parent.id.as_str()));
+        set_project_collection(&conn, &child.id, None).unwrap();
+        assert!(list_tree(&conn).unwrap().projects.iter().all(|p| p.collection_id.is_none()));
+        delete_node(&conn, NodeKind::Project, &parent.id).unwrap();
+        assert!(set_project_collection(&conn, &child.id, Some(&parent.id)).is_err());
     }
 
+    /// Both physical deletion and archive-retaining tombstones detach member projects, without deleting their content.
     #[test]
-    fn set_project_folder_assigns_clears_and_rejects_unknown_ids() {
-        let conn = mem_conn();
-        let project = create_virtual_project(&conn, "payments-web").unwrap();
-        assert_eq!(project.folder_id, None);
-        let folder = create_project_folder(&conn, "Payments").unwrap();
-
-        set_project_folder(&conn, &project.id, Some(folder.id.as_str())).unwrap();
-        let tree = list_tree(&conn).unwrap();
-        assert_eq!(tree.projects[0].folder_id.as_deref(), Some(folder.id.as_str()));
-
-        let err = set_project_folder(&conn, &project.id, Some("missing")).unwrap_err();
-        assert!(err.contains("Folder not found"), "{err}");
-        // The rejected call must leave the existing assignment alone.
-        assert_eq!(
-            list_tree(&conn).unwrap().projects[0].folder_id.as_deref(),
-            Some(folder.id.as_str())
-        );
-        assert!(set_project_folder(&conn, "missing", Some(folder.id.as_str())).is_err());
-
-        set_project_folder(&conn, &project.id, None).unwrap();
-        assert_eq!(list_tree(&conn).unwrap().projects[0].folder_id, None);
-    }
-
-    /// Deleting a folder must never delete projects. The clear is explicit, so it holds even on a connection
-    /// with foreign-key enforcement off.
-    #[test]
-    fn deleting_a_project_folder_keeps_its_projects_loose() {
-        let conn = mem_conn();
-        conn.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
-        let web = create_virtual_project(&conn, "payments-web").unwrap();
-        let api = create_virtual_project(&conn, "payments-api").unwrap();
-        let folder = create_project_folder(&conn, "Payments").unwrap();
-        set_project_folder(&conn, &web.id, Some(folder.id.as_str())).unwrap();
-        set_project_folder(&conn, &api.id, Some(folder.id.as_str())).unwrap();
-
-        delete_project_folder(&conn, &folder.id).unwrap();
-        let tree = list_tree(&conn).unwrap();
-        assert!(tree.folders.is_empty());
-        assert_eq!(tree.projects.len(), 2);
-        assert!(tree.projects.iter().all(|p| p.folder_id.is_none()));
-        // A second view may still show the folder; deleting it again must not fail.
-        delete_project_folder(&conn, &folder.id).unwrap();
-    }
-
-    #[test]
-    fn project_folder_collapsed_state_persists() {
-        let conn = mem_conn();
-        let folder = create_project_folder(&conn, "Payments").unwrap();
-        set_project_folder_collapsed(&conn, &folder.id, true).unwrap();
-        assert!(list_tree(&conn).unwrap().folders[0].collapsed);
-        set_project_folder_collapsed(&conn, &folder.id, false).unwrap();
-        assert!(!list_tree(&conn).unwrap().folders[0].collapsed);
+    fn deleting_collection_preserves_member_projects_and_archives() {
+        for archived in [false, true] {
+            let conn = mem_conn();
+            let collection = create_virtual_project(&conn, "Work").unwrap();
+            let member = create_virtual_project(&conn, "Member").unwrap();
+            let direct_group = create_group(&conn, &collection.id, None, "Direct").unwrap();
+            let direct = create_session(&conn, &collection.id, Some(&direct_group.id), "Direct", SessionKind::Terminal,
+                None, None, None, None, None).unwrap();
+            let retained = create_session(&conn, &member.id, None, "Member session", SessionKind::Terminal,
+                None, Some("/tmp/member"), None, None, None).unwrap();
+            let archive = if archived {
+                let session = create_session(&conn, &collection.id, None, "Archive", SessionKind::Terminal,
+                    None, None, None, None, None).unwrap();
+                set_archived(&conn, &session.id, true).unwrap(); Some(session)
+            } else { None };
+            set_project_collection(&conn, &member.id, Some(&collection.id)).unwrap();
+            let deleted = delete_node(&conn, NodeKind::Project, &collection.id).unwrap();
+            assert_eq!(deleted, vec![direct.id]);
+            let tree = list_tree(&conn).unwrap();
+            assert_eq!(tree.projects.len(), 1);
+            assert_eq!(tree.projects[0].id, member.id);
+            assert!(tree.projects[0].collection_id.is_none());
+            assert_eq!(tree.sessions[0].id, retained.id);
+            assert_eq!(tree.sessions[0].cwd.as_deref(), Some("/tmp/member"));
+            if let Some(archive) = archive {
+                assert!(set_project_collection(&conn, &member.id, Some(&collection.id)).is_err());
+                assert_eq!(list_archived(&conn).unwrap()[0].id, archive.id);
+                set_archived(&conn, &archive.id, false).unwrap();
+                assert_eq!(list_tree(&conn).unwrap().projects.len(), 2);
+                assert!(list_tree(&conn).unwrap().projects.iter().all(|p| p.collection_id.is_none()));
+            }
+        }
     }
 }

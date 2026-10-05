@@ -1,6 +1,6 @@
 //! Generic form modal that renders inputs from field definitions for creating groups/sessions, renaming, and similar actions.
 
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { normalizeArgDashes } from "../args";
 import { useT } from "../i18n";
 import { Backdrop } from "./Backdrop";
@@ -37,10 +37,12 @@ function SelectField({
   field,
   value,
   onChange,
+  disabled,
 }: {
   field: FieldDef;
   value: string;
   onChange: (v: string) => void;
+  disabled?: boolean;
 }) {
   const t = useT();
   const opts = field.select ?? [];
@@ -51,6 +53,7 @@ function SelectField({
   return (
     <>
       <Select
+        disabled={disabled}
         value={custom ? CUSTOM_SENTINEL : value}
         onChange={(v) => {
           if (v === CUSTOM_SENTINEL) {
@@ -72,6 +75,7 @@ function SelectField({
       {custom && (
         <input
           className="vlx-input"
+          disabled={disabled}
           style={{ marginTop: 6 }}
           autoCapitalize="none"
           placeholder={field.placeholder}
@@ -90,13 +94,22 @@ export function FormModal({
   submitLabel,
   onSubmit,
   onCancel,
+  validate,
+  formatSubmitError,
+  onValuesChange,
 }: {
   title: string;
   fields: FieldDef[];
   initial?: Record<string, string>;
   submitLabel?: string;
-  onSubmit: (values: Record<string, string>) => void;
+  onSubmit: (values: Record<string, string>) => void | Promise<void>;
   onCancel: () => void;
+  /** Returns an error message to show below the fields and block submission, or null when the values are valid. */
+  validate?: (values: Record<string, string>) => string | null;
+  /** Formats submission failures for display; the default preserves the error message. */
+  formatSubmitError?: (error: unknown) => string;
+  /** Persist presentation drafts, for example in a recoverable dialog URL. */
+  onValuesChange?: (values: Record<string, string>) => void;
 }) {
   const t = useT();
   const [values, setValues] = useState<Record<string, string>>(() => {
@@ -104,26 +117,57 @@ export function FormModal({
     for (const f of fields) v[f.key] = initial?.[f.key] ?? "";
     return v;
   });
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const canSubmit = fields.every(
+  const changeValue = (key: string, value: string) => {
+    if (submittingRef.current) return;
+    setSubmitError(null);
+    const next = { ...values, [key]: value };
+    setValues(next);
+    onValuesChange?.(next);
+  };
+  const cancel = () => {
+    if (!submittingRef.current) onCancel();
+  };
+
+  const validationError = validate?.(values) ?? null;
+  const error = validationError ?? submitError;
+  const canSubmit = !submitting && !validationError && fields.every(
     (f) => !f.required || values[f.key].trim().length > 0,
   );
 
-  const submit = () => {
-    if (!canSubmit) return;
+  const submit = async () => {
+    if (!canSubmit || submittingRef.current) return;
     // On submit, restore long dashes to `--` in fields marked normalizeDashes, such as launch arguments.
     const out: Record<string, string> = { ...values };
     for (const f of fields) {
       if (f.normalizeDashes) out[f.key] = normalizeArgDashes(out[f.key] ?? "");
     }
-    onSubmit(out);
+    submittingRef.current = true;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      await onSubmit(out);
+    } catch (e) {
+      setSubmitError(formatSubmitError ? formatSubmitError(e) : e instanceof Error ? e.message : String(e));
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
   };
 
   return (
-    <Backdrop onClose={onCancel}>
+    <Backdrop onClose={cancel}>
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        aria-busy={submitting}
         style={{
           width: 380,
+          maxWidth: "calc(100vw - 32px)",
           background: "var(--bg-panel)",
           border: "1px solid var(--border)",
           borderRadius: 10,
@@ -132,8 +176,12 @@ export function FormModal({
         }}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) submit();
-          if (e.key === "Escape") onCancel();
+          if (e.defaultPrevented) return;
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            void submit();
+          }
+          if (e.key === "Escape") cancel();
         }}
       >
         <div
@@ -166,12 +214,10 @@ export function FormModal({
                   >
                     <input
                       type="checkbox"
+                      disabled={submitting}
                       checked={checked}
                       onChange={(e) =>
-                        setValues((v) => ({
-                          ...v,
-                          [f.key]: e.target.checked ? on : f.uncheckedValue ?? "",
-                        }))
+                        changeValue(f.key, e.target.checked ? on : f.uncheckedValue ?? "")
                       }
                     />
                     {f.label}
@@ -206,21 +252,23 @@ export function FormModal({
                     <span style={{ color: "var(--status-error)" }}> *</span>
                   )}
                 </div>
-                {f.render ? f.render(values[f.key], v => setValues(vs => ({ ...vs, [f.key]: v }))) : f.select ? (
+                {f.render ? f.render(values[f.key], v => changeValue(f.key, v)) : f.select ? (
                   <SelectField
                     field={f}
                     value={values[f.key]}
-                    onChange={(v) => setValues((vs) => ({ ...vs, [f.key]: v }))}
+                    disabled={submitting}
+                    onChange={(v) => changeValue(f.key, v)}
                   />
                 ) : (
                 <input
                   className="vlx-input"
+                  disabled={submitting}
                   autoCapitalize="none"
                   placeholder={f.placeholder}
                   autoFocus={f.autoFocus}
                   value={values[f.key]}
                   onChange={(e) =>
-                    setValues((v) => ({ ...v, [f.key]: e.target.value }))
+                    changeValue(f.key, e.target.value)
                   }
                 />
                 )}
@@ -228,6 +276,12 @@ export function FormModal({
             );
           })}
         </div>
+
+        {error && (
+          <div role="alert" style={{ fontSize: 12, color: "var(--status-error)", marginTop: 10 }}>
+            {error}
+          </div>
+        )}
 
         <div
           style={{
@@ -237,12 +291,12 @@ export function FormModal({
             marginTop: 18,
           }}
         >
-          <button className="vlx-btn" onClick={onCancel}>
+          <button className="vlx-btn" onClick={cancel} disabled={submitting}>
             {t("common.cancel")}
           </button>
           <button
             className="vlx-btn vlx-btn-primary"
-            onClick={submit}
+            onClick={() => void submit()}
             disabled={!canSubmit}
           >
             {submitLabel ?? t("common.confirm")}

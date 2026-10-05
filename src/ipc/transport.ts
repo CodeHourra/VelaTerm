@@ -10,6 +10,7 @@ import { Channel, invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { t } from "../i18n";
+import { genId } from "../genId";
 import { recordRequestError } from "./reqLog";
 import { safeCommand, safeError, diagnosticOperation } from "./diagnosticSafety";
 import { apiUrl } from "./shareBase";
@@ -153,7 +154,7 @@ const DIRECT_DESKTOP_CMDS = new Set([
  *  console, ring buffer, and UI banner. It never retries; callers own retry policy. Errors remain visible even
  *  when a caller intentionally swallows rejection, such as `void loadTree()` during startup. */
 export function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  const requestId = crypto.randomUUID();
+  const requestId = genId();
   const started = performance.now();
   const tracked = !["pty_write", "pty_resize", "diagnostic_event", "diagnostic_health"].includes(cmd);
   return invokeInner<T>(cmd, args, tracked ? { requestId, operationId: diagnosticOperation(args?.sessionId ?? args?.id) } : undefined).then((result) => {
@@ -260,7 +261,7 @@ export function spawnPty(
   args: PtySpawnArgs,
   onBytes: (bytes: Uint8Array) => void,
 ): Promise<PtySpawnResult> {
-  const requestId = crypto.randomUUID();
+  const requestId = genId();
   const started = performance.now();
   let first = true;
   const receive = (bytes: Uint8Array) => {

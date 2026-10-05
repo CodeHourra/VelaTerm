@@ -18,6 +18,7 @@ export function Backdrop({
   zIndex = 1100,
   dim = true,
   center = true,
+  interactive = true,
   children,
 }: {
   /** Fire when both press and release occur on empty backdrop space; releasing a text-selection drag does not trigger it. */
@@ -28,6 +29,8 @@ export function Backdrop({
   dim?: boolean;
   /** Whether to center children with flex; pass false when children position themselves. */
   center?: boolean;
+  /** Hover previews pass pointer events through the shell; their panel can opt back in. */
+  interactive?: boolean;
   children: ReactNode;
 }) {
   const backdrop = useBackdropDismiss(onClose);
@@ -40,6 +43,7 @@ export function Backdrop({
         position: "fixed",
         inset: 0,
         zIndex,
+        ...(!interactive ? { pointerEvents: "none" } : null),
         ...(dim ? { background: "rgba(0,0,0,0.45)" } : null),
         ...(center
           ? { display: "flex", alignItems: "center", justifyContent: "center" }

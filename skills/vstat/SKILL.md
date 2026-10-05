@@ -15,7 +15,7 @@ allowed-tools: Bash(vstat:*)
 `vstat` prints which vlx-term sessions are working, asking, waiting, or running background work. The
 answer comes from the same authoritative status the sidebar displays, not from reading screens.
 
-For planning/execution task progress, use `vflow status <workflow-id>`: it includes task states, independent rounds and delivery receipts. `vstat` reports activity only; idle does not establish acceptance.
+For planning/execution task progress, use `vflow list [session]` to find workflow and execute IDs, then `vflow status <workflow-id>` from a workflow member session for task states, independent rounds and delivery receipts. For ordinary session hierarchy and saved properties, use `vself [session] --json`. `vstat` reports activity only; idle does not establish acceptance.
 
 ## Forms
 

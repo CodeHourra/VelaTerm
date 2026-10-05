@@ -5,7 +5,6 @@ import type {
   Group,
   NodeKind,
   Project,
-  ProjectFolder,
   Session,
   SessionEngine,
   SessionKind,
@@ -18,14 +17,13 @@ export function listTree(): Promise<Tree> {
 }
 
 /** Import a known path as a project after native or web directory selection. */
-export function importProject(rootPath: string): Promise<Project> {
-  return invoke<Project>("import_project", { rootPath });
+export function importProject(rootPath: string, collectionId?: string | null): Promise<Project> {
+  return invoke<Project>("import_project", { rootPath, ...(collectionId ? { collectionId } : {}) });
 }
 
-/** Create a collection: a top-level container with no folder behind it, for grouping sessions that belong
- * to no single checkout. Its rootPath comes back empty. */
-export function createVirtualProject(name: string): Promise<Project> {
-  return invoke<Project>("create_virtual_project", { name });
+/** Create a collection with no directory of its own. It can contain projects, groups and sessions. */
+export function createVirtualProject(name: string, collectionId?: string | null): Promise<Project> {
+  return invoke<Project>("create_virtual_project", { name, ...(collectionId ? { collectionId } : {}) });
 }
 
 /** Clone a remote repository under parentDir and import it as a project. Derive an empty folderName
@@ -200,6 +198,15 @@ export function deleteNode(kind: NodeKind, id: string): Promise<void> {
   return invoke("delete_node", { kind, id });
 }
 
+/** Generate and save a title from the backend's complete conversation snapshot. */
+export function renameSessionWithAgent(sessionId: string, agent?: SessionKind): Promise<{ title: string; agent: SessionKind }> {
+  return invoke("rename_session_with_agent", { sessionId, ...(agent ? { agent } : {}) });
+}
+
+export function sessionTitleOptions(sessionId: string): Promise<{ agents: (import("./launch").LaunchOption & { available: boolean })[] }> {
+  return invoke("session_title_options", { sessionId });
+}
+
 /** Clear a node's worktree binding when converting it to a regular session/group. Remove
  * worktreePath/worktreeBaseRef and clear session cwd so it falls back to the project root. Call only
  * after deleting the bound worktree. */
@@ -244,24 +251,8 @@ export function setCollapsed(
   return invoke("set_collapsed", { kind, id, collapsed });
 }
 
-export function createProjectFolder(name: string): Promise<ProjectFolder> {
-  return invoke<ProjectFolder>("create_project_folder", { name });
-}
-
-export function renameProjectFolder(id: string, name: string): Promise<void> {
-  return invoke("rename_project_folder", { id, name });
-}
-
-export function deleteProjectFolder(id: string): Promise<void> {
-  return invoke("delete_project_folder", { id });
-}
-
-export function setProjectFolderCollapsed(id: string, collapsed: boolean): Promise<void> {
-  return invoke("set_project_folder_collapsed", { id, collapsed });
-}
-
-export function setProjectFolder(projectId: string, folderId: string | null): Promise<void> {
-  return invoke("set_project_folder", { projectId, folderId });
+export function setProjectCollection(projectId: string, collectionId: string | null): Promise<void> {
+  return invoke("set_project_collection", { projectId, collectionId });
 }
 
 /** Archive or restore a session. Archiving hides it without data loss and keeps read-only playback. */
