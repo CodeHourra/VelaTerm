@@ -94,9 +94,6 @@ impl ChatEvent {
     }
 }
 
-/// Exact provider identity, when the native parser preserves one for this event.
-pub fn recovery_identity(event: &ChatEvent) -> Option<String> { event.native_id.clone() }
-
 /// Read a session's recording and return the session-view rows.
 ///
 /// Errors carry the reason the view cannot be shown — deleted recording, or an agent whose history is not a

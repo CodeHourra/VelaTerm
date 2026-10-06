@@ -285,7 +285,6 @@ pub fn configure_zsh_startup(
     state: &State,
     cmd: &mut portable_pty::CommandBuilder,
     binaries: &[String],
-    current_path: Option<&std::ffi::OsStr>,
 ) -> Result<(), String> {
     let dir = state
         .selection_file
@@ -303,7 +302,7 @@ pub fn configure_zsh_startup(
     );
     let finish = format!(
         "unset _vlxc_startup_zdotdir_set _vlxc_startup_zdotdir\n{}builtin source {}\n",
-        startup_path(binaries, current_path),
+        startup_path(binaries),
         quote(&dir.join("integration.zsh").to_string_lossy())
     );
     for file in [".zshenv", ".zprofile", ".zshrc", ".zlogin"] {
@@ -330,7 +329,7 @@ pub fn configure_zsh_startup(
 /// `~/.bash_logout` does not run on exit.
 /// Append verified binary directories after profiles load, preserving PATH precedence and avoiding a
 /// second .bashrc evaluation when the user's login profile already sources it.
-pub fn configure_bash_startup(state: &State, binaries: &[String], current_path: Option<&std::ffi::OsStr>) -> Result<PathBuf, String> {
+pub fn configure_bash_startup(state: &State, binaries: &[String]) -> Result<PathBuf, String> {
     let dir = state
         .selection_file
         .parent()
@@ -346,21 +345,15 @@ pub fn configure_bash_startup(state: &State, binaries: &[String], current_path: 
          done\n\
          unset _vlxc_startup_profile\n"
     );
-    body.push_str(&startup_path(binaries, current_path));
+    body.push_str(&startup_path(binaries));
     body.push_str(&format!("builtin source {}\n", quote(&dir.join("integration.bash").to_string_lossy())));
     let path = dir.join("bashrc");
     std::fs::write(&path, body).map_err(|e| e.to_string())?;
     Ok(path)
 }
 
-fn startup_path(binaries: &[String], current_path: Option<&std::ffi::OsStr>) -> String {
-    let mut dirs = crate::agent::executable::binary_dirs(binaries);
-    if let Some(path) = current_path {
-        for dir in std::env::split_paths(path).filter(|dir| dir.is_absolute() && dir.is_dir()) {
-            if !dirs.contains(&dir) { dirs.push(dir); }
-        }
-    }
-    crate::agent::executable::path_startup_script(&dirs)
+fn startup_path(binaries: &[String]) -> String {
+    crate::agent::executable::path_startup_script(&crate::agent::executable::binary_dirs(binaries))
 }
 
 /// Install only in application data; shell profiles are never edited.

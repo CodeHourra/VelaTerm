@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@t
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Session } from "../types";
 
-const mocks = vi.hoisted(() => ({ rename: vi.fn(), options: vi.fn() }));
+const mocks = vi.hoisted(() => ({ rename: vi.fn(), options: vi.fn(), models: vi.fn(), t: (key: string) => key }));
 const state = vi.hoisted(() => new Proxy({
   sessions: [] as Session[], projects: [], groups: [], agentPresets: [], agentDefaults: {},
   runtimes: {}, paneTrees: {}, sidebarTreeViews: [], ephemeralSessions: {}, openTabs: [], liveTabs: [],
@@ -11,10 +11,9 @@ vi.mock("../store/termStore", () => ({
   useTermStore: Object.assign((select: (s: typeof state) => unknown) => select(state), { getState: () => state }),
 }));
 vi.mock("../ipc/tree", () => ({ renameSessionWithAgent: mocks.rename, sessionTitleOptions: mocks.options }));
+vi.mock("../ipc/launch", async importOriginal => ({ ...await importOriginal<object>(), launchModels: mocks.models }));
 vi.mock("../ipc/commands", async importOriginal => ({
-  ...await importOriginal<object>(),
-  listShells: vi.fn().mockResolvedValue([]),
-  gitbashStatus: vi.fn().mockResolvedValue(null),
+  ...await importOriginal<object>(), listShells: vi.fn().mockResolvedValue([]), gitbashStatus: vi.fn().mockResolvedValue(null),
 }));
 vi.mock("../hooks/useGitBranch", () => ({
   isWorktreeGone: () => false, peekGitBranchInfo: () => null, prefetchGitBranchInfo: vi.fn(), invalidateGitBranch: vi.fn(),
@@ -22,7 +21,7 @@ vi.mock("../hooks/useGitBranch", () => ({
 vi.mock("../ipc/events", async importOriginal => ({
   ...await importOriginal<object>(), onGitbashDownloadDone: () => Promise.resolve(() => {}),
 }));
-vi.mock("../i18n", () => ({ t: (key: string) => key, useT: () => (key: string) => key }));
+vi.mock("../i18n", () => ({ t: mocks.t, useT: () => mocks.t }));
 
 import { useSessionMenu } from "./sessionMenu";
 import { SmartRenameRoute } from "./SmartRename/SmartRenameRoute";
@@ -37,16 +36,27 @@ function titleItem(menu: ReturnType<typeof useSessionMenu>, s: Session) {
   return menu.buildSessionItems({ kind: "session", id: s.id, name: s.name, projectId: s.projectId, groupId: s.groupId ?? null })
     .find(item => item.label.startsWith("sessionTitle."));
 }
+const spec = { supportsPlanExecute: true, supportsReferSummary: true, acceptsTask: true, effortFlag: "--effort", effortLevels: ["low", "high"] };
+function options(available = true) {
+  return { agent: "claude", sessionName: "Existing title", agents: [
+    { ...spec, id: "claude", label: "Claude", available, model: "current-model", effort: "high" },
+    { ...spec, id: "codex", label: "Codex", available: true, model: "codex-default", effort: "low" },
+  ] };
+}
+function openRoute(query = "?smartRename=session") { window.history.replaceState(null, "", `/${query}`); render(<SmartRenameRoute />); }
 beforeEach(() => {
-  state.sessions = [session()]; mocks.rename.mockReset(); mocks.options.mockReset();
+  state.sessions = [session()]; mocks.rename.mockReset(); mocks.options.mockReset(); mocks.models.mockReset();
+  mocks.options.mockResolvedValue(options());
+  mocks.models.mockResolvedValue({ models: [{ id: "custom-model", label: "Custom", effortLevels: ["low", "high", "ultra"] }], effortLevels: ["low", "high", "ultra"] });
   window.history.replaceState(null, "", "/");
 });
 afterEach(cleanup);
 
-describe("agent-generated session titles", () => {
+describe("AI session renaming", () => {
   it("appears for recorded agent sessions in the shared sidebar/tab menu", () => {
     const { result } = renderHook(useSessionMenu);
     expect(titleItem(result.current, state.sessions[0])?.disabled).toBe(false);
+    expect(titleItem(result.current, state.sessions[0])?.href).toContain("smartRename=session");
     state.sessions = [session("claude", null)];
     const empty = renderHook(useSessionMenu);
     expect(titleItem(empty.result.current, state.sessions[0])?.disabled).toBe(true);
@@ -57,68 +67,101 @@ describe("agent-generated session titles", () => {
     }
   });
 
-  it("shows progress, suppresses duplicate clicks and leaves title persistence to the backend", async () => {
-    let finish!: (value: { title: string; agent: string }) => void;
-    mocks.rename.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+  it("always opens confirmation before generating, including repeated menu clicks", () => {
     const { result } = renderHook(useSessionMenu);
     const item = titleItem(result.current, state.sessions[0])!;
-    act(() => { item.onClick?.({} as React.MouseEvent); item.onClick?.({} as React.MouseEvent); });
+    act(() => { item.onClick?.({ preventDefault: vi.fn() } as unknown as React.MouseEvent); item.onClick?.({ preventDefault: vi.fn() } as unknown as React.MouseEvent); });
+    expect(readSmartRenameRoute()).toEqual({ sessionId: "session", agent: null, model: null, effort: null });
+    expect(mocks.rename).not.toHaveBeenCalled();
+  });
+
+  it("loads options inside the same rename dialog with submission disabled", async () => {
+    mocks.options.mockReturnValue(new Promise(() => {}));
+    openRoute();
+    const dialog = screen.getByRole("dialog", { name: "sessionTitle.rename" });
+    expect(dialog.textContent).toContain("sessionTitle.confirmHint");
+    expect(screen.getByRole("status").textContent).toContain("common.loading");
+    expect(screen.getByRole("button", { name: "common.rename" })).toHaveProperty("disabled", true);
+  });
+
+  it("shows backend defaults and the full-conversation notice, and cancellation never generates", async () => {
+    openRoute();
+    expect(await screen.findByRole("combobox", { name: "orch.agentLabel" })).toHaveProperty("textContent", expect.stringContaining("Claude"));
+    expect(screen.getByText("sessionTitle.confirmHint")).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "spawn.modelLabel" })).toHaveProperty("value", "current-model");
+    expect(screen.getByRole("combobox", { name: "spawn.effortLabel" })).toHaveProperty("value", "high");
+    expect(mocks.rename).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "common.cancel" }));
+    await waitFor(() => expect(readSmartRenameRoute()).toBeNull());
+    expect(mocks.rename).not.toHaveBeenCalled();
+  });
+
+  it("submits the chosen agent/model/effort only on confirmation and suppresses duplicate submission", async () => {
+    let finish!: (value: { title: string; agent: string }) => void;
+    mocks.rename.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    openRoute();
+    const agent = await screen.findByRole("combobox", { name: "orch.agentLabel" });
+    fireEvent.keyDown(agent, { key: "Enter" }); fireEvent.keyDown(agent, { key: "ArrowDown" }); fireEvent.keyDown(agent, { key: "Enter" });
+    expect(screen.getByRole("combobox", { name: "spawn.modelLabel" })).toHaveProperty("value", "codex-default");
+    expect(screen.getByRole("combobox", { name: "spawn.effortLabel" })).toHaveProperty("value", "low");
+    const model = screen.getByRole("combobox", { name: "spawn.modelLabel" });
+    const effort = screen.getByRole("combobox", { name: "spawn.effortLabel" });
+    fireEvent.change(model, { target: { value: "custom-model" } });
+    fireEvent.change(effort, { target: { value: "ultra" } });
+    expect(readSmartRenameRoute()).toEqual({ sessionId: "session", agent: "codex", model: "custom-model", effort: "ultra" });
+    await waitFor(() => expect(mocks.models).toHaveBeenCalledWith("codex", { parentSessionId: "session", cwd: null, inheritArgs: true }));
+    expect(mocks.rename).not.toHaveBeenCalled();
+    const submit = screen.getByRole("button", { name: "common.rename" });
+    fireEvent.click(submit); fireEvent.click(submit);
     expect(mocks.rename).toHaveBeenCalledTimes(1);
-    expect(mocks.rename).toHaveBeenCalledWith("session");
-    expect(titleItem(result.current, state.sessions[0])?.disabled).toBe(true);
-    const view = render(result.current.dialogs);
+    expect(mocks.rename).toHaveBeenCalledWith("session", "codex", "custom-model", "ultra");
     expect(screen.getByRole("status").textContent).toContain("sessionTitle.generating");
-    await act(async () => { finish({ title: "Generated", agent: "claude" }); });
-    view.rerender(result.current.dialogs);
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByRole("combobox", { name: "orch.agentLabel" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("combobox", { name: "spawn.modelLabel" })).toHaveProperty("disabled", true);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(readSmartRenameRoute()).not.toBeNull();
+    await act(async () => { finish({ title: "Generated", agent: "codex" }); });
+    await waitFor(() => expect(readSmartRenameRoute()).toBeNull());
     expect(state.sessions[0].name).toBe("Existing title");
   });
 
-  it("shows a localized error while keeping the original title", async () => {
-    mocks.rename.mockRejectedValue(new Error("session_title:changed"));
-    const { result } = renderHook(useSessionMenu);
-    act(() => titleItem(result.current, state.sessions[0])!.onClick?.({} as React.MouseEvent));
-    await waitFor(() => expect(titleItem(result.current, state.sessions[0])?.disabled).toBe(false));
-    render(result.current.dialogs);
-    expect(screen.getByRole("alertdialog").textContent).toContain("sessionTitle.changed");
+  it("retains the selections and original title after an error so the user can retry", async () => {
+    mocks.rename.mockRejectedValueOnce(new Error("session_title:changed")).mockResolvedValueOnce({ title: "Generated", agent: "claude" });
+    openRoute();
+    await screen.findByRole("combobox", { name: "spawn.modelLabel" });
+    fireEvent.click(screen.getByRole("button", { name: "common.rename" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("sessionTitle.changed");
+    expect(screen.getByRole("combobox", { name: "spawn.modelLabel" })).toHaveProperty("value", "current-model");
+    expect(readSmartRenameRoute()?.sessionId).toBe("session");
     expect(state.sessions[0].name).toBe("Existing title");
+    fireEvent.click(screen.getByRole("button", { name: "common.rename" }));
+    await waitFor(() => expect(readSmartRenameRoute()).toBeNull());
+    expect(mocks.rename).toHaveBeenCalledTimes(2);
   });
 
-  it("opens the chooser only after the current agent becomes unavailable", async () => {
-    mocks.rename.mockRejectedValue(new Error("session_title:agent_unavailable"));
-    const { result } = renderHook(useSessionMenu);
-    act(() => titleItem(result.current, state.sessions[0])!.onClick?.({} as React.MouseEvent));
-    await waitFor(() => expect(readSmartRenameRoute()?.sessionId).toBe("session"));
-    expect(mocks.rename).toHaveBeenCalledTimes(1);
-    expect(mocks.rename).toHaveBeenCalledWith("session");
-    expect(new URL(window.location.href).searchParams.get("smartRenameAgent")).toBeNull();
-  });
-
-  it("restores a chooser without generating and retries with the explicitly selected agent", async () => {
-    const spec = { supportsPlanExecute: true, supportsReferSummary: true, acceptsTask: true, effortFlag: null, effortLevels: [] };
-    mocks.options.mockResolvedValue({ agents: [
-      { ...spec, id: "claude", label: "Claude", available: false },
-      { ...spec, id: "codex", label: "Codex", available: true },
-    ] });
-    mocks.rename.mockResolvedValue({ title: "Generated", agent: "codex" });
-    window.history.replaceState(null, "", "/?smartRename=session");
-    render(<SmartRenameRoute />);
-    const trigger = await screen.findByRole("combobox", { name: "orch.agentLabel" });
+  it("restores URL selections and explicit native defaults without generating", async () => {
+    openRoute("?smartRename=session&smartRenameAgent=codex&smartRenameModel=&smartRenameEffort=");
+    expect(await screen.findByRole("combobox", { name: "orch.agentLabel" })).toHaveProperty("textContent", expect.stringContaining("Codex"));
+    expect(screen.getByRole("combobox", { name: "spawn.modelLabel" })).toHaveProperty("value", "");
+    expect(screen.getByRole("combobox", { name: "spawn.effortLabel" })).toHaveProperty("value", "");
     expect(mocks.rename).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "common.rename" }).hasAttribute("disabled")).toBe(true);
-    fireEvent.keyDown(trigger, { key: "Enter" });
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(readSmartRenameRoute()).toBeNull();
+    expect(new URL(window.location.href).searchParams.size).toBe(0);
+  });
+
+  it("requires the user to select an available alternative when the current agent is unavailable", async () => {
+    mocks.options.mockResolvedValue(options(false)); openRoute();
+    const agent = await screen.findByRole("combobox", { name: "orch.agentLabel" });
+    expect(screen.getByRole("button", { name: "common.rename" })).toHaveProperty("disabled", true);
+    fireEvent.keyDown(agent, { key: "Enter" });
     expect(screen.getByRole("option", { name: /Claude/ }).getAttribute("aria-disabled")).toBe("true");
-    fireEvent.keyDown(trigger, { key: "ArrowDown" });
-    fireEvent.keyDown(trigger, { key: "Enter" });
-    expect(new URL(window.location.href).searchParams.get("smartRenameAgent")).toBe("codex");
-    expect(mocks.rename).not.toHaveBeenCalled();
-    fireEvent.keyDown(trigger, { key: "Enter" });
-    fireEvent.keyDown(trigger, { key: "Escape" });
+    fireEvent.keyDown(agent, { key: "ArrowDown" }); fireEvent.keyDown(agent, { key: "Enter" });
+    expect(readSmartRenameRoute()?.agent).toBe("codex");
+    fireEvent.keyDown(agent, { key: "Enter" }); fireEvent.keyDown(agent, { key: "Escape" });
     expect(readSmartRenameRoute()?.sessionId).toBe("session");
     expect(screen.queryByRole("listbox")).toBeNull();
     expect(mocks.rename).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "common.rename" }));
-    await waitFor(() => expect(readSmartRenameRoute()).toBeNull());
-    expect(mocks.rename).toHaveBeenCalledWith("session", "codex");
+    expect(screen.getByRole("button", { name: "common.rename" })).toHaveProperty("disabled", false);
   });
 });

@@ -1111,7 +1111,7 @@ interface TermStore {
   /** Whether Claude conversations that never chose otherwise have Claude in Chrome attached. */
   chatChromeDefault: boolean;
   /** Last launch choices for each planning-workflow role. */
-  planExecutePrefs: { plan: PlanExecuteRolePrefs; exec: PlanExecuteRolePrefs };
+  planExecutePrefs: { plan: PlanExecuteRolePrefs; exec: PlanExecuteRolePrefs; review?: PlanExecuteRolePrefs };
   /** Last agent, model and effort chosen for knowledge-base compilation. */
   memoryPrefs: MemoryPrefs;
   /** Optional global pre-summary selection for `vrefer --ask`. */
@@ -1506,7 +1506,7 @@ interface TermStore {
   setChatChromeDefault: (enabled: boolean) => void;
   /** Remember the agent, model or effort chosen for one planning-workflow role; null clears a field. */
   setPlanExecuteRolePrefs: (
-    role: "plan" | "exec",
+    role: "plan" | "exec" | "review",
     patch: { agent?: SessionKind | null; model?: string | null; effort?: string | null },
   ) => void;
   /** Remember the agent, model or effort chosen for knowledge-base compilation; null clears a field. */
@@ -1843,6 +1843,32 @@ function statusSnapshot(
     }
   }
   return ids;
+}
+
+/**
+ * Adds a session the user just created to every status-filtered sidebar view, so it stays under its parent while
+ * a filter is active. It leaves again only when that view's snapshot is rebuilt (Refresh Status, the pane refresh
+ * button, or a filter change), matching how existing snapshot members behave.
+ */
+function keepInStatusFilters(
+  state: Pick<
+    TermStore,
+    "sidebarTreeViews" | "primarySidebarTreeViewId" | "statusFilterIds"
+  >,
+  sessionId: string,
+): Pick<TermStore, "sidebarTreeViews" | "statusFilterIds"> | null {
+  if (!state.sidebarTreeViews.some((view) => view.statusFilter)) return null;
+  let primaryIds = state.statusFilterIds;
+  const sidebarTreeViews = state.sidebarTreeViews.map((view) => {
+    if (!view.statusFilter || view.statusFilterIds?.[sessionId]) return view;
+    const statusFilterIds = {
+      ...(view.statusFilterIds ?? {}),
+      [sessionId]: true as const,
+    };
+    if (view.id === state.primarySidebarTreeViewId) primaryIds = statusFilterIds;
+    return { ...view, statusFilterIds };
+  });
+  return { sidebarTreeViews, statusFilterIds: primaryIds };
 }
 
 // Last brightness sent to agents, preventing duplicate notifications; the first frame establishes a baseline.
@@ -2268,8 +2294,10 @@ export const useTermStore = create<TermStore>((set, get) => ({
         sessions: [...sessions, session],
         runtimes,
         revealSuppressId: session.id,
+        ...keepInStatusFilters(state, session.id),
       };
     });
+    saveSidebarViewsTick(get);
     // Persist expansion and reload authoritative tree data in the background after the terminal can open.
     const expand = input.parentSessionId
       ? tree.setCollapsed("session", input.parentSessionId, false)
@@ -4631,7 +4659,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
   },
   setPlanExecuteRolePrefs: (role, patch) => {
     set((state) => ({
-      planExecutePrefs: { ...state.planExecutePrefs, [role]: mergeLaunchChoice(state.planExecutePrefs[role], patch) },
+      planExecutePrefs: { ...state.planExecutePrefs, [role]: mergeLaunchChoice(state.planExecutePrefs[role] ?? {}, patch) },
     }));
     persistAndApplyVisual(get);
   },

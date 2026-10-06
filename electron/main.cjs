@@ -23,6 +23,8 @@ const crypto = require("node:crypto");
 const net0 = require("node:net");
 const path = require("node:path");
 const fs = require("node:fs");
+const windowLayout = require("./window-layout.cjs");
+const windowPolicy = windowLayout.loadPolicy(app);
 const diagnostic = require("./diagnostics.cjs").createDiagnostics(process.env.VLX_LOG_DIR || path.join(app.getPath("userData"), "logs"));
 
 const LOOPBACK = "127.0.0.1";
@@ -618,19 +620,10 @@ function registerBrowserIpc() {
 // ─────────────────────────── Window and menus ───────────────────────────
 
 function createWindow() {
-  // Size the startup window relative to the primary display's work area, which excludes the taskbar/Dock:
-  // use 77% of its width and 81% of its height, cap both dimensions to avoid oversized ultrawide windows,
-  // then center it. This adapts better than a fixed 1280×820: laptops stay within the screen while larger
-  // displays receive more usable space.
-  const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
-  const winW = Math.max(720, Math.min(1620, Math.round(sw * 0.77)));
-  const winH = Math.max(480, Math.min(1035, Math.round(sh * 0.81)));
+  // Use the same outer-frame policy as Tauri, excluding system bars and accounting for display scaling.
+  const layout = windowLayout.windowOptions(windowPolicy, screen.getPrimaryDisplay().workArea);
   const win = new BrowserWindow({
-    width: winW,
-    height: winH,
-    center: true,
-    minWidth: 720,
-    minHeight: 480,
+    ...layout,
     backgroundColor: "#1e1e1e",
     icon: windowIcon(),
     webPreferences: {
@@ -959,7 +952,9 @@ function registerNativeIpc() {
     // The page comes from another machine, so it runs as a plain browser: no app preload (and with it no
     // vlxNative), a sandbox, and a user agent without the Electron token so the frontend does not take it
     // for this app's own window.
-    const win = new BrowserWindow({width:1280,height:820,minWidth:720,minHeight:480,icon:windowIcon(),
+    const display = screen.getDisplayMatching(state.win.getBounds());
+    const layout = windowLayout.windowOptions(windowPolicy, display.workArea);
+    const win = new BrowserWindow({...layout,icon:windowIcon(),
       title:"VelaTerm · Remote", webPreferences:{contextIsolation:true,nodeIntegration:false,sandbox:true}});
     state.remoteWindows.add(win);
     win.on("closed", () => state.remoteWindows.delete(win));

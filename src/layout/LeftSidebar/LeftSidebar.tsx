@@ -533,7 +533,7 @@ export function LeftSidebar() {
 
   const collectionCreationItems = (collectionId: string): MenuItem[] => [
     {
-      label: t("tree.newCollection"), icon: <Icons.layers size={14} />,
+      label: t("tree.newCollection"), icon: <Icons.collection size={14} />,
       href: collectionDialogUrl("create", undefined, collectionId),
       onClick: event => {
         if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -876,7 +876,7 @@ export function LeftSidebar() {
             navigateCollectionDialog("create");
           }}
         >
-          <Icons.layers size={14} />
+          <Icons.collection size={14} />
         </a>
         <button
           className="icon-btn sm"

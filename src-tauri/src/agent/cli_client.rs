@@ -151,12 +151,13 @@ pub fn run_view(args: &[String]) -> ! {
 
 const SPAWN_USAGE: &str =
     "usage: vspawn [--worktree] [--cwd <path>] [--yes] [--claude|--codex|--copilot|--kiro] [--model <name>] [--effort <level>] <task description...>\n\
-    --plan-execute    create planning/review and execution chat sessions\n\
+    --plan-execute    create planning, execution and optional independent review chat sessions\n\
     --split-tasks     let the planner propose multiple tasks for user confirmation (requires --plan-execute)\n\
     --worktree-mode <none|shared|each>   directory mode for all workflow roles; overrides --worktree (requires --plan-execute)\n\
-    --plan-agent / --exec-agent <agent>   agent for each role\n\
-    --plan-model / --exec-model <model>   model for each role\n\
-    --plan-effort / --exec-effort <level> reasoning effort for each role\n\
+    --review / --no-review   enable independent review (default) or disable it (requires --plan-execute)\n\
+    --plan-agent / --exec-agent / --review-agent <agent>   agent for each role\n\
+    --plan-model / --exec-model / --review-model <model>   model for each role\n\
+    --plan-effort / --exec-effort / --review-effort <level> reasoning effort for each role\n\
     --cwd <path>      child working directory and repository used to create a worktree\n\
     --request-id <uuid> reuse the same request identity after a lost acknowledgement\n\
     --yes             skip initial launch confirmation; split-task proposals still require review\n\
@@ -235,6 +236,7 @@ fn parse_spawn_args(rest: &[String]) -> SpawnParse {
                 request_id = Some(value.to_owned());
             }
             "--plan-execute" => workflow = true,
+            "--review" | "--no-review" => { flow_config.review_enabled = Some(a == "--review"); flow_options = true; }
             "--split-tasks" => { flow_config.split_tasks = true; flow_options = true; }
             _ if a == "--worktree-mode" || a.starts_with("--worktree-mode=") => {
                 let value = if let Some((_, value)) = a.split_once('=') {
@@ -252,7 +254,7 @@ fn parse_spawn_args(rest: &[String]) -> SpawnParse {
                 };
                 flow_options = true;
             }
-            _ if a.starts_with("--plan-") || a.starts_with("--exec-") => {
+            _ if a.starts_with("--plan-") || a.starts_with("--exec-") || matches!(a.split('=').next(),Some("--review-agent"|"--review-model"|"--review-effort")) => {
                 let (flag, inline) = a
                     .split_once('=')
                     .map(|(f, v)| (f, Some(v)))
@@ -271,12 +273,15 @@ fn parse_spawn_args(rest: &[String]) -> SpawnParse {
                 }
                 let role = if flag.starts_with("--plan-") {
                     &mut flow_config.plan
+                } else if flag.starts_with("--review-") {
+                    &mut flow_config.review
                 } else {
                     &mut flow_config.exec
                 };
                 match flag
                     .strip_prefix("--plan-")
                     .or_else(|| flag.strip_prefix("--exec-"))
+                    .or_else(|| flag.strip_prefix("--review-"))
                     .unwrap_or("")
                 {
                     "agent" => match serde_json::from_value(serde_json::json!(value)) {
@@ -351,9 +356,10 @@ fn parse_spawn_args(rest: &[String]) -> SpawnParse {
         return SpawnParse::Err("vspawn: missing task description".to_string());
     }
     if flow_options && !workflow {
-        return SpawnParse::Err("vspawn: role options, --split-tasks and --worktree-mode require --plan-execute".into());
+        return SpawnParse::Err("vspawn: role options, review options, --split-tasks and --worktree-mode require --plan-execute".into());
     }
     if workflow {
+        flow_config.review_enabled = Some(flow_config.review_enabled.unwrap_or(true));
         if let Some(mode) = flow_config.worktree_mode {
             worktree = mode != super::plan_execute::WorktreeMode::None;
         }
@@ -1604,6 +1610,23 @@ mod tests {
 
     fn args(rest: &[&str]) -> Vec<String> {
         rest.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn spawn_optional_review_switch_and_role_options_are_workflow_only() {
+        let SpawnParse::Ok(defaults) = parse_spawn_args(&args(&["--plan-execute","Task"])) else { panic!("valid workflow") };
+        assert_eq!(defaults.plan_execute.unwrap().review_enabled,Some(true));
+        let SpawnParse::Ok(disabled) = parse_spawn_args(&args(&["--plan-execute","--no-review","Task"])) else { panic!("valid workflow") };
+        assert_eq!(disabled.plan_execute.unwrap().review_enabled,Some(false));
+        let SpawnParse::Ok(selected) = parse_spawn_args(&args(&["--plan-execute","--no-review","--review","--review-agent=codex","--review-model","reviewer","--review-effort=xhigh","Task"])) else { panic!("valid workflow") };
+        let config = selected.plan_execute.unwrap();
+        assert_eq!(config.review_enabled,Some(true));
+        assert_eq!(config.review.agent,Some(crate::models::SessionKind::Codex));
+        assert_eq!(config.review.model.as_deref(),Some("reviewer"));
+        assert_eq!(config.review.effort.as_deref(),Some("xhigh"));
+        for input in [vec!["--no-review","Task"],vec!["--review","Task"],vec!["--review-model","reviewer","Task"],vec!["--plan-execute","--review-agent=terminal","Task"],vec!["--plan-execute","--review-effort=","Task"]] {
+            assert!(matches!(parse_spawn_args(&args(&input)),SpawnParse::Err(_)),"{input:?}");
+        }
     }
 
     /// Body-building fixture: only the fields a test cares about are set by the caller.

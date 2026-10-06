@@ -24,7 +24,7 @@ pub(super) fn list(app: &AppCtx, caller: &str, target: &str) -> Result<Value, St
     let runs = {
         let conn = app.db().conn.lock().unwrap();
         // A split planner belongs to every task; return each overall workflow once, with all its tasks.
-        let mut query = conn.prepare("SELECT COALESCE(t.parent_id,r.id) FROM plan_execute_runs r LEFT JOIN plan_execute_tasks t ON t.run_id=r.id WHERE r.owner_id=?1 OR r.planner_id=?1 OR r.executor_id=?1 ORDER BY r.rowid").map_err(|e|e.to_string())?;
+        let mut query = conn.prepare("SELECT COALESCE(t.parent_id,r.id) FROM plan_execute_runs r LEFT JOIN plan_execute_tasks t ON t.run_id=r.id WHERE r.owner_id=?1 OR r.planner_id=?1 OR r.executor_id=?1 OR r.reviewer_id=?1 ORDER BY r.rowid").map_err(|e|e.to_string())?;
         let rows = query.query_map([id], |r|r.get::<_,String>(0)).map_err(|e|e.to_string())?
             .collect::<Result<Vec<_>,_>>().map_err(|e|e.to_string())?;
         let mut runs = Vec::new();
@@ -37,6 +37,7 @@ pub(super) fn list(app: &AppCtx, caller: &str, target: &str) -> Result<Value, St
         result["prompt"] = json!(run.task);
         result["planner"] = describe(app, &run.planner_id)?;
         result["executor"] = run.executor_id.as_deref().map(|id|describe(app,id)).transpose()?.unwrap_or(Value::Null);
+        result["reviewer"] = run.reviewer_id.as_deref().map(|id|describe(app,id)).transpose()?.unwrap_or(Value::Null);
         if let Some(tasks) = result["tasks"].as_array_mut() {
             for task in tasks {
                 if let Some(id) = task["run"]["executorId"].as_str().map(str::to_owned) {

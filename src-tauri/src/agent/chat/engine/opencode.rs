@@ -883,7 +883,6 @@ pub(super) fn dispatch(
     let server = server(proc)?;
     let native = root_session(proc)?;
     let message_id = wire::new_message_id();
-    super::super::recovery::provider_id(app,session_id,row_id,&message_id)?;
     {
         let mut state = proc.opencode.lock().unwrap();
         state.user_messages.insert(message_id.clone(), row_id.to_string());
@@ -944,11 +943,10 @@ pub(super) fn dispatch(
 
 /// OpenCode persists asynchronous prompts while its loop is running and reads them at its next step.
 /// Send steering as prose, so shell and slash syntax cannot start a competing command.
-pub(super) fn steer(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, row_id: &str, text: &str, images: &[ChatImage]) -> Result<(), String> {
+pub(super) fn steer(proc: &Arc<ChatProcess>, row_id: &str, text: &str, images: &[ChatImage]) -> Result<(), String> {
     let server = server(proc)?;
     let native = root_session(proc)?;
     let message_id = wire::new_message_id();
-    super::super::recovery::provider_id(app,session_id,row_id,&message_id)?;
     let agent = proc.collaboration_mode.lock().unwrap().clone();
     let model = proc.model.lock().unwrap().clone();
     let variant = proc.effort.lock().unwrap().clone();

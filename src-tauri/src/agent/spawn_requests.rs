@@ -1129,6 +1129,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)] // Windows hosts refuse shell mode before any receipt exists.
     fn shell_receipts_reuse_results_reject_conflicts_and_preserve_uncertainty() {
         let f = fixture(); let sid = &f.parent.id; let id = format!("msg-{}",uuid::Uuid::new_v4());
         let receipt_id = super::super::chat::shell::submission_id(&id);

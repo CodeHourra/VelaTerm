@@ -33,6 +33,9 @@ files:
 
 # Bundle the release velaterm binary as a resource; packaged builds resolve it from process.resourcesPath in main.cjs.
 extraResources:
+  # Native window geometry is a presentation resource shared with the Tauri host.
+  - from: src-tauri/resources/window-layout.json
+    to: window-layout.json
   - from: src-tauri/target/release/velaterm
     to: velaterm
   # Window/taskbar icons: in packaged builds, windowIcon() in main.cjs reads these from resources/icons

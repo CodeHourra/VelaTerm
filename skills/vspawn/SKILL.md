@@ -2,11 +2,11 @@
 name: vspawn
 description: >-
   Explicitly spawn a standalone child session under the current vlx-term session, passing the task in as its
-  first message (mirrors spawn_task). With --plan-execute, create a separate planner/reviewer and persistent execution sessions; --split-tasks enables user-confirmed task decomposition. **Runs in the current directory by default, without a git worktree**
+  first message (mirrors spawn_task). With --plan-execute, create a planner, persistent executors and an optional separate reviewer; --split-tasks enables user-confirmed task decomposition. **Runs in the current directory by default, without a git worktree**
   (use vspawn-tree for a worktree). Only use when the user explicitly invokes /vspawn or $vspawn; never auto-trigger.
   This is a real session run by its own process in the vlx-term left-panel tree — not an in-process sub-agent,
   and not a background Task. Available only inside vlx-term-hosted sessions.
-argument-hint: "[--plan-execute] [--split-tasks] [--plan-agent <agent>] [--plan-model <model>] [--plan-effort <level>] [--exec-agent <agent>] [--exec-model <model>] [--exec-effort <level>] [--worktree-mode <none|shared|each>] [--worktree] [--cwd <path>] [--yes] [--claude|--codex] [--model <name>] [--effort <level>] <task>"
+argument-hint: "[--plan-execute] [--review|--no-review] [--review-agent <agent>] [--review-model <model>] [--review-effort <level>] [--split-tasks] [--plan-agent <agent>] [--plan-model <model>] [--plan-effort <level>] [--exec-agent <agent>] [--exec-model <model>] [--exec-effort <level>] [--worktree-mode <none|shared|each>] [--worktree] [--cwd <path>] [--yes] [--claude|--codex] [--model <name>] [--effort <level>] <task>"
 disable-model-invocation: true
 allowed-tools: Bash(vspawn:*)
 ---
@@ -31,7 +31,7 @@ $ARGUMENTS
 
 When the user requests this workflow or supplies `--plan-execute`, keep the
 current session as the initiator. Pass the expanded task to `vspawn --plan-execute`; VelaTerm creates a new
-planner/reviewer, which later dispatches work to its own persistent executor. Add `--split-tasks` when the user requests automatic decomposition into multiple tasks. The new planner then proposes the split for a separate user review; do not split or execute the task in the initiating conversation. Do not perform the planning
+planner, which later dispatches work to its persistent executor. Independent review is enabled by default and runs in a separate Review session. Pass `--no-review` when the user requests no review; Plan only collects context, coordinates and summarizes in both modes. Add `--split-tasks` when the user requests automatic decomposition into multiple tasks. The new planner then proposes the split for a separate user review; do not split or execute the task in the initiating conversation. Do not perform the planning
 or execution here, and do not use in-process subagents.
 
 For a skill invocation that uses both `--plan-execute` and `--split-tasks`, **automatically add `--yes`**
@@ -40,7 +40,7 @@ keeps only the final task-proposal review; the user does not need to supply `--y
 the proposal on the user's behalf. Without task splitting, keep the ordinary confirmation rules below.
 
 Each role has independent `--plan-agent`, `--plan-model`, `--plan-effort` and `--exec-agent`, `--exec-model`,
-`--exec-effort` parameters. Pass only explicit user selections; the backend resolves omitted choices using
+`--exec-effort` parameters. Optional Review also has `--review-agent`, `--review-model` and `--review-effort`; `--review` or `--no-review` selects whether it exists. Pass only explicit user selections; the backend resolves omitted choices using
 the initiating session and supported defaults. With split-task skill invocation, the planner starts with
 those settings, and the final review lets the user edit each executor's settings. It does not reconfigure
 the already-started planner. Both launch dialogs also offer automatic task splitting. Do not guess a
@@ -56,10 +56,10 @@ means shared; otherwise all workflow sessions use the requested directory. A dis
 change the mode; the final task review retains it. The selected mode is saved for
 both single-task and split-task execution and is retained through retries and correction rounds.
 Include existing user modifications and the required delivery location in the task. The planner may edit
-its plan and audit documents; only the executor edits implementation files.
+its plan and delivery-summary documents; only the executor edits implementation files.
 
-The backend supplies both roles with [the workflow protocol](references/plan-execute.md). Read it when
-explaining or diagnosing dispatch, result delivery, correction rounds, cancellation or recovery. In split mode, the user edits and confirms task prompts and execution settings before any executor starts; `--yes` skips only the initial launch confirmation. Each task reports to the same planner with its own workflow ID and round. Workflow
+The backend supplies all roles with [the workflow protocol](references/plan-execute.md). Read it when
+explaining or diagnosing dispatch, result delivery, correction rounds, cancellation or recovery. In split mode, the user edits and confirms task prompts and execution settings before any executor starts; `--yes` skips only the initial launch confirmation. Each task has its own workflow ID and round. With review enabled, reports go to the shared reviewer with progress notices to Plan; otherwise the full reports go to Plan. Workflow
 messages use `vflow` actions and `vtell --report`; they appear with their sender identity in the destination chat. A successful
 `vspawn` invocation records a launch request; it does not prove the user confirmed it or the workflow passed.
 Report that the request was submitted and leave this session free. Do not poll after submitting.

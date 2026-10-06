@@ -1,0 +1,11 @@
+{
+  "widthRatio": 0.85,
+  "heightRatio": 0.88,
+  "minWidth": 900,
+  "minHeight": 600,
+  "maxWidth": 1920,
+  "maxHeight": 1200,
+  "fallbackWidth": 1440,
+  "fallbackHeight": 900,
+  "edgeMargin": 16
+}

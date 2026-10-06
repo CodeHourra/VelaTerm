@@ -290,7 +290,6 @@ fn app_command(cmd: &str) -> bool {
             | "chat_interrupt"
             | "chat_auto_continue_cancel"
             | "chat_permission"
-            | "chat_recovery_resume"
             | "chat_queue_steer"
             | "chat_queue_remove"
             | "chat_queue_update"
@@ -397,7 +396,6 @@ fn allowed_command(cmd: &str) -> bool {
             | "chat_send"
             | "chat_interrupt"
             | "chat_permission"
-            | "chat_recovery_resume"
             | "chat_queue_steer"
             | "chat_queue_remove"
             | "chat_queue_update"
@@ -477,8 +475,8 @@ mod tests {
         assert!(visible[0].get("agentArgs").is_none());
         assert!(visible[0].get("cwd").is_none());
         let origin = crate::web::dispatch::CallOrigin::Remote;
-        assert_eq!(dispatch_shared(&app,&scope,"chat_recovery_resume",&json!({"sessionId":other.id}),"recovery-test",origin).unwrap_err(),"Session is outside the shared scope");
-        assert_eq!(scope.dispatch(&app,"chat_recovery_resume",&json!({"sessionId":other.id})).unwrap_err(),"Session is outside the shared scope");
+        assert_eq!(dispatch_shared(&app,&scope,"chat_queue_remove",&json!({"sessionId":other.id,"id":"msg-outside"}),"queue-test",origin).unwrap_err(),"Session is outside the shared scope");
+        assert_eq!(scope.dispatch(&app,"chat_queue_remove",&json!({"sessionId":other.id,"id":"msg-outside"})).unwrap_err(),"Session is outside the shared scope");
         assert!(dispatch_shared(&app, &scope, "mobile_notification_preview", &json!({"sessionId":other.id}), "notification-test", origin).is_err());
         let preview = dispatch_shared(&app, &scope, "mobile_notification_preview", &json!({"sessionId":session.id}), "notification-test", origin).unwrap();
         assert_eq!(preview, json!({"title":"Visible","body":""}));

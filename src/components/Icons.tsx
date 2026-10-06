@@ -83,7 +83,9 @@ const Icons: Record<string, IconComponent> = {
   rename: I([r("path", { key: 1, d: "M3 11.5l6.4-6.4 2 2L5 13.5H3z" }), r("path", { key: 2, d: "M9.4 5.1l1.5-1.5a1 1 0 011.4 0l.6.6a1 1 0 010 1.4l-1.5 1.5" })]),
   trash: I([r("path", { key: 1, d: "M3.5 4.5h9M6 4.5V3.2A.7.7 0 016.7 2.5h2.6a.7.7 0 01.7.7V4.5M5 4.5l.5 8h5l.5-8" })]),
   dup: I([r("rect", { key: 1, x: 5, y: 5, width: 8, height: 8, rx: 1.5 }), r("path", { key: 2, d: "M3 10V4.5A1.5 1.5 0 014.5 3H10" })]),
-  // Collection: stacked plates, a container with no directory of its own.
+  // Collection: three stacked layers distinguish containers from projects and groups.
+  collection: I([r("path", { key: 1, d: "M8 2.1l5.5 2.9L8 7.9 2.5 5z" }), r("path", { key: 2, d: "M2.5 8.2L8 11.1l5.5-2.9" }), r("path", { key: 3, d: "M2.5 11.4L8 14.3l5.5-2.9" })]),
+  // General stacked layers used for knowledge and workflow entries.
   layers: I([r("path", { key: 1, d: "M8 2.5l5.5 2.9L8 8.3 2.5 5.4z" }), r("path", { key: 2, d: "M2.5 8.6L8 11.5l5.5-2.9" })]),
   // Generated knowledge entry: a sparkle, so distilled content is not mistaken for a stored file.
   sparkle: I(r("path", { key: 1, d: "M8 2.6Q8.8 6.2 13.4 8Q8.8 9.8 8 13.4Q7.2 9.8 2.6 8Q7.2 6.2 8 2.6z" })),

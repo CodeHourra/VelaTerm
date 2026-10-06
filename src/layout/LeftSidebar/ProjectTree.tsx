@@ -1262,7 +1262,7 @@ export function ProjectTree(h: TreeHandlers) {
               (contextId === p.id ? " context" : "")
             }
             style={{ paddingLeft: 6 + row.indent * 13, ...dragStyle(p.id) }}
-            draggable={!filtering && !renaming && !isShareSurface}
+            draggable={!renaming && !isShareSurface}
             onDragStart={onDragStart({ kind: "project", id: p.id, projectId: p.id })}
             onDragOver={(e) =>
               hasProjectDrag(e.dataTransfer.types) ? allowProjectDrop(e, p.id) : allowDrop(e, p.id, true)
@@ -1288,7 +1288,7 @@ export function ProjectTree(h: TreeHandlers) {
               style={{ color: "var(--text-dim)" }}
               title={isVirtualProject(p) ? t("collection.tag") : p.rootPath}
             >
-              {isVirtualProject(p) ? <Icons.layers size={15} /> : <Icons.project size={15} />}
+              {isVirtualProject(p) ? <Icons.collection size={15} /> : <Icons.project size={15} />}
             </span>
             {renaming ? (
               renameInput
@@ -1320,7 +1320,7 @@ export function ProjectTree(h: TreeHandlers) {
               (contextId === g.id ? " context" : "")
             }
             style={{ paddingLeft: 6 + row.depth * 13, ...dragStyle(g.id) }}
-            draggable={!filtering && !renaming}
+            draggable={!renaming}
             onDragStart={onDragStart({ kind: "group", id: g.id, projectId: g.projectId })}
             onDragOver={(e) => allowDrop(e, g.id, true)}
             onDragLeave={() => setDragOver((d) => (d?.id === g.id ? null : d))}
@@ -1372,7 +1372,7 @@ export function ProjectTree(h: TreeHandlers) {
             context={contextId === s.id}
             renaming={renaming}
             renameVal={renaming ? renameVal : undefined}
-            draggable={!filtering && !renaming}
+            draggable={!renaming}
             dragHighlight={dragStyle(s.id)}
             onRowClick={sOnClick}
             onRowContext={sOnContext}
@@ -1437,25 +1437,27 @@ export function ProjectTree(h: TreeHandlers) {
           <kbd className="hint-kbd">{formatCombo(openProjectCombo)}</kbd>
           {t("tree.noProjectsPost")}
         </div>
-        <button className="empty-action" onClick={() => setCreateProjectModalOpen(true)}>
-          <Icons.projectPlus size={14} />
-          {t("tree.createProject")}
-        </button>
-        <button className="empty-action" onClick={() => void importProject()}>
-          <Icons.projectOpen size={14} />
-          {t("tree.openProject")}
-        </button>
-        <button className="empty-action" onClick={() => setCloneModalOpen(true)}>
-          <Icons.git size={14} />
-          {t("tree.cloneProject")}
-        </button>
-        <a className="empty-action" href={collectionDialogUrl("create")} onClick={event => {
-          if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-          event.preventDefault(); onNewCollection();
-        }}>
-          <Icons.layers size={14} />
-          {t("tree.newCollection")}
-        </a>
+        <div className="project-empty-actions">
+          <button className="empty-action" onClick={() => setCreateProjectModalOpen(true)}>
+            <Icons.projectPlus size={14} />
+            {t("tree.createProject")}
+          </button>
+          <button className="empty-action" onClick={() => void importProject()}>
+            <Icons.projectOpen size={14} />
+            {t("tree.openProject")}
+          </button>
+          <button className="empty-action" onClick={() => setCloneModalOpen(true)}>
+            <Icons.git size={14} />
+            {t("tree.cloneProject")}
+          </button>
+          <a className="empty-action" href={collectionDialogUrl("create")} onClick={event => {
+            if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault(); onNewCollection();
+          }}>
+            <Icons.collection size={14} />
+            {t("tree.newCollection")}
+          </a>
+        </div>
       </div>
     );
   }

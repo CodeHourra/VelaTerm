@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import { genId } from "../../../genId";
 import { chatSend, resolveChatImage, type ChatImage, type ChatImageValue, type SendBehavior } from "../../../ipc/chat";
-import { readOutbox, storeOutbox } from "./outboxStorage";
 
 export interface Submission {
   id: string;
@@ -11,48 +10,22 @@ export interface Submission {
   status: "sending" | "sent" | "queued" | "failed" | "unknown";
   error?: string;
   observed?: boolean;
-  recovered?: boolean;
 }
 
 const EMPTY: Submission[] = [];
-const scopes = new Map<string, string>();
-const writes = new Map<string, Promise<void>>();
 export const useOutbox = create<{ sessions: Record<string, Submission[]> }>(() => ({ sessions: {} }));
 export const submissionsFor = (session: string) => useOutbox.getState().sessions[session] ?? EMPTY;
 export const emptySubmissions = EMPTY;
 
 function change(session: string, update: (items: Submission[]) => Submission[]) {
   useOutbox.setState(state => ({ sessions: { ...state.sessions, [session]: update(state.sessions[session] ?? EMPTY) } }));
-  const scope = scopes.get(session);
-  if (scope) {
-    const items = submissionsFor(session);
-    const previous = writes.get(session) ?? Promise.resolve();
-    const next = previous.catch(() => {}).then(() => storeOutbox(`${scope}:${session}`, items));
-    writes.set(session, next);
-    void next.catch(() => {});
-  }
 }
 
-export async function restoreSubmissions(session: string, scope: string, recovered: Submission[]) {
-  const key = `${scope}:${session}`;
-  const previousScope = scopes.get(session);
-  const previous = writes.get(session);
-  if (previous) await previous.catch(() => {});
-  const cached = await readOutbox(key);
-  scopes.set(session, scope);
-  change(session, items => {
-    const merged = new Map<string, Submission>(cached.map(item => [item.id, { ...item, status: item.status === "sending" ? "unknown" as const : item.status }]));
-    if (!previousScope || previousScope === scope) items.forEach(item => merged.set(item.id, item));
-    recovered.forEach(item => merged.set(item.id, item));
-    return [...merged.values()];
-  });
-}
-
-export function acknowledgeSubmissions(session: string, ids: string[], authoritative = false) {
+export function acknowledgeSubmissions(session: string, ids: string[]) {
   const confirmed = new Set(ids);
   if (submissionsFor(session).some(item => confirmed.has(item.id))) {
     change(session, items => items.flatMap(item => !confirmed.has(item.id) ? [item]
-      : authoritative || item.status === "sent" || item.status === "queued" ? [] : [{ ...item, observed: true }]));
+      : item.status === "sent" || item.status === "queued" ? [] : [{ ...item, observed: true }]));
   }
 }
 
@@ -70,9 +43,6 @@ export async function deliverSubmission(session: string, item: Submission, start
   active.add(key);
   change(session, items => items.map(value => value.id === item.id ? { ...value, status: "sending", error: undefined } : value));
   try {
-    // Do not clear the composer and launch a provider with the only recoverable copy still in memory.
-    const saved = writes.get(session);
-    if (saved) await saved;
     const images = item.images.some(image => "attachmentId" in image) ? await Promise.all(item.images.map(resolveChatImage)) : item.images as ChatImage[];
     if (start) await start();
     const receipt = await chatSend(session, item.text, item.behavior, images.length ? images : undefined, item.id);

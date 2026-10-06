@@ -134,7 +134,7 @@ pub fn has_password(identifier: &str, kind: &str, account: &str) -> bool {
 pub enum RemoteShell {
     /// sh-compatible login shell (Linux, macOS, and Cygwin/MSYS on Windows).
     Posix,
-    /// Windows PowerShell, driven through `-EncodedCommand` so no quoting reaches cmd.exe.
+    /// Windows PowerShell, fed its script on stdin so no quoting reaches cmd.exe.
     Powershell,
 }
 
@@ -260,32 +260,30 @@ fn clear_session_target(session: &str) {
     session_target_map().lock().unwrap().remove(session);
 }
 
-/// Wrap a PowerShell script as `-EncodedCommand` so the command line carries only base64 characters.
+/// The remote command that runs a PowerShell script read from stdin.
 ///
-/// The remote login shell may be cmd.exe or PowerShell and each quotes differently; base64 passes through
-/// both untouched. PowerShell requires UTF-16LE before base64.
-fn ps_encoded(script: &str) -> String {
-    format!(
-        "powershell -NoProfile -NonInteractive -EncodedCommand {}",
-        ps_b64(script)
-    )
-}
+/// The command line carries only fixed ASCII flags, so it passes through a cmd.exe or PowerShell login
+/// shell untouched. Antivirus products such as Huorong block `-EncodedCommand` launches as suspicious
+/// scripts, which is why the script is not passed on the command line.
+const PS_STDIN: &str = "powershell -NoProfile -NonInteractive -Command -";
 
-/// Encode a PowerShell script as the base64 UTF-16LE blob `-EncodedCommand` expects.
-fn ps_b64(script: &str) -> String {
-    use base64::Engine;
-    let mut bytes = Vec::with_capacity(script.len() * 2);
-    for u in script.encode_utf16() {
-        bytes.extend_from_slice(&u.to_le_bytes());
+/// The stdin payload for `PS_STDIN`.
+///
+/// PowerShell decodes stdin with the console code page, so the script must be ASCII: every path is an
+/// `$env:` expression expanded remotely, never a literal. The trailing blank line ends any open block,
+/// which `-Command -` otherwise keeps waiting on.
+fn ps_stdin(script: &str) -> Result<String, String> {
+    if !script.is_ascii() {
+        return Err("internal error: remote PowerShell scripts must be ASCII".into());
     }
-    base64::engine::general_purpose::STANDARD.encode(&bytes)
+    Ok(format!("{script}\n\n"))
 }
 
-/// Run a script written for the detected shell, encoding it first when that shell is PowerShell.
+/// Run a script written for the detected shell, feeding it on stdin when that shell is PowerShell.
 fn shell_exec(t: &dyn SshTransport, sys: &RemoteSystem, script: &str) -> Result<String, String> {
     match sys.shell {
         RemoteShell::Posix => t.exec(script),
-        RemoteShell::Powershell => t.exec(&ps_encoded(script)),
+        RemoteShell::Powershell => t.exec_input(PS_STDIN, &ps_stdin(script)?),
     }
 }
 
@@ -387,7 +385,7 @@ pub fn open_master(host: &str, session: &str, strict: bool) -> Result<(), String
     // background. `exit 0` rather than `true` because a Windows remote runs this through cmd.exe, which
     // has no `true` and would fail the whole connection before the system is ever probed.
     cmd.arg(NOOP_REMOTE_CMD);
-    run_capture(cmd, "establish SSH control connection")?;
+    run_capture(cmd, "establish SSH control connection", None)?;
     Ok(())
 }
 
@@ -552,6 +550,15 @@ pub fn close_master(host: &str, session: &str) {
 
 /// Run a remote command over the established connection and return trimmed stdout.
 pub fn run_remote(host: &str, session: &str, remote_cmd: &str) -> Result<String, String> {
+    run_capture(remote_command(host, session, remote_cmd), "remote command", None)
+}
+
+/// Run a remote command with `input` written to its stdin, then EOF.
+fn run_remote_input(host: &str, session: &str, remote_cmd: &str, input: &str) -> Result<String, String> {
+    run_capture(remote_command(host, session, remote_cmd), "remote command", Some(input))
+}
+
+fn remote_command(host: &str, session: &str, remote_cmd: &str) -> Command {
     let (target, port) = split_ssh_target(host);
     let sock = control_path(session);
     let mut cmd = ssh_command("ssh");
@@ -559,14 +566,28 @@ pub fn run_remote(host: &str, session: &str, remote_cmd: &str) -> Result<String,
     cmd.args(["-o", "BatchMode=yes"]);
     cmd.arg(target);
     cmd.arg(remote_cmd);
-    run_capture(cmd, "remote command")
+    cmd
 }
 
-/// Run a command and capture stdout; include stderr on nonzero exit.
-fn run_capture(mut cmd: Command, what: &str) -> Result<String, String> {
-    let out = cmd
-        .output()
-        .map_err(|e| format!("{what} failed to run (ssh missing locally?): {e}"))?;
+/// Run a command and capture stdout; include stderr on nonzero exit. `input`, when given, is written to
+/// the command's stdin from a separate thread so a large reply cannot deadlock against the write.
+fn run_capture(mut cmd: Command, what: &str, input: Option<&str>) -> Result<String, String> {
+    let out = match input {
+        None => cmd.output(),
+        Some(input) => {
+            use std::io::Write;
+            cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+            cmd.spawn().and_then(|mut child| {
+                let mut stdin = child.stdin.take().expect("stdin was piped");
+                let input = input.to_owned();
+                let writer = std::thread::spawn(move || stdin.write_all(input.as_bytes()));
+                let out = child.wait_with_output();
+                let _ = writer.join();
+                out
+            })
+        }
+    }
+    .map_err(|e| format!("{what} failed to run (ssh missing locally?): {e}"))?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
         return Err(format!("{what} failed: {}", err.trim()));
@@ -593,7 +614,7 @@ pub fn probe_system(t: &dyn SshTransport) -> Result<RemoteSystem, String> {
                   $a=$env:PROCESSOR_ARCHITECTURE; \
                   if($env:PROCESSOR_ARCHITEW6432){$a=$env:PROCESSOR_ARCHITEW6432}; \
                   Write-Output \"Windows_NT $a\"";
-    let win = t.exec(&ps_encoded(script)).map_err(|e| {
+    let win = t.exec_input(PS_STDIN, &ps_stdin(script)?).map_err(|e| {
         // Report both failures: neither shell answered, so the host is not a supported remote.
         let posix_err = posix.err().unwrap_or_default();
         format!("cannot detect the remote system (uname: {posix_err}; powershell: {e})")
@@ -669,7 +690,7 @@ pub fn probe_host_key(host: &str) -> Result<HostKeyProbe, String> {
     // Prefer stronger key types among all results.
     cmd.args(["-t", "ed25519,ecdsa,rsa"]);
     cmd.arg(hostname);
-    let scanned = run_capture(cmd, "ssh-keyscan host key probe")?;
+    let scanned = run_capture(cmd, "ssh-keyscan host key probe", None)?;
     let (key_type, key_b64) = first_host_key(&scanned)
         .ok_or_else(|| format!("ssh-keyscan returned no usable host key: {scanned:?}"))?;
     let fingerprint = sha256_fingerprint(&key_b64)?;
@@ -808,7 +829,7 @@ pub fn trust_host(host: &str, was_changed: bool) -> Result<(), String> {
     }
     cmd.args(["-t", "ed25519,ecdsa,rsa"]);
     cmd.arg(hostname);
-    let scanned = run_capture(cmd, "ssh-keyscan (trust write)")?;
+    let scanned = run_capture(cmd, "ssh-keyscan (trust write)", None)?;
 
     let kh = known_hosts_file()?;
     if let Some(dir) = kh.parent() {
@@ -1228,15 +1249,22 @@ fn serve_script(
                  $j='{{\"pid\":'+$p.Id+',\"port\":{rport},\"password\":\"{password}\",\"version\":\"{version}\",\"shared_db\":{shared_json},\"mirror\":{mirror_json}}}'; \
                  Set-Content -LiteralPath \"{run}\" -Value $j -Encoding ASCII"
             );
-            let inner_b64 = ps_b64(&inner);
+            // Stage two reaches WMI as a file rather than an encoded command line: this script writes it
+            // under ~/.velaterm, the WMI-created PowerShell reads it into a script block (which no execution
+            // policy restricts), and this script deletes it once run.json appears.
+            let inner_literal = inner.replace('\'', "''");
             format!(
                 "$ErrorActionPreference='Stop'; \
                  $run=\"{run}\"; \
                  Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $run; \
-                 $r=Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{{ \
-                     CommandLine = 'powershell -NoProfile -NonInteractive -EncodedCommand {inner_b64}' }}; \
-                 if($r.ReturnValue -ne 0){{ throw ('could not spawn the service host (Win32_Process.Create returned ' + $r.ReturnValue + ')') }}; \
+                 $f=Join-Path $env:USERPROFILE '.velaterm\\serve-start.ps1'; \
+                 Set-Content -LiteralPath $f -Value '{inner_literal}' -Encoding ASCII; \
+                 $q=$f.Replace(\"'\",\"''\"); \
+                 $c='powershell -NoProfile -NonInteractive -Command \"& ([scriptblock]::Create([IO.File]::ReadAllText('''+$q+''')))\"'; \
+                 $r=Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{{ CommandLine = $c }}; \
+                 if($r.ReturnValue -ne 0){{ Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $f; throw ('could not spawn the service host (Win32_Process.Create returned ' + $r.ReturnValue + ')') }}; \
                  for($i=0;$i -lt 200;$i++){{ if(Test-Path -LiteralPath $run){{ break }}; Start-Sleep -Milliseconds 100 }}; \
+                 Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $f; \
                  $t=Get-Content -Raw -LiteralPath $run; \
                  if(-not $t){{ throw 'the remote service did not start (see .velaterm\\server.err.log)' }}; \
                  Write-Output ($t | ConvertFrom-Json).pid"
@@ -1326,11 +1354,10 @@ fn kill_service_cmd(sys: &RemoteSystem) -> String {
 pub fn kill_remote_service(host: &str, session: &str) {
     let sys = session_sys(session);
     let cmd = kill_service_cmd(&sys);
-    let wrapped = match sys.shell {
-        RemoteShell::Posix => cmd,
-        RemoteShell::Powershell => ps_encoded(&cmd),
+    let _ = match sys.shell {
+        RemoteShell::Posix => run_remote(host, session, &cmd),
+        RemoteShell::Powershell => ps_stdin(&cmd).and_then(|input| run_remote_input(host, session, PS_STDIN, &input)),
     };
-    let _ = run_remote(host, session, &wrapped);
 }
 
 /// Poll the local forwarding port until the remote service actually responds over HTTP or times out.
@@ -1384,6 +1411,8 @@ pub enum SshAuth {
 pub trait SshTransport: Send {
     /// Run a remote command and return trimmed stdout.
     fn exec(&self, cmd: &str) -> Result<String, String>;
+    /// Run a remote command with `input` on its stdin, then EOF, and return trimmed stdout.
+    fn exec_input(&self, cmd: &str, input: &str) -> Result<String, String>;
     /// Upload to a home-relative path with transfer progress.
     fn upload(&self, local: &Path, remote_rel: &str, progress: Progress) -> Result<(), String>;
     /// Start persistent local forwarding and return lport after health succeeds.
@@ -1447,6 +1476,10 @@ impl SshTransport for OpensshTransport {
         run_remote(&self.host, &self.session, cmd)
     }
 
+    fn exec_input(&self, cmd: &str, input: &str) -> Result<String, String> {
+        run_remote_input(&self.host, &self.session, cmd, input)
+    }
+
     fn upload(&self, local: &Path, remote_rel: &str, progress: Progress) -> Result<(), String> {
         let (target, port) = split_ssh_target(&self.host);
         // The SCP path after `:` is home-relative and does not use shell expansion. The size probe below
@@ -1458,16 +1491,17 @@ impl SshTransport for OpensshTransport {
                 format!("$env:USERPROFILE\\{}", remote_rel.replace('/', "\\"))
             }
         };
-        let size_cmd = match sys.shell {
+        // The probe is a command plus, for PowerShell, the script it reads from stdin.
+        let size_probe = match sys.shell {
             // Use Linux stat syntax then macOS/BSD fallback; report zero if neither works.
-            RemoteShell::Posix => format!(
+            RemoteShell::Posix => (format!(
                 "stat -c %s \"{tmp_abs}\" 2>/dev/null || stat -f %z \"{tmp_abs}\" 2>/dev/null || echo 0"
-            ),
-            RemoteShell::Powershell => ps_encoded(&format!(
+            ), None),
+            RemoteShell::Powershell => (PS_STDIN.to_string(), Some(ps_stdin(&format!(
                 "$ErrorActionPreference='SilentlyContinue'; \
                  $i=Get-Item -LiteralPath \"{tmp_abs}\"; \
                  if($i){{ Write-Output $i.Length }} else {{ Write-Output 0 }}"
-            )),
+            ))?)),
         };
         let total = std::fs::metadata(local).map(|m| m.len()).unwrap_or(0);
 
@@ -1514,7 +1548,11 @@ impl SshTransport for OpensshTransport {
                 Err(e) => return Err(format!("scp wait failed: {e}")),
             }
             if total > 0 {
-                if let Ok(out) = run_remote(&self.host, &self.session, &size_cmd) {
+                let probed = match &size_probe {
+                    (cmd, None) => run_remote(&self.host, &self.session, cmd),
+                    (cmd, Some(input)) => run_remote_input(&self.host, &self.session, cmd, input),
+                };
+                if let Ok(out) = probed {
                     if let Ok(cur) = out.trim().parse::<u64>() {
                         let pct = (cur.min(total) * 99 / total) as u8;
                         progress("transfer", Some(pct));
@@ -2076,18 +2114,14 @@ mod tests {
     }
 
     #[test]
-    fn ps_encoded_is_pure_base64_utf16le() {
-        let wrapped = ps_encoded("hi");
-        let b64 = wrapped
-            .strip_prefix("powershell -NoProfile -NonInteractive -EncodedCommand ")
-            .expect("the wrapper should carry the standard PowerShell flags");
-        use base64::Engine;
-        let raw = base64::engine::general_purpose::STANDARD
-            .decode(b64)
-            .expect("the argument should be valid base64");
-        assert_eq!(raw, vec![b'h', 0, b'i', 0], "PowerShell requires UTF-16LE");
-        // No quoting reaches cmd.exe, which is the entire point of -EncodedCommand.
-        assert!(!b64.contains(' ') && !b64.contains('"') && !b64.contains('\''));
+    fn ps_stdin_keeps_the_command_line_fixed_and_the_script_ascii() {
+        // The command line is the same fixed ASCII string for every script; the script travels on stdin.
+        assert_eq!(PS_STDIN, "powershell -NoProfile -NonInteractive -Command -");
+        assert!(!PS_STDIN.contains("EncodedCommand"));
+        // A trailing blank line closes any open block, which `-Command -` would otherwise wait on.
+        assert_eq!(ps_stdin("Write-Output hi").unwrap(), "Write-Output hi\n\n");
+        // Stdin is decoded with the console code page, so non-ASCII scripts are refused, not garbled.
+        assert!(ps_stdin("Write-Output '中文'").is_err());
     }
 
     #[test]
@@ -2268,28 +2302,24 @@ mod tests {
             "the first stage must spawn through WMI, not directly"
         );
         assert!(!s.contains("Start-Process -FilePath 'powershell'"));
-        assert!(s.contains("CommandLine = 'powershell -NoProfile -NonInteractive -EncodedCommand "));
-        // Stage two carries the real launch, so the password and log redirection live inside its blob.
-        let b64 = s
-            .split("-EncodedCommand ")
-            .nth(1)
-            .and_then(|t| t.split('\'').next())
-            .expect("the first stage should embed the second stage's encoded script");
-        use base64::Engine;
-        let raw = base64::engine::general_purpose::STANDARD
-            .decode(b64)
-            .expect("the embedded stage should be valid base64");
-        let inner: String = raw
-            .chunks_exact(2)
-            .map(|c| u16::from_le_bytes([c[0], c[1]]))
-            .collect::<Vec<_>>()
-            .iter()
-            .filter_map(|u| char::from_u32(*u as u32))
-            .collect();
+        // Stage two travels as a file read into a script block, never as an encoded command line.
+        assert!(!s.contains("EncodedCommand"));
+        assert!(s.contains("$f=Join-Path $env:USERPROFILE '.velaterm\\serve-start.ps1'"));
+        assert!(s.contains("[scriptblock]::Create([IO.File]::ReadAllText("));
+        assert!(s.contains("CommandLine = $c"));
+        // The stage-two file is removed once run.json has appeared.
+        let wait = s.find("Test-Path -LiteralPath $run").unwrap();
+        assert!(s[wait..].contains("Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $f"));
+        // Stage two is embedded as one single-quoted literal, so its own quotes are doubled.
+        let start = s.find("Set-Content -LiteralPath $f -Value '").unwrap() + "Set-Content -LiteralPath $f -Value '".len();
+        let end = s[start..].find("' -Encoding ASCII; $q=").unwrap() + start;
+        let inner = s[start..end].replace("''", "'");
         assert!(inner.contains("$env:VELA_SERVE_PASSWORD='pw123'"));
         assert!(inner.contains("-RedirectStandardOutput \"$b\\server.log\""));
         assert!(inner.contains("vela-server.exe"));
         assert!(inner.contains("--mirror 0"));
+        // The whole script goes through stdin, so it has to be ASCII.
+        assert!(ps_stdin(&s).is_ok());
         // The PID handed back must be the server's own, read out of run.json rather than any wrapper's.
         assert!(s.contains("Write-Output ($t | ConvertFrom-Json).pid"));
     }

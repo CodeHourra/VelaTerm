@@ -647,10 +647,11 @@ mod tests {
         let script = kinds.iter().map(|kind| super::super::executable::command_name(*kind))
             .collect::<Vec<_>>().join("; ");
         let dirs = super::super::executable::binary_dirs(&binaries);
-        let launch = format!("{} {script}", super::super::executable::path_startup_script(&dirs).trim_end());
+        let launch = format!("{} {script}", super::super::executable::PATH_APPEND_COMMAND);
         // Typed sessions retain Bash's native login startup and receive this single launch command afterwards.
         let output = std::process::Command::new("/bin/bash")
             .env_clear().env("HOME", &home).env("PATH", "/usr/bin:/bin")
+            .env(super::super::executable::PATH_APPEND_VAR, super::super::executable::path_append_value(&dirs))
             .args(["-lic", &launch]).output().unwrap();
         assert!(output.status.success());
         let output = String::from_utf8(output.stdout).unwrap();
@@ -661,11 +662,11 @@ mod tests {
             let mut command = std::process::Command::new(shell);
             command.env_clear().env("HOME", &home).env("PATH", "/usr/bin:/bin");
             if shell.ends_with("bash") {
-                let rcfile = crate::pty::completion::configure_bash_startup(&state, &binaries, None).unwrap();
+                let rcfile = crate::pty::completion::configure_bash_startup(&state, &binaries).unwrap();
                 command.arg("--rcfile").arg(rcfile).args(["-ic", &script]);
             } else {
                 let mut pty = portable_pty::CommandBuilder::new(shell);
-                crate::pty::completion::configure_zsh_startup(&state, &mut pty, &binaries, None).unwrap();
+                crate::pty::completion::configure_zsh_startup(&state, &mut pty, &binaries).unwrap();
                 command.env("ZDOTDIR", pty.get_env("ZDOTDIR").unwrap()).args(["-lic", &script]);
             }
             let output = command.output().unwrap();

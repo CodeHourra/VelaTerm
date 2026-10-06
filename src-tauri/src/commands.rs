@@ -706,10 +706,12 @@ pub async fn open_remote_window(
 }})();"#
     );
 
-    with_download_handler(tauri::WebviewWindowBuilder::new(&app, &label, tauri::WebviewUrl::External(parsed)))
+    let layout = crate::window_layout::policy();
+    let win = with_download_handler(tauri::WebviewWindowBuilder::new(&app, &label, tauri::WebviewUrl::External(parsed)))
         .title(format!("VelaTerm · Remote: {display_addr}"))
-        .inner_size(1280.0, 820.0)
-        .min_inner_size(900.0, 600.0)
+        .inner_size(layout.fallback_width, layout.fallback_height)
+        .min_inner_size(layout.min_width, layout.min_height)
+        .visible(false)
         // Open with the chrome the user already chose instead of the OS default; see `set_native_theme`.
         .theme(crate::native_theme(&app))
         .initialization_script(&init_script)
@@ -744,6 +746,9 @@ pub async fn open_remote_window(
     )
     .map_err(|e| format!("Failed to grant remote window capability: {e}"))?;
 
+    crate::window_layout::apply(&win);
+    win.show().map_err(|e| format!("Failed to show remote window: {e}"))?;
+    let _ = win.set_focus();
     Ok(())
 }
 
@@ -831,15 +836,21 @@ fn build_account_remote_window(app: &AppHandle, url: url::Url) -> Result<tauri::
   window.__VLX_FORCE_BROWSER__=true;
   if(typeof window.OffscreenCanvas!=='undefined')window.OffscreenCanvas=undefined;
 })();"#;
-    with_download_handler(tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::External(url)))
+    let layout = crate::window_layout::policy();
+    let win = with_download_handler(tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::External(url)))
         .title("VelaTerm · Remote")
-        .inner_size(1280.0, 820.0)
-        .min_inner_size(720.0, 480.0)
+        .inner_size(layout.fallback_width, layout.fallback_height)
+        .min_inner_size(layout.min_width, layout.min_height)
+        .visible(false)
         .theme(crate::native_theme(app))
         .initialization_script(init_script)
         .disable_drag_drop_handler()
         .build()
-        .map_err(|e| format!("Cannot open Remote window: {e}"))
+        .map_err(|e| format!("Cannot open Remote window: {e}"))?;
+    crate::window_layout::apply(&win);
+    win.show().map_err(|e| format!("Cannot show Remote window: {e}"))?;
+    let _ = win.set_focus();
+    Ok(win)
 }
 
 /// Parse `(host, port)` from a pairing link; fingerprint trust is keyed by endpoint, not rotating token.
@@ -1271,10 +1282,12 @@ fn open_login_window(
     )
     .map_err(|e| format!("Failed to grant connection window capability: {e}"))?;
 
+    let layout = crate::window_layout::policy();
     let win = with_download_handler(tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::External(parsed)))
         .title(title)
-        .inner_size(1280.0, 820.0)
-        .min_inner_size(900.0, 600.0)
+        .inner_size(layout.fallback_width, layout.fallback_height)
+        .min_inner_size(layout.min_width, layout.min_height)
+        .visible(false)
         // Open with the chrome the user already chose instead of the OS default; see `set_native_theme`.
         .theme(crate::native_theme(app))
         .initialization_script(&init_script)
@@ -1355,5 +1368,8 @@ fn open_login_window(
         }
     });
 
+    crate::window_layout::apply(&win);
+    win.show().map_err(|e| format!("Failed to show {} window: {e}", kind.name()))?;
+    let _ = win.set_focus();
     Ok(())
 }

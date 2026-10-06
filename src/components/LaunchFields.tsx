@@ -5,6 +5,7 @@ import { useT } from "../i18n";
 import { launchModels, launchOptions, type LaunchOption, type LaunchModelContext, type LaunchModelCatalog } from "../ipc/launch";
 import type { WorktreeMode } from "../ipc/events";
 import Combo from "./Combo";
+import { Field } from "./Field";
 import { Icons } from "./Icons";
 import "./launch-dialog.css";
 
@@ -56,15 +57,7 @@ export function LaunchField({
   children: ReactNode;
   hint?: string;
 }) {
-  return (
-    <div className="launch-field">
-      <label className="launch-field">
-        <span className="launch-label">{label}</span>
-        {children}
-      </label>
-      {hint && <span className="launch-hint">{hint}</span>}
-    </div>
-  );
+  return <Field label={label} hint={hint}>{children}</Field>;
 }
 
 const modelRequests = new Map<string, Promise<LaunchModelCatalog>>();
@@ -198,7 +191,7 @@ export function WorktreeChoices({
   const name = useId();
   return (
     <fieldset className="launch-worktrees" disabled={disabled}>
-      <legend className="launch-label">{t("launch.directory")}</legend>
+      <legend className="vlx-field-label">{t("launch.directory")}</legend>
       <div className={`launch-worktree-grid${single ? " is-single" : ""}`}>
         {(["none", ...(single ? [] : ["shared"]), "each"] as const).map(
           (mode) => (

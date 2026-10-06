@@ -16,9 +16,6 @@
 //! adjacent input/output messages; history joins those observed records while preserving their identities.
 
 use std::io::Read;
-
-#[cfg(windows)]
-pub(crate) mod windows;
 use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -40,6 +37,9 @@ const LIVE_OUTPUT_CAP: usize = 8 * 1024;
 const PIPE_DRAIN_GRACE: Duration = Duration::from_millis(500);
 /// How often the wait thread checks whether the command has ended.
 const WAIT_POLL: Duration = Duration::from_millis(50);
+/// Stable refusal on Windows hosts. Running an arbitrary command there needs `powershell -EncodedCommand`
+/// or a comparable launcher, which antivirus products such as Huorong block as a suspicious script.
+pub const UNSUPPORTED: &str = "chat_shell_unsupported";
 
 pub const STATUS_RUNNING: &str = "running";
 pub const STATUS_COMPLETED: &str = "completed";
@@ -235,8 +235,6 @@ pub struct ShellRun {
     pub command: String,
     pub started_at: i64,
     child: Mutex<Child>,
-    #[cfg(windows)]
-    job: windows::Job,
     output_incomplete: AtomicBool,
     stdout: Arc<Mutex<TailBuffer>>,
     stderr: Arc<Mutex<TailBuffer>>,
@@ -254,10 +252,10 @@ impl ShellRun {
         // A late click cannot relabel an already completed command or target a reused process id.
         if matches!(child.try_wait(), Ok(Some(_))) { return; }
         self.cancelled.store(true, Ordering::Relaxed);
-        #[cfg(windows)]
-        self.job.terminate();
         #[cfg(unix)]
         crate::host::kill_process_tree(&mut child);
+        #[cfg(not(unix))]
+        let _ = child.kill();
     }
 
     pub fn abandon(&self) {
@@ -350,6 +348,8 @@ pub fn spawn_run(
     on_update: impl Fn(&ShellRun) + Send + Sync + 'static,
     on_finish: impl FnOnce(&ShellRun, ShellContext) + Send + 'static,
 ) -> Result<Arc<ShellRun>, String> {
+    // Windows has no shell mode; see `chat_run_shell`.
+    if cfg!(windows) { return Err(UNSUPPORTED.into()); }
     let shell = session_shell(app, kind, persisted_shell);
     let mut cmd = crate::host::command(&shell);
     configure_shell_command(&mut cmd, &shell, command);
@@ -364,24 +364,9 @@ pub fn spawn_run(
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
     }
-    #[cfg(windows)]
-    let job = {
-        use std::os::windows::process::CommandExt;
-        use ::windows::Win32::System::Threading::{CREATE_NO_WINDOW, CREATE_SUSPENDED};
-        cmd.creation_flags(CREATE_NO_WINDOW.0 | CREATE_SUSPENDED.0);
-        windows::Job::new()?
-    };
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("Failed to start the shell \"{shell}\": {e}"))?;
-    #[cfg(windows)]
-    if let Err(error) = job.assign_and_resume(&child) {
-        job.terminate();
-        let _ = child.kill();
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while matches!(child.try_wait(), Ok(None)) && Instant::now() < deadline { std::thread::sleep(WAIT_POLL); }
-        return Err(error);
-    }
     let stdout = child.stdout.take().ok_or("chat_shell_start_uncertain: The shell has no output stream")?;
     let stderr = child.stderr.take().ok_or("chat_shell_start_uncertain: The shell has no error stream")?;
     let run = Arc::new(ShellRun {
@@ -389,8 +374,6 @@ pub fn spawn_run(
         command: command.to_string(),
         started_at: now_ms(),
         child: Mutex::new(child),
-        #[cfg(windows)]
-        job,
         output_incomplete: AtomicBool::new(false),
         stdout: Arc::new(Mutex::new(TailBuffer::default())),
         stderr: Arc::new(Mutex::new(TailBuffer::default())),
@@ -422,8 +405,6 @@ pub fn spawn_run(
         }
         #[cfg(unix)]
         crate::host::kill_process_tree(&mut waited.child.lock().unwrap());
-        #[cfg(windows)]
-        waited.job.terminate();
         let exit_code = status.and_then(|s| s.code()).unwrap_or(-1);
         let mut ctx = waited.snapshot(Some(exit_code));
         if ctx.cancelled {
@@ -533,23 +514,6 @@ fn pipe_ready(pipe: &impl ShellPipe, capacity: usize) -> std::io::Result<usize> 
 }
 
 fn configure_shell_command(cmd: &mut std::process::Command, shell: &str, command: &str) {
-    #[cfg(windows)]
-    {
-        use crate::agent::inject::{shell_kind, ShellKind};
-        use std::os::windows::process::CommandExt;
-        if matches!(shell_kind(shell), ShellKind::Cmd) {
-            // cmd.exe parses a command language, not the CRT argv grammar used by Command::arg.
-            cmd.raw_arg(format!("/D /S /C \"{command}\""));
-            return;
-        }
-        if matches!(shell_kind(shell), ShellKind::PowerShell | ShellKind::Pwsh) {
-            use base64::Engine;
-            let bytes: Vec<u8> = command.encode_utf16().flat_map(u16::to_le_bytes).collect();
-            cmd.args(["-NoLogo", "-NonInteractive", "-EncodedCommand"]);
-            cmd.arg(base64::engine::general_purpose::STANDARD.encode(bytes));
-            return;
-        }
-    }
     cmd.args(shell_args(shell, command));
 }
 

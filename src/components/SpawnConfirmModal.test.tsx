@@ -39,6 +39,7 @@ const mocks = vi.hoisted(() => ({
     planExecutePrefs: { plan: {}, exec: {} } as {
       plan: PlanExecuteRolePrefs;
       exec: PlanExecuteRolePrefs;
+      review?: PlanExecuteRolePrefs;
     },
     setPlanExecuteRolePrefs: vi.fn(),
     confirmSpawn: vi.fn(),
@@ -735,8 +736,8 @@ it.each(["pending", "failed", "uncertain", "dispatching"] as const)("locks both 
   mocks.store.pendingSpawns = [approved];
   mocks.store.spawnReceipts["request-id"] = confirmedReceipt(approved, state, resolved);
   render(<SpawnConfirmModal />);
-  await screen.findByRole("region", { name: "launch.planTitle" });
-  for (const [role, label] of [["plan", "launch.planTitle"], ["exec", "launch.execTitle"]] as const) {
+  await screen.findByRole("region", { name: "launch.legacyPlanTitle" });
+  for (const [role, label] of [["plan", "launch.legacyPlanTitle"], ["exec", "launch.execTitle"]] as const) {
     const section = within(screen.getByRole("region", { name: label }));
     for (const name of ["spawn.agentLabel", "spawn.modelLabel", "spawn.effortLabel"]) {
       expect((section.getByLabelText(name) as HTMLInputElement).disabled).toBe(true);
@@ -782,7 +783,7 @@ it("keeps pending workflow edits, closes an open role portal on confirmation and
   fireEvent.click(staleOption);
   expect(mocks.store.setPlanExecuteRolePrefs).not.toHaveBeenCalled();
   expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
-  expect((within(screen.getByRole("region", { name: "launch.planTitle" })).getByLabelText("spawn.modelLabel") as HTMLInputElement).value).toBe("initial-plan");
+  expect((within(screen.getByRole("region", { name: "launch.legacyPlanTitle" })).getByLabelText("spawn.modelLabel") as HTMLInputElement).value).toBe("initial-plan");
 });
 
 it("discards late workflow defaults and accepts only a later persisted snapshot after another client confirms", async () => {
@@ -795,13 +796,67 @@ it("discards late workflow defaults and accepts only a later persisted snapshot 
   const config = { plan: { agent: "codex" as const, model: "frozen-plan", effort: "xhigh" }, exec: { agent: "claude" as const, model: "frozen-exec", effort: "high" } };
   mocks.store.spawnReceipts["request-id"] = confirmedReceipt(request, "failed", config);
   view.rerender(<SpawnConfirmModal />);
-  await screen.findByRole("region", { name: "launch.planTitle" });
+  await screen.findByRole("region", { name: "launch.legacyPlanTitle" });
   await act(async () => defaults({ plan: { agent: "claude", model: "late-default" }, exec: { agent: "codex", model: "late-exec" } }));
-  expect((within(screen.getByRole("region", { name: "launch.planTitle" })).getByLabelText("spawn.modelLabel") as HTMLInputElement).value).toBe("frozen-plan");
+  expect((within(screen.getByRole("region", { name: "launch.legacyPlanTitle" })).getByLabelText("spawn.modelLabel") as HTMLInputElement).value).toBe("frozen-plan");
   expect(mocks.store.setPlanExecuteRolePrefs).not.toHaveBeenCalled();
   // A later resolved receipt replaces the explicit, incomplete confirmed request without reading memory.
   mocks.store.spawnReceipts["request-id"] = confirmedReceipt(request, "dispatching", { ...config, worktreeMode: "each", exec: { ...config.exec, model: "persisted-exec" } });
   view.rerender(<SpawnConfirmModal />);
   await waitFor(() => expect((within(screen.getByRole("region", { name: "launch.execTitle" })).getByLabelText("spawn.modelLabel") as HTMLInputElement).value).toBe("persisted-exec"));
   expect((screen.getAllByRole("radio")[2] as HTMLInputElement).checked).toBe(true);
+});
+
+
+describe("optional independent review", () => {
+  const config = {
+    reviewEnabled: true,
+    plan: { agent: "codex" as const, model: "planner", effort: "xhigh" },
+    exec: { agent: "claude" as const, model: "executor", effort: "high" },
+    review: { agent: "codex" as const, model: "reviewer", effort: "high" },
+  };
+
+  it("shows the backend review default, preserves settings across toggles and submits all three roles", async () => {
+    mocks.planExecuteDefaults.mockResolvedValue(config);
+    await open({ planExecute: { plan: {}, exec: {} } }, false);
+    const reviewer = within(await screen.findByRole("region", { name: "launch.reviewTitle" }));
+    expect((screen.getByRole("checkbox", { name: "launch.reviewEnabled" }) as HTMLInputElement).checked).toBe(true);
+    fireEvent.change(reviewer.getByLabelText("spawn.modelLabel"), { target: { value: "custom-reviewer" } });
+    fireEvent.blur(reviewer.getByLabelText("spawn.modelLabel"));
+    fireEvent.click(screen.getByRole("checkbox", { name: "launch.reviewEnabled" }));
+    expect(screen.queryByRole("region", { name: "launch.reviewTitle" })).toBeNull();
+    expect(screen.getByText("launch.reviewDisabledHint")).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: "launch.reviewEnabled" }));
+    expect((within(screen.getByRole("region", { name: "launch.reviewTitle" })).getByLabelText("spawn.modelLabel") as HTMLInputElement).value).toBe("custom-reviewer");
+    const req = await launch();
+    expect(req.planExecute?.reviewEnabled).toBe(true);
+    expect(req.planExecute?.review?.model).toBe("custom-reviewer");
+    expect(mocks.applyLaunchArgs).toHaveBeenCalledWith("codex", null, "custom-reviewer", "high");
+  });
+
+  it("submits disabled review without validating the unused reviewer", async () => {
+    mocks.planExecuteDefaults.mockResolvedValue({ ...config, reviewEnabled: false, review: { agent: "terminal", model: "invalid model" } });
+    await open({ planExecute: { reviewEnabled: false, plan: {}, exec: {} } }, false);
+    await screen.findByRole("region", { name: "launch.planTitle" });
+    expect(screen.queryByRole("region", { name: "launch.reviewTitle" })).toBeNull();
+    const req = await launch();
+    expect(req.planExecute?.reviewEnabled).toBe(false);
+    expect(mocks.applyLaunchArgs).toHaveBeenCalledTimes(2);
+  });
+
+  it("locks the review setting and all saved role choices after confirmation", async () => {
+    const request: SpawnRequest = { requestId: "request-id", parentSessionId: "p1", prompt: "Task", planExecute: config };
+    mocks.store.pendingSpawns = [request];
+    mocks.store.spawnReceipts["request-id"] = confirmedReceipt(request, "failed", config);
+    mocks.store.planExecutePrefs.review = { agent: "claude", model: "different" };
+    render(<SpawnConfirmModal />);
+    const reviewer = within(await screen.findByRole("region", { name: "launch.reviewTitle" }));
+    const toggle = screen.getByRole("checkbox", { name: "launch.reviewEnabled" }) as HTMLInputElement;
+    expect(toggle.disabled).toBe(true);
+    fireEvent.click(toggle);
+    expect(toggle.checked).toBe(true);
+    expect((reviewer.getByLabelText("spawn.modelLabel") as HTMLInputElement).value).toBe("reviewer");
+    expect((reviewer.getByLabelText("spawn.modelLabel") as HTMLInputElement).disabled).toBe(true);
+    expect(mocks.planExecuteDefaults).not.toHaveBeenCalled();
+  });
 });

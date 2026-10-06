@@ -47,8 +47,7 @@ export function reconcileChat(snapshot: ChatSnapshot, current: ChatRow[], events
     }
     if (event.type === "queued") {
       if (event.revision === undefined || event.revision > (result.queueRevision ?? -1)) {
-        result = { ...result, queue: event.items, queueRevision: event.revision,
-          recovery: result.recovery && event.paused !== undefined ? { ...result.recovery, queuePaused: event.paused } : result.recovery };
+        result = { ...result, queue: event.items, queueRevision: event.revision };
       }
     } else if (event.revision === undefined || event.revision > (result.rowsRevision ?? -1)) {
       if (event.type === "replaceRows") result = { ...result, userMessages: event.userMessages ?? [] };

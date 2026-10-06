@@ -15,6 +15,8 @@ mod focus_win;
 // Tauri command registry is compiled only for GUI builds.
 #[cfg(feature = "gui")]
 mod commands;
+#[cfg(feature = "gui")]
+mod window_layout;
 mod db;
 mod files;
 mod fonts;
@@ -633,25 +635,9 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
             initial_open_project.map(|p| p.to_string_lossy().into_owned()),
         )))
         .setup(|app| {
-            // Size the main window to 77% x 81% of the current monitor with caps, then center it.
-            // This fits laptops and uses larger displays; fall back to configured dimensions if unavailable.
+            // Main and connection windows share a work-area-aware native startup frame on every platform.
             if let Some(win) = app.get_webview_window("main") {
-                if let Ok(Some(monitor)) = win.current_monitor() {
-                    let scale = monitor.scale_factor();
-                    let sz = monitor.size(); // Physical pixels.
-                    let sw = sz.width as f64 / scale;
-                    let sh = sz.height as f64 / scale;
-                    let w = (sw * 0.77).clamp(900.0, 1620.0);
-                    let h = (sh * 0.81).clamp(600.0, 1035.0);
-                    let _ = win.set_size(tauri::LogicalSize::new(w, h));
-                    // Center within work_area rather than the full display so menu bar/Dock do not skew
-                    // placement. Physical coordinates also handle multiple monitors and avoid center() timing.
-                    let wa = monitor.work_area();
-                    let x = wa.position.x as f64 + (wa.size.width as f64 - w * scale) / 2.0;
-                    let y = wa.position.y as f64 + (wa.size.height as f64 - h * scale) / 2.0;
-                    let _ =
-                        win.set_position(tauri::PhysicalPosition::new(x.round() as i32, y.round() as i32));
-                }
+                window_layout::apply(&win);
             }
 
             // DevTools open only on demand from the development title-bar action.

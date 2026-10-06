@@ -5,7 +5,8 @@ import { kindIconEl } from "../../sessionViewers/sessionMeta";
 /** Keep sender names and workflow roles consistent before and after delivery. */
 export function messageSenderName(origin: MessageOrigin, t: ReturnType<typeof useT>): string {
   const role = origin.role === "plan" ? t("chat.origin.plan")
-    : origin.role === "exec" ? t("chat.origin.exec") : null;
+    : origin.role === "exec" ? t("chat.origin.exec")
+    : origin.role === "review" ? t("chat.origin.review") : null;
   return role ? `${origin.name} · ${role}` : origin.name;
 }
 

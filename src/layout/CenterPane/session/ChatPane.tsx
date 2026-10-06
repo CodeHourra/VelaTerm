@@ -57,7 +57,6 @@ import {
   chatDetach,
   chatRunShell,
   chatSnapshot,
-  chatRecoveryResume,
   chatCommands,
   chatStart,
   isTaskFinished,
@@ -114,7 +113,7 @@ import {
 } from "./toolRuns";
 import "./session-view.css";
 import { onTransportReconnect, onTransportDisconnect } from "../../../ipc/transport";
-import { useOutbox, emptySubmissions, acknowledgeSubmissions, createSubmission, deliverSubmission, retrySubmission, restoreSubmissions, submissionsFor, ChatVersions } from "./outbox";
+import { useOutbox, emptySubmissions, acknowledgeSubmissions, createSubmission, deliverSubmission, retrySubmission, submissionsFor, ChatVersions } from "./outbox";
 import { cachedChat, cacheChat, mergeRows, reconcileChat, chatSyncMetrics } from "./chatCache";
 import { ChatSearch } from "./ChatSearch";
 import { QueuedMessageText } from "./QueuedMessageText";
@@ -275,8 +274,6 @@ export function ChatPane({
   const refreshRef = useRef<() => Promise<void>>(async () => {});
   const prependScroll = useRef<{ height: number; top: number; anchor?: { id: string; offset: number } } | null>(null);
   const readingRestore = useRef<(() => void) | undefined>(undefined);
-  const [recovery, setRecovery] = useState<ChatSnapshot["recovery"]>();
-  const [recovering, setRecovering] = useState(false);
   const [submissionReceipts, setSubmissionReceipts] = useState<boolean | null>(null);
   const pendingSubmissions = useOutbox(state => state.sessions[session.id] ?? emptySubmissions);
   // Messages typed while the agent was busy. They belong to the backend, not to this pane: a second view
@@ -460,9 +457,6 @@ export function ChatPane({
     const handleEvent = (event: ChatEvent) => {
       if (disposed) return;
       switch (event.type) {
-        case "recoveryChanged":
-          void refresh();
-          break;
         case "rows":
           if (!versions.accept("rows", event.revision, event.epoch)) break;
           acknowledgeSubmissions(session.id, event.rows.map(row => row.id));
@@ -508,7 +502,6 @@ export function ChatPane({
           if (!versions.accept("queue", event.revision, event.epoch)) break;
           acknowledgeSubmissions(session.id, event.items.map(item => item.id));
           setQueue(event.items);
-          if (event.paused !== undefined) setRecovery((prev) => prev && ({ ...prev, queuePaused: event.paused! }));
           break;
         case "permission":
           setPermissions((prev) =>
@@ -557,7 +550,6 @@ export function ChatPane({
         // in this pane: without them it shows "—" for started, uptime, and this session's CPU.
         case "process":
           setEngineRunning(true);
-          setRecovery((prev) => prev && ({ ...prev, writerBlocked: false }));
           setRewindScopes(event.rewindScopes ?? []);
           useTermStore.getState().setRuntime(session.id, {
             // A session that has never run has no runtime record at all, and `status` is the one field
@@ -569,7 +561,6 @@ export function ChatPane({
           break;
         case "turnStarted":
           setActionFeedback("");
-          setRecovery((prev) => prev && ({ ...prev, interruptedId: undefined }));
           setTurnStartedAt(event.startedAt);
           break;
         case "steerAccepted":
@@ -588,7 +579,6 @@ export function ChatPane({
           setActionFeedback("");
           setEngineRunning(false);
           setTurnStartedAt(undefined);
-          void refresh();
           // A process the application let go — its view closed here or on another device — is not
           // the agent failing; the next message simply starts it again. An agent that failed its
           // handshake has already said why. That message is the one worth keeping; the exit that
@@ -649,12 +639,6 @@ export function ChatPane({
         if (disposed) return;
         const pendingEvents = buffered ?? [];
         const snapshot = reconcileChat(response, rowsRef.current, pendingEvents);
-        if (snapshot.recovery) {
-          await restoreSubmissions(session.id, snapshot.recovery.scope, snapshot.recovery.items.map(item => ({ ...item, recovered: true })));
-          if (disposed) return;
-          acknowledgeSubmissions(session.id, snapshot.recovery.confirmedIds, true);
-          setRecovery(snapshot.recovery);
-        }
         buffered = null;
         if (snapshot.startedAt === undefined || snapshot.startedAt >= versions.epoch) {
           setRows(snapshot.rows);
@@ -710,7 +694,7 @@ export function ChatPane({
           });
         }
         if (!snapshot.running) {
-          if (!snapshot.recovery?.writerBlocked) useTermStore.getState().setRuntime(session.id, { status: "idle", pid: undefined, startedAt: undefined });
+          useTermStore.getState().setRuntime(session.id, { status: "idle", pid: undefined, startedAt: undefined });
           // A conversation opens on the pair last chosen by hand: the model, and the effort that was
           // picked for that model. The snapshot of a process already running wins over both, because
           // whatever it was started with is what is actually answering.
@@ -753,7 +737,7 @@ export function ChatPane({
     const reconnect = onTransportReconnect(() => {
       void refresh().then(() => {
         if (!disposed && receiptsAvailable) for (const item of submissionsFor(session.id)) {
-          if (item.status === "unknown" && !item.recovered) void retrySubmission(session.id, item);
+          if (item.status === "unknown") void retrySubmission(session.id, item);
         }
       });
     });
@@ -1965,20 +1949,11 @@ export function ChatPane({
     if (!item) return null;
     return <div className="sv-submission-status" role="status">
       {t(`chat.submission.${item.status}`)}
-      {!readOnly && (item.status === "failed" || item.status === "unknown") && <button disabled={submissionReceipts !== true} onClick={() => item.recovered && item.status === "unknown" ? void refreshRef.current?.() : void retrySubmission(session.id, item, item.status === "failed" && !engineRunning ? startAgent : undefined)}>
+      {!readOnly && (item.status === "failed" || item.status === "unknown") && <button disabled={submissionReceipts !== true} onClick={() => void retrySubmission(session.id, item, item.status === "failed" && !engineRunning ? startAgent : undefined)}>
         {t(item.status === "unknown" ? "chat.submission.check" : "common.retry")}
       </button>}
       {item.error && !isAgentNotInstalledError(item.error) && <ErrorRow message={item.error} />}
     </div>;
-  };
-
-  const resumeRecovery = async (interruptedId?: string) => {
-    setRecovering(true);
-    try {
-      await chatRecoveryResume(session.id, interruptedId);
-      await refreshRef.current?.();
-    } catch (err) { setError(String(err)); }
-    finally { setRecovering(false); }
   };
 
   // Every chip that exists for this session, in the toolbar's traditional order. The toolbar applies the
@@ -2321,19 +2296,8 @@ export function ChatPane({
                   {submissionFeedback(entry.id)}
                 </div>
               ))}
-              {!readOnly && recovery && (recovery.interruptedId || recovery.queuePaused || recovery.writerBlocked) && (
-                <div className="sv-item"><div className="sv-recovery" role="status">
-                  <div>{t(recovery.writerBlocked ? "chat.recovery.writerBlocked" : recovery.interruptedId ? "chat.recovery.interrupted" : "chat.recovery.paused")}</div>
-                  {!recovery.writerBlocked && recovery.interruptedId && recovery.queuePaused && <div>{t("chat.recovery.paused")}</div>}
-                  <div className="sv-recovery-actions">
-                    {recovery.queuePaused && <button type="button" className="vlx-btn" disabled={recovering || recovery.writerBlocked} onClick={() => void resumeRecovery()}>{t("chat.recovery.resumeQueue")}</button>}
-                    {recovery.interruptedId && !recovery.queuePaused && <button type="button" className="vlx-btn" disabled={recovering || recovery.writerBlocked} onClick={() => void resumeRecovery(recovery.interruptedId)}>{t("chat.recovery.continue")}</button>}
-                  </div>
-                </div></div>
-              )}
               {pendingSubmissions.filter(item => !rows.some(row => row.id === item.id) && !queue.some(queued => queued.id === item.id)).map(item => (
                 <div className="sv-item sv-submission" key={item.id} data-submission-id={item.id}>
-                  {item.recovered && item.status === "sent" && <div className="sv-submission-status">{t("chat.recovery.savedSubmission")}</div>}
                   <Entry entry={{ kind: "row", id: item.id, row: { kind: "user", id: item.id, text: item.text, images: item.images } }}
                     label={label} icon={kindIcon} cwd={cwd} openRuns={openRuns} onToggleRun={toggleRun}
                     rewindScopes={[]} rewindRequest={null} onRewindRequestHandled={finishRewindRequest} />
@@ -2516,7 +2480,7 @@ export function ChatPane({
                             <QueuedMessageText
                               text={queuedShellCommand(item) ?? item.text}
                               origin={item.origin}
-                              disabled={steeringQueue || recovery?.writerBlocked || queuedShellCommand(item) !== null}
+                              disabled={steeringQueue || queuedShellCommand(item) !== null}
                               onEdit={() => setEditing({ id: item.id, text: item.text })}
                             />
                           )}
@@ -2543,7 +2507,7 @@ export function ChatPane({
                       </button>}
                       <button
                         className="sv-queue-drop"
-                        disabled={steeringQueue || recovery?.writerBlocked}
+                        disabled={steeringQueue}
                         title={t("chat.queue.remove")}
                         aria-label={t("chat.queue.remove")}
                         onClick={() => removeQueued(item.id)}

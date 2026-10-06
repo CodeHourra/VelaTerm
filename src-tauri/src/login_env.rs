@@ -139,7 +139,6 @@ pub(crate) fn latest_terminal_environment(shell: &str, cwd: Option<&std::path::P
 }
 
 fn latest_environment_with_policy(shell: Option<&str>, cwd: Option<&std::path::Path>, agent: bool) -> Option<SessionEnvironment> {
-    #[cfg(unix)]
     let _ = agent;
     #[cfg(unix)]
     {
@@ -160,9 +159,10 @@ fn latest_environment_with_policy(shell: Option<&str>, cwd: Option<&std::path::P
         let initial = INITIAL_SYSTEM.get_or_init(|| windows_environment().unwrap_or_default());
         let current = windows_environment()?;
         let entries = merge_system_environment(baseline(), initial, &current);
-        let configured = windows_shell_environment(shell, &entries, cwd, agent).unwrap_or_else(|| entries.clone());
-        let mut environment = SessionEnvironment::from_entries(configured);
-        environment.shell_baseline = SessionEnvironment::from_entries(entries).entries;
+        // Windows uses the rebuilt system settings only; no hidden shell is started to read profiles.
+        let _ = (shell, cwd);
+        let mut environment = SessionEnvironment::from_entries(entries);
+        environment.shell_baseline = environment.entries.clone();
         Some(environment)
     }
 }
@@ -206,6 +206,7 @@ pub(crate) fn captured_environment(stdout: &[u8], begin: &str, end: &str) -> Opt
     Some(entries)
 }
 
+#[cfg(unix)]
 fn capture_body<'a>(stdout: &'a [u8], begin: &str, end: &str) -> Option<&'a [u8]> {
     let start = stdout.windows(begin.len()).position(|part| part == begin.as_bytes())? + begin.len();
     let rest = &stdout[start..];
@@ -305,118 +306,9 @@ fn windows_path(block: &[u16]) -> Option<&[u16]> {
         !val.is_empty() && String::from_utf16_lossy(key).eq_ignore_ascii_case("PATH")).map(|(_, val)| val)
 }
 
-/// Capture shell-profile exports on top of freshly rebuilt Windows settings. The ASCII envelope avoids
-/// PowerShell/cmd code-page changes corrupting Unicode or multiline values; no environment is logged.
-#[cfg(windows)]
-fn windows_shell_environment(shell: Option<&str>, entries: &Entries, cwd: Option<&std::path::Path>, agent: bool) -> Option<Entries> {
-    use base64::Engine;
-    use crate::agent::inject::{shell_kind, ShellKind};
-    let root = value(entries, OsStr::new("SystemRoot"))?;
-    let helper = std::path::Path::new(root).join("System32/WindowsPowerShell/v1.0/powershell.exe");
-    let shell = shell.filter(|s| !s.is_empty()).map(OsString::from).unwrap_or_else(|| helper.as_os_str().into());
-    // cmd parses its own executable token before /C; forward slashes can be mistaken for switches.
-    let shell = if shell_kind(&shell.to_string_lossy()) == ShellKind::Cmd {
-        OsString::from(shell.to_string_lossy().replace('/', "\\"))
-    } else { shell };
-    let nonce = uuid::Uuid::new_v4().simple().to_string();
-    let begin = format!("VLX_ENV_{nonce}");
-    let end = format!("VLX_ENV_END_{nonce}");
-    let script = format!("$e=[Environment]::GetEnvironmentVariables('Process'); $j=ConvertTo-Json -InputObject $e -Compress; [Console]::Write('{begin}'+[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($j))+'{end}')");
-    let encoded = base64::engine::general_purpose::STANDARD.encode(script.encode_utf16().flat_map(u16::to_le_bytes).collect::<Vec<_>>());
-    let mut command = crate::host::command(&shell);
-    command.env_clear().envs(entries.iter().map(|(k, v)| (k, v)));
-    if let Some(cwd) = cwd { command.current_dir(cwd); }
-    match shell_kind(&shell.to_string_lossy()) {
-        ShellKind::PowerShell | ShellKind::Pwsh => {
-            // Match the existing typed-session policy; plain terminal probes keep the native policy.
-            if agent { command.args(["-ExecutionPolicy", "Bypass"]); }
-            command.args(["-NoLogo", "-NonInteractive", "-EncodedCommand", &encoded]);
-        }
-        ShellKind::Cmd => {
-            use std::os::windows::process::CommandExt;
-            command.raw_arg(format!("/S /C \"\"{}\" -NoLogo -NoProfile -NonInteractive -EncodedCommand {encoded}\"", helper.display()));
-        }
-        ShellKind::Posix | ShellKind::Fish => {
-            if let Some(msystem) = crate::agent::gitbash::msystem_for_bash(std::path::Path::new(&shell)) {
-                command.env("MSYSTEM", msystem);
-            }
-            let path = helper.to_string_lossy().replace('\\', "/").replace('\'', "'\\''");
-            command.args(["-lic", &format!("'{path}' -NoLogo -NoProfile -NonInteractive -EncodedCommand {encoded}")]);
-        }
-    }
-    let output = windows_probe_output(command)?;
-    captured_windows_environment(&output, &begin, &end)
-}
-
-#[cfg(any(windows, test))]
-fn captured_windows_environment(output: &[u8], begin: &str, end: &str) -> Option<Entries> {
-    use base64::Engine;
-    let body = capture_body(output, begin, end)?;
-    let bytes = base64::engine::general_purpose::STANDARD.decode(body).ok()?;
-    if bytes.len() % 2 != 0 { return None; }
-    let wide = bytes.chunks_exact(2).map(|pair| u16::from_le_bytes([pair[0], pair[1]])).collect::<Vec<_>>();
-    let json = String::from_utf16(&wide).ok()?;
-    let values: std::collections::BTreeMap<String, String> = serde_json::from_str(&json).ok()?;
-    Some(values.into_iter().filter(|(key, _)| !key.is_empty() && !key.contains('=')).map(|(k, v)| (k.into(), v.into())).collect())
-}
-
-#[cfg(windows)]
-fn windows_probe_output(mut command: std::process::Command) -> Option<Vec<u8>> {
-    use std::io::Read;
-    use std::os::windows::process::CommandExt;
-    use std::process::Stdio;
-    use std::time::{Duration, Instant};
-    use windows::Win32::System::Threading::{CREATE_NO_WINDOW, CREATE_SUSPENDED};
-    let job = crate::agent::chat::shell::windows::Job::new().ok()?;
-    command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null())
-        .creation_flags(CREATE_NO_WINDOW.0 | CREATE_SUSPENDED.0);
-    let mut child = command.spawn().ok()?;
-    if job.assign_and_resume(&child).is_err() {
-        let _ = child.kill();
-        let _ = child.wait();
-        return None;
-    }
-    let mut stdout = child.stdout.take()?;
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let mut output = Vec::new();
-        let mut buffer = [0u8; 4096];
-        loop {
-            let Ok(count) = stdout.read(&mut buffer) else { break; };
-            if count == 0 { break; }
-            output.extend_from_slice(&buffer[..count]);
-            if output.len() > CAPTURE_LIMIT { output.drain(..output.len() - CAPTURE_LIMIT); }
-        }
-        let _ = tx.send(output);
-    });
-    let deadline = Instant::now() + Duration::from_secs(3);
-    let success = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status.success(),
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
-            _ => break false,
-        }
-    };
-    job.terminate();
-    let _ = child.wait();
-    if !success { return None; }
-    rx.recv_timeout(Duration::from_millis(500)).ok()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[cfg(windows)]
-    #[test]
-    fn cmd_capture_accepts_forward_slash_executable_paths() {
-        let entries = windows_environment().expect("Could not rebuild the Windows environment");
-        let root = value(&entries, OsStr::new("SystemRoot")).unwrap();
-        let shell = std::path::Path::new(root).join("System32/cmd.exe").to_string_lossy().replace('\\', "/");
-        let captured = windows_shell_environment(Some(&shell), &entries, None, false)
-            .expect("cmd did not execute the environment capture command");
-        assert_eq!(value(&captured, OsStr::new("SystemRoot")), Some(root));
-    }
 
     #[test]
     fn windows_environment_path_is_case_insensitive_and_keeps_unicode() {
@@ -428,23 +320,6 @@ mod tests {
         assert_eq!(windows_path(&empty), None);
         let absent = "PATHEXT=.EXE;.CMD\0\0".encode_utf16().collect::<Vec<_>>();
         assert_eq!(windows_path(&absent), None);
-    }
-
-    #[test]
-    fn windows_capture_ignores_non_utf8_banners_and_keeps_all_values() {
-        use base64::Engine;
-        let values = serde_json::json!({"API_KEY":"fixture-key-中文", "MULTI":"line1\nline2=value", "EMPTY":""});
-        let wide = values.to_string().encode_utf16().flat_map(u16::to_le_bytes).collect::<Vec<_>>();
-        let encoded = base64::engine::general_purpose::STANDARD.encode(wide);
-        let begin = "VLX_WIDE_BEGIN";
-        let end = "VLX_WIDE_END";
-        let output = [b"banner\xff\xa3".as_slice(), begin.as_bytes(), encoded.as_bytes(), end.as_bytes(), b"tail\xff".as_slice()].concat();
-        let entries = captured_windows_environment(&output, begin, end).unwrap();
-        assert_eq!(value(&entries, OsStr::new("API_KEY")), Some(OsStr::new("fixture-key-中文")));
-        assert_eq!(value(&entries, OsStr::new("MULTI")), Some(OsStr::new("line1\nline2=value")));
-        assert_eq!(value(&entries, OsStr::new("EMPTY")), Some(OsStr::new("")));
-        assert!(captured_windows_environment(b"VLX_WIDE_BEGINinvalidVLX_WIDE_END", begin, end).is_none());
-        assert!(captured_windows_environment(&output[..output.len() - end.len() - 5], begin, end).is_none());
     }
 
     #[test]
@@ -534,8 +409,9 @@ mod tests {
                 environment.apply_command(&mut command);
                 let output = command.output().unwrap();
                 assert!(output.status.success());
-                let framed = [b"BEGIN".as_slice(), &output.stdout, b"END".as_slice()].concat();
-                captured_environment(&framed, "BEGIN", "END").unwrap()
+                // Session variables such as VLX_PATH_APPEND reach the child, so a bare "END" marker can match inside them.
+                let framed = [BEGIN.as_bytes(), &output.stdout, END.as_bytes()].concat();
+                captured_environment(&framed, BEGIN, END).unwrap()
             };
             let first_child = run(&first);
             assert_eq!(value(&first_child, OsStr::new("FIXTURE_API_KEY")), Some(OsStr::new("first")));
@@ -595,15 +471,7 @@ mod tests {
         let output = std::process::Command::new("vlx-path-fixture").env("PATH", &current).output().unwrap();
         assert!(output.status.success());
         assert_eq!(output.stdout, b"CURRENT_PATH_OK");
-
-        let (state, _) = crate::pty::completion::install(&root, "/bin/bash").unwrap().unwrap();
-        let rcfile = crate::pty::completion::configure_bash_startup(&state, &[], Some(&current)).unwrap();
-        let output = std::process::Command::new("/bin/bash").env_clear().env("HOME", &home).env("PATH", before)
-            .arg("--rcfile").arg(rcfile).args(["-ic", "vlx-path-fixture"]).output().unwrap();
-        assert!(output.status.success());
-        assert!(output.stdout.ends_with(b"CURRENT_PATH_OK"));
         assert_eq!(std::env::var_os("PATH"), inherited, "the application environment was never mutated");
-        drop(state);
         std::fs::remove_dir_all(root).unwrap();
     }
 

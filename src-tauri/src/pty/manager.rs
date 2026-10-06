@@ -502,7 +502,6 @@ impl PtyManager {
         let (mut agent_binaries, environment) = crate::agent::executable::terminal_environment(
             &app, &shell, spawn_cwd.as_deref().map(std::path::Path::new), kind != SessionKind::Terminal,
         );
-        let current_path = environment.as_ref().and_then(|env| env.path());
         if let Some(environment) = environment { environment.apply_pty(&mut cmd); }
         // A PTY inherits this process's environment, which on Linux still carries the AppImage launcher's
         // rewrite of `PYTHONHOME`, `LD_LIBRARY_PATH`, `PATH`, and friends. Undo it before anything else so
@@ -643,13 +642,7 @@ impl PtyManager {
         // Refresh all supported installations at spawn time. Configured defaults and presets share the same
         // validation, and shared npm-prefix probes serve all npm agents. Never cache a pre-install absence.
         if let Some(path) = &bin_path { agent_binaries.insert(0, path.clone()); }
-        let mut agent_bin_dirs = crate::agent::executable::binary_dirs(&agent_binaries);
-        // Keep interactive-only PATH entries available even when Bash's login profile omits .bashrc.
-        if let Some(path) = &current_path {
-            for dir in std::env::split_paths(path).filter(|dir| dir.is_absolute() && dir.is_dir()) {
-                if !agent_bin_dirs.contains(&dir) { agent_bin_dirs.push(dir); }
-            }
-        }
+        let agent_bin_dirs = crate::agent::executable::binary_dirs(&agent_binaries);
         crate::agent::executable::prepare_pty(&mut cmd, &agent_bin_dirs);
         // Lazily install the state-bridge extension of whichever agent loads one through `-e`: Pi's under
         // `<data_dir>/pi/`, OMP's under `<data_dir>/omp/`. The static extension reads the session's injected
@@ -898,8 +891,8 @@ impl PtyManager {
                 match stem.as_str() {
                     // Both shells load the integration from a startup file, leaving nothing on screen. Every
                     // other shell has no such hook and receives the bootstrap command as terminal input.
-                    "zsh" => super::completion::configure_zsh_startup(&state, &mut cmd, &agent_binaries, current_path.as_deref())?,
-                    "bash" => bash_rcfile = Some(super::completion::configure_bash_startup(&state, &agent_binaries, current_path.as_deref())?),
+                    "zsh" => super::completion::configure_zsh_startup(&state, &mut cmd, &agent_binaries)?,
+                    "bash" => bash_rcfile = Some(super::completion::configure_bash_startup(&state, &agent_binaries)?),
                     _ => launch = Some(command),
                 }
                 completion_state = state;
@@ -920,8 +913,11 @@ impl PtyManager {
         // runs so profile PATH resets cannot hide an adjacent Node runtime or a newly installed command.
         if kind != SessionKind::Terminal && inject::shell_kind(&shell) == inject::ShellKind::Posix {
             if let Some(command) = launch.as_mut() {
-                let paths = crate::agent::executable::path_startup_script(&agent_bin_dirs);
-                if !paths.is_empty() { command.insert_str(0, &format!("{} ", paths.trim_end())); }
+                let paths = crate::agent::executable::path_append_value(&agent_bin_dirs);
+                if !paths.is_empty() {
+                    cmd.env(crate::agent::executable::PATH_APPEND_VAR, paths);
+                    command.insert_str(0, &format!("{} ", crate::agent::executable::PATH_APPEND_COMMAND));
+                }
             }
         }
 

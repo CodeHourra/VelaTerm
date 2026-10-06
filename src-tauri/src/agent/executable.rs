@@ -327,18 +327,41 @@ pub(crate) fn prepare_pty(command: &mut portable_pty::CommandBuilder, dirs: &[st
 /// Only quoted configuration and backend-validated directory literals enter this startup script.
 pub(crate) fn path_startup_script(dirs: &[std::path::PathBuf]) -> String {
     if dirs.is_empty() { return String::new(); }
-    let dirs = dirs.iter().map(|dir| {
-        let path = dir.to_string_lossy();
-        #[cfg(windows)]
-        let path = posix_windows_path(&path);
-        format!("'{}'", path.replace('\'', "'\\''"))
-    })
+    let dirs = dirs.iter().map(|dir| format!("'{}'", posix_dir(dir).replace('\'', "'\\''")))
         .collect::<Vec<_>>().join(" ");
     format!(
         "for _vlx_path_bin in {dirs}; do case \":${{PATH-}}:\" in \
          *\":$_vlx_path_bin:\"*) ;; *) export PATH=\"${{PATH:+$PATH:}}$_vlx_path_bin\" ;; \
          esac; done; unset _vlx_path_bin;\n"
     )
+}
+
+/// Environment variable through which a typed launch receives the directories `PATH_APPEND_COMMAND` reapplies.
+pub(crate) const PATH_APPEND_VAR: &str = "VLX_PATH_APPEND";
+
+/// Typed launch prefix that appends each `PATH_APPEND_VAR` entry missing from PATH. The directories travel in
+/// the environment rather than on the command line because macOS discards terminal input beyond 1024 bytes on
+/// one line before the shell's line editor starts, and a long PATH would cut the launch command short.
+/// Splitting by parameter expansion behaves the same in sh, Bash and zsh, which does not word-split `$VAR`.
+pub(crate) const PATH_APPEND_COMMAND: &str = "_vlx_path_rest=${VLX_PATH_APPEND-}; \
+    while [ -n \"$_vlx_path_rest\" ]; do _vlx_path_bin=${_vlx_path_rest%%:*}; \
+    case \"$_vlx_path_rest\" in *:*) _vlx_path_rest=${_vlx_path_rest#*:} ;; *) _vlx_path_rest= ;; esac; \
+    case \":${PATH-}:\" in *\":$_vlx_path_bin:\"*) ;; *) export PATH=\"${PATH:+$PATH:}$_vlx_path_bin\" ;; esac; \
+    done; unset _vlx_path_bin _vlx_path_rest;";
+
+/// Value for `PATH_APPEND_VAR`: POSIX directory paths joined by `:`. A directory containing `:` cannot be a
+/// PATH entry, so it is skipped.
+pub(crate) fn path_append_value(dirs: &[std::path::PathBuf]) -> String {
+    dirs.iter().map(|dir| posix_dir(dir)).filter(|dir| !dir.is_empty() && !dir.contains(':'))
+        .collect::<Vec<_>>().join(":")
+}
+
+/// A directory as the POSIX shell spells it: Git Bash takes Windows paths in its own drive syntax.
+fn posix_dir(dir: &Path) -> String {
+    let path = dir.to_string_lossy();
+    #[cfg(windows)]
+    let path = posix_windows_path(&path);
+    path.to_string()
 }
 
 #[cfg(any(windows, test))]
@@ -552,6 +575,29 @@ mod tests {
         assert_eq!(posix_windows_path(r"\\?\D:\tools\bin"), "/d/tools/bin");
         assert_eq!(posix_windows_path(r"\\?\UNC\host\share\bin"), "//host/share/bin");
         assert_eq!(posix_windows_path(r"\\host\share\bin"), "//host/share/bin");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn typed_path_append_stays_short_and_appends_missing_dirs_in_every_shell() {
+        // Many long directories must not lengthen the typed command past the terminal's line limit.
+        let mut dirs: Vec<_> = (0..64).map(|i| std::path::PathBuf::from(format!("/opt/long directory/it's {i}/bin"))).collect();
+        dirs.push("/usr/bin".into());
+        dirs.push("/bad:dir".into());
+        assert!(PATH_APPEND_COMMAND.len() < 512);
+        let value = path_append_value(&dirs);
+        assert!(!value.contains("/bad"));
+        let expected = format!("/usr/bin:/bin:{}", dirs[..64].iter().map(|dir| dir.to_string_lossy())
+            .collect::<Vec<_>>().join(":"));
+        // zsh reads `.zshenv` even for `-c`; `-f` keeps the user's startup files out of the comparison.
+        for (shell, flag) in [("/bin/sh", "-c"), ("/bin/bash", "-c"), ("/bin/zsh", "-fc")] {
+            if !Path::new(shell).exists() { continue; }
+            let output = std::process::Command::new(shell)
+                .env_clear().env("PATH", "/usr/bin:/bin").env(PATH_APPEND_VAR, &value)
+                .args([flag, &format!("{PATH_APPEND_COMMAND} printf '%s' \"$PATH\"")]).output().unwrap();
+            assert!(output.status.success(), "{shell}");
+            assert_eq!(String::from_utf8(output.stdout).unwrap(), expected, "{shell}");
+        }
     }
 
     #[cfg(unix)]

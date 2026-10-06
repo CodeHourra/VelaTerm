@@ -17,6 +17,7 @@ import Icons from "../../components/Icons";
 import { dateLocale, useT } from "../../i18n";
 import type { TranscriptMessage } from "../../ipc/commands";
 import type { Session } from "../../types";
+import { messageSenderName } from "../CenterPane/session/MessageSender";
 import { MessageBubble } from "../CenterPane/session/rows";
 import { UserMessageRail } from "../CenterPane/session/UserMessageRail";
 import { userMessagePreview } from "../CenterPane/session/userMessageRailItems";
@@ -139,7 +140,7 @@ export function TranscriptViewer({
           const origin = m.origin;
           const who = isUser
             ? origin
-              ? `${origin.name}${origin.role === "plan" || origin.role === "exec" ? ` · ${t(origin.role === "plan" ? "chat.origin.plan" : "chat.origin.exec")}` : ""}`
+              ? messageSenderName(origin, t)
               : t("archive.you")
             : label;
           return (

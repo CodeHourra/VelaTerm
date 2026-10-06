@@ -15,7 +15,11 @@ vi.mock("../ipc/commands", () => ({
   ptyWrite: vi.fn().mockResolvedValue(undefined),
   listShells: vi.fn().mockResolvedValue([]),
 }));
-vi.mock("../ipc/tree", () => ({ listTree: vi.fn().mockResolvedValue({ projects: [], groups: [], sessions: [] }) }));
+vi.mock("../ipc/tree", () => ({
+  listTree: vi.fn().mockResolvedValue({ projects: [], groups: [], sessions: [] }),
+  createSession: vi.fn(),
+  setCollapsed: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("../notify", () => ({
   notify: vi.fn(),
   getNotifyPermission: vi.fn().mockResolvedValue("granted"),
@@ -25,6 +29,7 @@ vi.mock("../notify", () => ({
 }));
 
 import { useTermStore } from "./termStore";
+import * as tree from "../ipc/tree";
 import { effectiveStatus } from "../types";
 import type { Session } from "../types";
 
@@ -299,6 +304,47 @@ describe("membership updates for the sidebar status filter", () => {
     useTermStore.getState().refreshSidebarTreeViewStatusMatch("main", newlyMatchingId);
 
     // Only the refreshed row leaves; the equally stale one stays until it is refreshed itself.
+    expect(useTermStore.getState().statusFilterIds).toEqual({ [staleId]: true });
+  });
+
+  it("keeps a newly created session in every status-filtered view until it is refreshed", async () => {
+    const createdId = "filter-created";
+    vi.mocked(tree.createSession).mockResolvedValueOnce(filterSession(createdId));
+    useTermStore.setState((state) => ({
+      sidebarTreeViews: [
+        ...state.sidebarTreeViews,
+        {
+          id: "split",
+          name: "Split",
+          treeFilter: "",
+          statusFilter: ["waiting"],
+          statusFilterIds: {},
+          markFilter: null,
+          collapsedOverrides: null,
+        },
+        {
+          id: "plain",
+          name: "Plain",
+          treeFilter: "",
+          statusFilter: null,
+          statusFilterIds: null,
+          markFilter: null,
+          collapsedOverrides: null,
+        },
+      ],
+    }));
+
+    await useTermStore.getState().addSession({ projectId: "p", groupId: null, name: "New" });
+
+    const state = useTermStore.getState();
+    expect(state.statusFilterIds).toEqual({ [staleId]: true, [createdId]: true });
+    const byId = new Map(state.sidebarTreeViews.map((view) => [view.id, view]));
+    expect(byId.get("main")?.statusFilterIds).toEqual({ [staleId]: true, [createdId]: true });
+    expect(byId.get("split")?.statusFilterIds).toEqual({ [createdId]: true });
+    expect(byId.get("plain")?.statusFilterIds).toBeNull();
+
+    // The new session is idle, so a refresh drops it like any other stale member.
+    useTermStore.getState().refreshSidebarTreeViewStatusMatch("main", createdId);
     expect(useTermStore.getState().statusFilterIds).toEqual({ [staleId]: true });
   });
 

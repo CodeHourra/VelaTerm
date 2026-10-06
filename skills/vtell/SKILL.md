@@ -65,20 +65,21 @@ vtell <planner-session> --report --round N --message-id msg-UUID < result.txt
 ```
 
 Read `vflow status <workflow-id>` to obtain the current round. `--report` is for the assigned executor:
-it sends the result to its planner and moves that round to review. The backend finds the planner from
-the workflow; an explicit target must resolve to that same planner. When omitting the target, supply
+the backend routes one submission according to the saved review setting. With independent review enabled, the full report goes to Review and a progress/reference notice to Plan, entering `reviewing`. With review disabled, the full report goes to Plan, entering `summarizing`; Plan does not perform technical review. Legacy workflows without a review setting retain planner review. An explicit target must resolve to the saved planner or reviewer. When omitting the target, supply
 the report on stdin. Use the recorded round, not a guessed or incremented value.
 
 A `blocked` workflow still accepts ordinary messages and the assigned executor's current-round report.
-Submitting that report moves the workflow to review without another dispatch or a round increment.
+Submitting that report enters the appropriate review or summary phase without another dispatch or a round increment.
 Progress updates use ordinary `vtell` and leave the workflow state unchanged. A completed or explicitly
 stopped workflow cannot accept a new execution report.
 
 Include changed files, what changed, checks actually run and their results, remaining omissions and
 review evidence. Submit only when this round is ready for review. Reporting is the last action that
-affects the work: do not edit files afterward, because the planner can begin reviewing immediately.
+affects the work: do not edit files afterward, because the reviewer may inspect them immediately.
 End the turn and wait for feedback in the same conversation. A real blocker still uses `vflow block`.
-Planning, dispatch, acceptance, stopping and status remain `vflow` operations.
+Planning, dispatch, review acceptance, final summary (`finish`), stopping and status remain `vflow` operations.
+
+When independent review is enabled, inspect the returned `deliveries` for both targets. Each target uses a stable submission ID, and retries with the original report ID preserve already-successful deliveries.
 
 ## Receipts and retries
 

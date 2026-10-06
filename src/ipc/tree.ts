@@ -199,11 +199,15 @@ export function deleteNode(kind: NodeKind, id: string): Promise<void> {
 }
 
 /** Generate and save a title from the backend's complete conversation snapshot. */
-export function renameSessionWithAgent(sessionId: string, agent?: SessionKind): Promise<{ title: string; agent: SessionKind }> {
-  return invoke("rename_session_with_agent", { sessionId, ...(agent ? { agent } : {}) });
+export function renameSessionWithAgent(sessionId: string, agent?: SessionKind, model?: string, effort?: string): Promise<{ title: string; agent: SessionKind }> {
+  return invoke("rename_session_with_agent", { sessionId, ...(agent ? { agent } : {}),
+    ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}) });
 }
 
-export function sessionTitleOptions(sessionId: string): Promise<{ agents: (import("./launch").LaunchOption & { available: boolean })[] }> {
+export function sessionTitleOptions(sessionId: string): Promise<{
+  agents: (import("./launch").LaunchOption & { available: boolean; model: string; effort: string })[];
+  agent: SessionKind | ""; sessionName: string;
+}> {
   return invoke("session_title_options", { sessionId });
 }
 

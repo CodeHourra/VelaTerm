@@ -1,7 +1,7 @@
 ---
 name: vflow
 description: >-
-  Query VelaTerm plan-execute workflows by session: find planner and executor IDs, tasks, states,
+  Query VelaTerm plan-execute workflows by session: find planner, executor and optional reviewer IDs, tasks, states,
   rounds, delivery receipts and saved session properties. Use when a workflow ID is unknown or the
   user asks which execute sessions belong to a plan session. Lookup is read-only; it does not dispatch,
   message, stop or accept work.
@@ -26,7 +26,7 @@ Read the JSON result:
 - `session`, `parent`, `ancestors`, `children`: the resolved session, its parent, ancestor chain and
   actual direct children, with saved properties and per-session settings.
 - `workflows`: associated overall workflows, including saved configuration, state, round, latest
-  handoff summary, planner, executor, recent delivery receipts, and split `tasks`.
+  handoff summary, review configuration/status, planner, executor, optional reviewer, recent delivery receipts, and split `tasks`.
 - `workflows[].tasks`: each task's name, prompt, independent workflow ID, state, round, and executor.
 - `workflowIds` on a session: its direct workflow memberships; `parentSessionId` records its tree parent.
 
@@ -42,12 +42,12 @@ arguments. Null means the value was not saved; do not invent an effective defaul
 `redactedFields` identifies masked launch input, environment values and URL credentials/query/fragment.
 Environment variable names remain visible. These masked values are not evidence that a setting is empty.
 
-For complete reports or tool history, use `vrefer <executor-session-id>`; summaries can be truncated.
+Workflow members can read a saved complete execution report with `vflow read-report <workflow-id> --message-id msg-UUID`. This does not dispatch or review work. For tool history, use `vrefer <executor-session-id>`; summaries can be truncated.
 For ordinary session hierarchy or properties without workflow details, use `vself [session] --json`.
 
 Inside a workflow member session, `vflow status <workflow-id>` reads that workflow's detailed status.
-Unlike `list`, `status` requires the caller to be its owner, planner or executor. Existing dispatch,
-stop, block and accept commands retain their role and round checks. Read-only lookup does not authorize
+Unlike `list`, `status` requires the caller to be its owner, planner, executor or reviewer. Existing dispatch,
+stop, block, accept and finish commands retain their role and round checks. Read-only lookup does not authorize
 those actions. For an already authorized planning/execution handoff, read
 `../vspawn/references/plan-execute.md` and follow that protocol.
 

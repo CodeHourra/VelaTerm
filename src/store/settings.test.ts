@@ -85,11 +85,11 @@ describe("planExecutePrefs sanitization", () => {
       SETTINGS_KEY,
       JSON.stringify({ planExecutePrefs: { plan: { agent: "codex", model: 7, effort: "high" }, exec: "nonsense" } }),
     );
-    expect(loadSettings().planExecutePrefs).toEqual({ plan: { agent: "codex", effort: "high" }, exec: {} });
+    expect(loadSettings().planExecutePrefs).toEqual({ plan: { agent: "codex", effort: "high" }, exec: {}, review: {} });
   });
 
   it("defaults to empty roles when nothing was saved", () => {
-    expect(loadSettings().planExecutePrefs).toEqual({ plan: {}, exec: {} });
+    expect(loadSettings().planExecutePrefs).toEqual({ plan: {}, exec: {}, review: {} });
   });
 });
 

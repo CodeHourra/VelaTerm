@@ -1,3 +1,35 @@
+## v0.2.8 — 2026-10-06
+
+- 🪟 Windows: al volver a la ventana, el foco del teclado se mantiene donde está si ya se encuentra dentro de la página.
+
+- 🛡️ Windows: el antivirus Huorong ya no detecta VelaTerm ni vela-server como `Trojan/MSIL.ShellLoader.q`.
+
+- 🔕 Windows: al crear sesiones y actualizar la lista de modelos ya no se ejecuta PowerShell en segundo plano, y el estado de las sesiones de Cursor ahora se determina a partir de la salida del terminal, lo que puede ser algo menos preciso.
+
+- ⛔ Windows: en la vista de conversación, las entradas que empiezan por `!` ya no se ejecutan como comandos de shell; aparece un aviso y la entrada se conserva, mientras que los comandos anteriores del historial siguen mostrándose.
+
+- 🔐 Las conexiones SSH a hosts Windows con el servidor OpenSSH integrado ya no inician PowerShell con `-EncodedCommand`.
+
+- 🚀 Las sesiones de agentes TUI se inician correctamente aunque el PATH sea largo, sin mostrar un comando de inicio truncado en el terminal.
+
+- ⬇️ Las sesiones de agentes TUI vuelven al final cuando termina un turno o el agente solicita una aprobación, salvo que esté consultando la salida anterior.
+
+- 💾 Se ha retirado la recuperación experimental de conversaciones de la v0.2.7: Chat ya no muestra mensajes Saved submission duplicados ni avisos de interrupción, y los mensajes en cola no enviados ya no se conservan tras un reinicio.
+
+- 🔁 Los flujos de trabajo de planificación y ejecución incorporan un rol Review independiente y opcional, activado de forma predeterminada en los nuevos flujos, con su propio agente, modelo y nivel de razonamiento; `vspawn --plan-execute` admite `--review`, `--no-review`, `--review-agent`, `--review-model` y `--review-effort`.
+
+- 🏷️ «Renombrar con IA…» pide confirmación antes de empezar y permite elegir el agente, el modelo y el nivel de razonamiento para ese cambio de nombre; el cuadro de diálogo aparece centrado mientras se cargan las opciones.
+
+- 🔍 Las sesiones, los grupos y los proyectos se pueden arrastrar mientras hay activa una búsqueda por nombre, un filtro de estado o un filtro de marca.
+
+- ➕ Con un filtro de estado activo, una sesión nueva permanece bajo su grupo o sesión principal hasta que se actualice el estado o se cambie el filtro.
+
+- 🪟 Las ventanas de la aplicación se abren más grandes de forma predeterminada, según el área disponible de la pantalla, y las ventanas de conexión se abren centradas en la pantalla de la ventana principal.
+
+- 🎨 Las colecciones tienen un nuevo icono de capas apiladas, los iconos de la barra de título oscura son algo más tenues, los cuatro botones de la barra lateral vacía tienen el mismo ancho y los cuadros de diálogo de formulario usan un único estilo de etiqueta.
+
+---
+
 ## v0.2.7 — 2026-10-05
 
 - 🪐 Antigravity se incorpora a la vista de conversación como agente experimental con texto, herramientas, mensajes en cola e historial nativo; las imágenes, las instrucciones durante una respuesta, las aprobaciones interactivas, la bifurcación y el retroceso siguen sin estar disponibles, y queda pendiente la validación completa de la recuperación en todas las plataformas.

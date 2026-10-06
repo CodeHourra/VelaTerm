@@ -488,7 +488,7 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
         "session_title_options" => to_value(crate::agent::session_title::options(app, &req_str(args, "sessionId")?)?),
         "rename_session_with_agent" => to_value(crate::agent::session_title::rename(app, &req_str(args, "sessionId")?,
             opt_str(args, "agent").map(|kind| serde_json::from_value::<SessionKind>(Value::String(kind))
-                .map_err(|e| e.to_string())).transpose()?)?),
+                .map_err(|e| e.to_string())).transpose()?, opt_str(args, "model").as_deref(), opt_str(args, "effort").as_deref())?),
         "rename_node" => {
             core::rename_node(
                 app,
@@ -894,7 +894,6 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
         "model_catalog_refresh" => to_value(crate::agent::remote_model_catalog::refresh(app)),
         "chat_models" => core::chat_models(app, &req_str(args, "sessionId")?),
         "chat_commands" => to_value(core::chat_commands(app, &req_str(args, "sessionId")?)?),
-        "chat_recovery_resume" => to_value(core::chat_recovery_resume(app, &req_str(args,"sessionId")?, opt_str(args,"interruptedId").as_deref())?),
         "chat_snapshot" => {
             let window = args.get("window").filter(|value| !value.is_null()).map(|value| serde_json::from_value::<crate::agent::chat::engine::ChatWindow>(value.clone())).transpose().map_err(|e| e.to_string())?;
             let sid = req_str(args,"sessionId")?;
@@ -2236,6 +2235,7 @@ mod tests {
     /// command. The session's agent points at a binary that does not exist, so the start the core
     /// performs first fails with the core's own stable code instead of launching a real agent.
     #[test]
+    #[cfg(unix)] // Windows hosts refuse shell mode; see `shell_mode_is_refused_on_windows_hosts`.
     fn shell_mode_arms_reach_the_core_from_both_origins() {
         let app = test_ctx();
         if let AppCtx::Headless(host) = &app {
@@ -2271,6 +2271,24 @@ mod tests {
         }
         let err = dispatch(&app, "chat_run_shell", &json!({ "sessionId": "s", "command": "  ", "messageId": "sh-1" }), DESKTOP_SOURCE, CallOrigin::Local).unwrap_err();
         assert_eq!(err, "chat_shell_empty");
+    }
+
+    /// Windows hosts refuse shell mode from every origin with the stable code the composer translates.
+    #[test]
+    #[cfg(windows)]
+    fn shell_mode_is_refused_on_windows_hosts() {
+        let app = test_ctx();
+        for origin in [CallOrigin::Local, CallOrigin::Remote] {
+            let err = dispatch(
+                &app,
+                "chat_run_shell",
+                &json!({ "sessionId": "s", "command": "echo x", "messageId": "sh-1" }),
+                if origin == CallOrigin::Local { DESKTOP_SOURCE } else { "ws-1" },
+                origin,
+            )
+            .unwrap_err();
+            assert_eq!(err, crate::agent::chat::shell::UNSUPPORTED, "{origin:?}");
+        }
     }
 
     /// Argument keys that carry a caller-chosen filesystem path anywhere in this dispatch match.

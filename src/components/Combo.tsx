@@ -247,6 +247,9 @@ export default function Combo<T extends string>({
         display: "flex",
         alignItems: "center",
         height: HEIGHT,
+        // A full-width combo grows along a row; in a column container its zero flex basis would otherwise
+        // collapse the box to the text line height.
+        minHeight: HEIGHT,
         background: "var(--bg-app)",
         border: `1px solid ${open ? "var(--accent)" : "var(--border)"}`,
         borderRadius: 5,

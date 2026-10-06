@@ -25,6 +25,7 @@ describe("shellErrorKey", () => {
   it("maps the stable backend refusals and nothing else", () => {
     expect(shellErrorKey(new Error("chat_shell_running"))).toBe("chat.shell.alreadyRunning");
     expect(shellErrorKey("chat_shell_empty")).toBe("chat.shell.emptyCommand");
+    expect(shellErrorKey("chat_shell_unsupported")).toBe("chat.shell.unsupported");
     expect(shellErrorKey("Failed to start the shell")).toBeNull();
   });
 });

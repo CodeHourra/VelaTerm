@@ -144,11 +144,6 @@
   gap: 6px;
   min-width: 0;
 }
-.launch-label {
-  color: var(--text-primary);
-  font-size: 12px;
-  font-weight: 550;
-}
 .launch-hint {
   color: var(--text-muted);
   font-size: 11px;

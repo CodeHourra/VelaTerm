@@ -74,7 +74,7 @@ pub(super) fn describe(app: &AppCtx, id: &str) -> Result<Value, String> {
         Ok(json!({"continueAt":r.get::<_,i64>(0)?,"limitType":r.get::<_,Option<String>>(1)?,"rearms":r.get::<_,u32>(2)?})))
         .optional().map_err(|e|e.to_string())?;
     result["autoContinue"] = json!(continuation);
-    let mut query = conn.prepare("SELECT id FROM plan_execute_runs WHERE owner_id=?1 OR planner_id=?1 OR executor_id=?1 ORDER BY rowid").map_err(|e|e.to_string())?;
+    let mut query = conn.prepare("SELECT id FROM plan_execute_runs WHERE owner_id=?1 OR planner_id=?1 OR executor_id=?1 OR reviewer_id=?1 ORDER BY rowid").map_err(|e|e.to_string())?;
     let workflows = query.query_map([id], |r|r.get::<_,String>(0)).map_err(|e|e.to_string())?
         .collect::<Result<Vec<_>,_>>().map_err(|e|e.to_string())?;
     result["workflowIds"] = json!(workflows);

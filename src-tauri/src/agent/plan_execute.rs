@@ -12,6 +12,7 @@ use sha2::{Digest, Sha256};
 pub mod menu;
 pub mod split;
 mod query;
+mod review;
 use super::chat::protocol::ChatImage;
 
 use crate::{
@@ -26,6 +27,8 @@ CREATE TABLE IF NOT EXISTS plan_execute_runs (
  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
  planner_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
  executor_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+ reviewer_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+ review_status TEXT NOT NULL DEFAULT 'legacy',
  config TEXT NOT NULL, task TEXT NOT NULL, state TEXT NOT NULL, round INTEGER NOT NULL DEFAULT 0,
  summary TEXT NOT NULL DEFAULT ''
 );
@@ -65,9 +68,18 @@ pub struct RoleConfig {
     pub effort: Option<String>,
 }
 
+impl RoleConfig {
+    fn is_empty(&self) -> bool { self.agent.is_none() && self.model.is_none() && self.effort.is_none() }
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Config {
+    /// None preserves the two-role review protocol of already-created workflows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "RoleConfig::is_empty")]
+    pub review: RoleConfig,
     /// Missing on older workflows, whose executors always share the planner's directory.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree_mode: Option<WorktreeMode>,
@@ -88,6 +100,10 @@ pub enum WorktreeMode {
 }
 
 impl Config {
+    fn initial_review_status(&self) -> &'static str {
+        match self.review_enabled { Some(true) => "pending", Some(false) => "not_enabled", None => "legacy" }
+    }
+
     fn worktree_mode(&self, legacy_worktree: bool) -> WorktreeMode {
         self.worktree_mode.unwrap_or(if legacy_worktree {
             WorktreeMode::Shared
@@ -104,11 +120,25 @@ pub struct Run {
     pub owner_id: String,
     pub planner_id: String,
     pub executor_id: Option<String>,
+    pub reviewer_id: Option<String>,
+    pub review_status: String,
     pub config: Config,
     pub task: String,
     pub state: String,
     pub round: u32,
     pub summary: String,
+}
+
+pub fn migrate(conn: &rusqlite::Connection) -> Result<(), String> {
+    let columns: Vec<String> = conn.prepare("PRAGMA table_info(plan_execute_runs)").map_err(|e|e.to_string())?
+        .query_map([], |r|r.get(1)).map_err(|e|e.to_string())?.collect::<Result<_,_>>().map_err(|e|e.to_string())?;
+    if !columns.iter().any(|c|c == "reviewer_id") {
+        conn.execute_batch("ALTER TABLE plan_execute_runs ADD COLUMN reviewer_id TEXT REFERENCES sessions(id) ON DELETE SET NULL;").map_err(|e|e.to_string())?;
+    }
+    if !columns.iter().any(|c|c == "review_status") {
+        conn.execute_batch("ALTER TABLE plan_execute_runs ADD COLUMN review_status TEXT NOT NULL DEFAULT 'legacy';").map_err(|e|e.to_string())?;
+    }
+    Ok(())
 }
 
 pub fn supported(kind: SessionKind) -> bool {
@@ -135,16 +165,17 @@ fn session(app: &AppCtx, id: &str) -> Result<Session, String> {
 
 fn get(app: &AppCtx, id: &str) -> Result<Run, String> {
     app.db().conn.lock().unwrap().query_row(
-        "SELECT id,owner_id,planner_id,executor_id,config,task,state,round,summary FROM plan_execute_runs WHERE id=?1", [id],
-        |r| Ok((r.get::<_,String>(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get::<_,String>(4)?,r.get(5)?,r.get(6)?,r.get(7)?,r.get(8)?)),
-    ).map_err(|_| "Workflow not found".to_string()).and_then(|(id,owner_id,planner_id,executor_id,config,task,state,round,summary)| {
-        Ok(Run { id,owner_id,planner_id,executor_id,config:serde_json::from_str(&config).map_err(|e|e.to_string())?,task,state,round,summary })
+        "SELECT id,owner_id,planner_id,executor_id,config,task,state,round,summary,reviewer_id,review_status FROM plan_execute_runs WHERE id=?1", [id],
+        |r| Ok((r.get::<_,String>(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get::<_,String>(4)?,r.get(5)?,r.get(6)?,r.get(7)?,r.get(8)?,r.get(9)?,r.get(10)?)),
+    ).map_err(|_| "Workflow not found".to_string()).and_then(|(id,owner_id,planner_id,executor_id,config,task,state,round,summary,reviewer_id,review_status)| {
+        Ok(Run { id,owner_id,planner_id,executor_id,reviewer_id,review_status,config:serde_json::from_str(&config).map_err(|e|e.to_string())?,task,state,round,summary })
     })
 }
 
 fn brief(run: &Run) -> Value {
     json!({"id":run.id,"ownerId":run.owner_id,"plannerId":run.planner_id,
-        "executorId":run.executor_id,"config":run.config,"state":run.state,"round":run.round,
+        "executorId":run.executor_id,"reviewerId":run.reviewer_id,"reviewStatus":run.review_status,
+        "config":run.config,"state":run.state,"round":run.round,
         "summary":run.summary.chars().take(2000).collect::<String>(),
         "summaryTruncated":run.summary.chars().count()>2000})
 }
@@ -175,7 +206,9 @@ fn normalize(app: &AppCtx, config: &RoleConfig, parent: &Session) -> Result<Role
 /// Drafts must remain editable even when a caller supplied an invalid identifier. Validate only when
 /// starting, before any session or worktree is created.
 fn validate_config(config: &Config) -> Result<(), String> {
-    for (role, value) in [("Planner", &config.plan), ("Executor", &config.exec)] {
+    let mut roles = vec![("Planner", &config.plan), ("Executor", &config.exec)];
+    if config.review_enabled == Some(true) { roles.push(("Reviewer", &config.review)); }
+    for (role, value) in roles {
         let kind = value.agent.ok_or("Missing workflow agent")?;
         if !supported(kind) {
             return Err(format!(
@@ -228,7 +261,10 @@ pub fn defaults(app: &AppCtx, parent_id: &str, config: &Config) -> Result<Value,
         exec.agent = plan.agent;
     }
     let exec = normalize(app, &exec, &parent)?;
-    Ok(json!(Config { plan, exec, ..config.clone() }))
+    let mut review = config.review.clone();
+    if review.agent.is_none() { review.agent = plan.agent; }
+    let review = if config.review_enabled == Some(false) { review } else { normalize(app, &review, &parent)? };
+    Ok(json!(Config { plan, exec, review, review_enabled:Some(config.review_enabled.unwrap_or(true)), ..config.clone() }))
 }
 
 /// Stable role identities close the creation window before the workflow result is committed.
@@ -318,7 +354,10 @@ pub fn start(app: &AppCtx, request: &super::server::SpawnRequest) -> Result<Valu
         let mut exec = requested.exec.clone();
         if exec.agent.is_none() { exec.agent = plan.agent; }
         let exec = normalize(app, &exec, &parent)?;
-        Config { plan, exec, ..requested.clone() }
+        let mut review = requested.review.clone();
+        if review.agent.is_none() { review.agent = plan.agent; }
+        let review = if requested.review_enabled == Some(false) { review } else { normalize(app, &review, &parent)? };
+        Config { plan, exec, review, review_enabled:Some(requested.review_enabled.unwrap_or(true)), ..requested.clone() }
     };
     validate_config(&config)?;
     super::spawn_requests::save_workflow_config(&app.db().conn.lock().unwrap(), &id, &config)?;
@@ -346,12 +385,12 @@ pub fn start(app: &AppCtx, request: &super::server::SpawnRequest) -> Result<Valu
         config.worktree_mode(request.worktree == Some(true)) != WorktreeMode::None, None, None,
         |tx, planner| {
             let task = format!("{}\n\nWorkflow ID: {id}\nRole: planner\nWorking directory: {}\n\nUser task:\n{}",
-                include_str!("../../../skills/vspawn/references/plan-execute.md"), planner.cwd.as_deref().unwrap_or(""), request.prompt);
+                review::protocol(&config), planner.cwd.as_deref().unwrap_or(""), request.prompt);
             let message_id = format!("msg-{id}");
             let origin = json!({"sessionId":parent.id,"name":parent.name,"agent":parent.kind,"role":"initiator","runId":id,"round":0});
             let wire = format!("[VelaTerm message {message_id}]\n{origin}\n\n{task}").trim_end().to_owned();
-            tx.execute("INSERT INTO plan_execute_runs(id,owner_id,planner_id,config,task,state) VALUES (?1,?2,?3,?4,?5,'planning')",
-                params![id,parent.id,planner.id,serde_json::to_string(&config).map_err(|e|e.to_string())?,request.prompt]).map_err(|e|e.to_string())?;
+            tx.execute("INSERT INTO plan_execute_runs(id,owner_id,planner_id,config,task,state,review_status) VALUES (?1,?2,?3,?4,?5,'planning',?6)",
+                params![id,parent.id,planner.id,serde_json::to_string(&config).map_err(|e|e.to_string())?,request.prompt,config.initial_review_status()]).map_err(|e|e.to_string())?;
             tx.execute("INSERT INTO plan_execute_messages(id,run_id,sender_id,target_id,action,round,fingerprint,wire,origin) VALUES (?1,?2,?3,?4,'start',0,?7,?5,?6)",
                 params![message_id,id,parent.id,planner.id,wire,origin.to_string(),start_fingerprint]).map_err(|e|e.to_string())?;
             save_images(tx, &message_id, &request.images)
@@ -443,7 +482,8 @@ fn status(app: &AppCtx, run: &Run) -> Result<Value, String> {
         .map_err(|e|e.to_string())?.collect::<Result<Vec<_>,_>>().map_err(|e|e.to_string())?;
     drop(query);
     drop(conn);
-    Ok(json!({"planner":health(app,&run.planner_id),"executor":run.executor_id.as_deref().map(|id|health(app,id)),"run":brief(run),"recentDeliveries":receipts,
+    Ok(json!({"planner":health(app,&run.planner_id),"executor":run.executor_id.as_deref().map(|id|health(app,id)),
+        "reviewer":run.reviewer_id.as_deref().map(|id|health(app,id)),"run":brief(run),"recentDeliveries":receipts,
         "parentRunId":split::parent_id(app,&run.id)?,"tasks":split::tasks(app,&run.id)?,
         "proposal":if run.config.split_tasks {split::read(app,&run.id).ok()} else {None}}))
 }
@@ -487,8 +527,8 @@ pub fn report(
     if run.executor_id.as_deref() != Some(req.session_id.as_str()) {
         return Err("Only the workflow executor can submit a report".into());
     }
-    if target.is_some_and(|id| id != run.planner_id) {
-        return Err("A report must target this workflow's planning session".into());
+    if target.is_some_and(|id| id != run.planner_id && run.reviewer_id.as_deref() != Some(id)) {
+        return Err("A report must target this workflow's planning session or review session".into());
     }
     apply_action(
         app,
@@ -508,12 +548,20 @@ fn apply_action(app: &AppCtx, req: &Request) -> Result<Value, String> {
     split::check_action(app, &run, &req.action)?;
     let is_plan = req.session_id == run.planner_id;
     let is_exec = run.executor_id.as_deref() == Some(req.session_id.as_str());
-    if !is_plan && !is_exec && req.session_id != run.owner_id {
+    let is_review = run.reviewer_id.as_deref() == Some(req.session_id.as_str());
+    if !is_plan && !is_exec && !is_review && req.session_id != run.owner_id {
         return Err("This session does not belong to the workflow".into());
     }
     session(app, &req.session_id)?;
     if req.action == "status" {
         return status(app, &run);
+    }
+    if req.action == "read-report" {
+        let conn = app.db().conn.lock().unwrap();
+        let (wire, origin, round): (String,String,u32) = conn.query_row(
+            "SELECT wire,origin,round FROM plan_execute_messages WHERE id=?1 AND run_id=?2 AND action='report'",
+            params![req.message_id,run.id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).map_err(|_|"Execution report not found".to_owned())?;
+        return Ok(json!({"messageId":req.message_id,"runId":run.id,"round":round,"wire":wire,"origin":serde_json::from_str::<Value>(&origin).map_err(|e|e.to_string())?}));
     }
     if req.action == "propose" { return split::propose(app, &run, req); }
     if req.action == "stop" {
@@ -534,7 +582,10 @@ fn apply_action(app: &AppCtx, req: &Request) -> Result<Value, String> {
         for id in split::task_ids(app,&run.id)? { runs.push(get(app,&id)?); }
         let mut peers = Vec::new();
         // Stopping one task must not interrupt the planner shared by its siblings.
-        if split::parent_id(app,&run.id)?.is_none() { peers.push(run.planner_id.clone()); }
+        if split::parent_id(app,&run.id)?.is_none() {
+            peers.push(run.planner_id.clone());
+            if let Some(id) = &run.reviewer_id { peers.push(id.clone()); }
+        }
         for item in &runs {
             app.db().conn.lock().unwrap().execute("UPDATE plan_execute_runs SET state='stopped' WHERE id=?1 AND state!='completed'",[&item.id]).map_err(|e|e.to_string())?;
             if item.state != "completed" {
@@ -542,7 +593,13 @@ fn apply_action(app: &AppCtx, req: &Request) -> Result<Value, String> {
             }
         }
         app.db().conn.lock().unwrap().execute("UPDATE plan_execute_proposals SET state='stopped' WHERE run_id=?1 AND state='pending'",[&run.id]).map_err(|e|e.to_string())?;
-        for id in &peers {
+        let mut cleanup_peers = peers.clone();
+        if run.config.review_enabled.is_some() && split::parent_id(app,&run.id)?.is_some() {
+            cleanup_peers.push(run.planner_id.clone());
+            if let Some(id) = &run.reviewer_id { cleanup_peers.push(id.clone()); }
+        }
+        cleanup_peers.sort(); cleanup_peers.dedup();
+        for id in &cleanup_peers {
             for item in app
                 .chat()
                 .snapshot_window(id, Some(&Default::default()))
@@ -557,7 +614,7 @@ fn apply_action(app: &AppCtx, req: &Request) -> Result<Value, String> {
                     }
                 }
             }
-            if app.chat().turn_in_progress(id) {
+            if peers.contains(id) && app.chat().turn_in_progress(id) {
                 if let Err(error) = core::chat_interrupt(app, id) {
                     failures.push(format!("{id}: {error}"));
                 }
@@ -597,18 +654,23 @@ fn apply_action(app: &AppCtx, req: &Request) -> Result<Value, String> {
         if run.state == "stopped" {
             return Err("This workflow was stopped; pending actions cannot be replayed".into());
         }
-        if req.round < run.round {
+        if req.round < run.round && !review::pending_progress(app,&run,&req.message_id)? {
             return Err("This message belongs to an earlier workflow round".into());
         }
-        return deliver(app, &run, &target, &wire, &req.message_id);
+        if let Some(parent) = split::parent_id(app,&run.id)? { split::refresh_parent(app,&parent)?; }
+        return review::deliver_handoff(app, &run, &target, &wire, &req.message_id);
     }
-    if matches!(run.state.as_str(), "completed" | "stopped") {
+    let reopening = req.action == "dispatch" && run.state == "completed"
+        && split::parent_id(app,&run.id)?.is_some()
+        && run.config.review_enabled.is_some() && (is_review || is_plan);
+    if run.state == "stopped" || (run.state == "completed" && !reopening) {
         return Err("This workflow has already ended".into());
     }
     let (target, state, role) = match req.action.as_str() {
         "dispatch"
-            if is_plan
-                && matches!(run.state.as_str(), "planning" | "reviewing" | "blocked")
+            if ((is_plan && (run.state == "planning" || run.state == "summarizing" || run.state == "blocked" || reopening
+                    || (run.config.review_enabled.is_none() && run.state == "reviewing")))
+                || (is_review && (matches!(run.state.as_str(), "reviewing" | "blocked") || reopening) && review::has_report(app,&run)?))
                 && req.round == run.round + 1 =>
         {
             if run.executor_id.is_none() {
@@ -623,28 +685,45 @@ fn apply_action(app: &AppCtx, req: &Request) -> Result<Value, String> {
                     })?;
                 run.executor_id = Some(executor.id);
             }
-            (run.executor_id.clone().unwrap(), "executing", "plan")
+            (run.executor_id.clone().unwrap(), "executing", if is_review {"review"} else {"plan"})
         }
         // A blocker records an incomplete handoff; it must not prevent the assigned executor from
         // completing that handoff after an interruption or reporting a result that is ready for review.
         "report"
             if is_exec
-                && matches!(run.state.as_str(), "executing" | "blocked")
+                && (matches!(run.state.as_str(), "executing" | "blocked")
+                    || (run.config.review_enabled.is_some() && matches!(run.state.as_str(), "reviewing" | "summarizing")))
                 && req.round == run.round =>
         {
-            (run.planner_id.clone(), "reviewing", "exec")
+            if run.config.review_enabled == Some(true) {
+                review::ensure_reviewer(app, &mut run)?;
+                (run.reviewer_id.clone().unwrap(), "reviewing", "exec")
+            } else {
+                (run.planner_id.clone(), if run.config.review_enabled == Some(false) {"summarizing"} else {"reviewing"}, "exec")
+            }
         }
-        "accept" if is_plan && (run.state == "reviewing" || (run.config.split_tasks && run.state == "blocked")) && req.round == run.round => {
+        "accept" if is_plan && run.config.review_enabled.is_none() && (run.state == "reviewing" || (run.config.split_tasks && run.state == "blocked")) && req.round == run.round => {
             (run.owner_id.clone(), "completed", "plan")
         }
-        "block" if (is_plan || is_exec) && req.round == run.round => (
-            if is_exec {
+        "accept" if is_review && matches!(run.state.as_str(), "reviewing" | "blocked") && req.round == run.round
+            && (run.config.split_tasks || review::has_report(app,&run)?) => {
+            (run.planner_id.clone(), "summarizing", "review")
+        }
+        "finish" if is_plan && run.config.review_enabled.is_some() && req.round == run.round
+            && matches!(run.state.as_str(), "summarizing" | "blocked")
+            && (run.config.split_tasks || review::has_report(app,&run)?)
+            && (run.config.review_enabled == Some(false) || run.review_status == "passed") => {
+            (run.owner_id.clone(), "completed", "plan")
+        }
+        "block" if (is_plan || is_exec || (is_review && matches!(run.state.as_str(),"reviewing"|"blocked")
+                && (run.config.split_tasks || review::has_report(app,&run)?))) && req.round == run.round => (
+            if is_exec || is_review {
                 run.planner_id.clone()
             } else {
                 run.owner_id.clone()
             },
             "blocked",
-            if is_exec { "exec" } else { "plan" },
+            if is_exec { "exec" } else if is_review { "review" } else { "plan" },
         ),
         _ => {
             return Err(
@@ -657,12 +736,17 @@ fn apply_action(app: &AppCtx, req: &Request) -> Result<Value, String> {
     let text = if req.action == "dispatch" && run.round == 0 {
         format!(
             "{}\n\nWorkflow ID: {}\nRole: executor\nRound: {}\nWorking directory: {}\n\nImplementation task:\n{}",
-            include_str!("../../../skills/vspawn/references/plan-execute.md"),
+            review::protocol(&run.config),
             run.id,
             req.round,
             session(app, &target)?.cwd.as_deref().unwrap_or(""),
             req.text
         )
+    } else if req.action == "report" && run.config.review_enabled == Some(true) {
+        format!("{}\n\nWorkflow ID: {}\nRole: reviewer\nRound: {}\nExecutor directory: {}\nOriginal task:\n{}\n\nExecution report:\n{}",
+            review::protocol(&run.config),run.id,req.round,session(app,run.executor_id.as_deref().unwrap())?.cwd.as_deref().unwrap_or(""),run.task,req.text)
+    } else if req.action == "finish" && run.config.review_enabled == Some(false) {
+        format!("No independent review was performed. Verification results are reported by Execute.\n\n{}",req.text)
     } else {
         req.text.clone()
     };
@@ -673,7 +757,7 @@ fn apply_action(app: &AppCtx, req: &Request) -> Result<Value, String> {
     .trim_end()
     .to_owned();
     // The executor receives the user's original references once, together with its first assignment.
-    let images = if req.action == "dispatch" && run.round == 0 {
+    let images = if (req.action == "dispatch" && run.round == 0) || (req.action == "report" && run.config.review_enabled == Some(true) && run.round == 1) {
         message_images(app, &format!("msg-{}", run.id))?
     } else {
         vec![]
@@ -684,16 +768,27 @@ fn apply_action(app: &AppCtx, req: &Request) -> Result<Value, String> {
         tx.execute("INSERT INTO plan_execute_messages(id,run_id,sender_id,target_id,action,round,fingerprint,wire,origin) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
             params![req.message_id,run.id,req.session_id,target,req.action,req.round,fingerprint(req),wire,origin.to_string()]).map_err(|e|e.to_string())?;
         save_images(&tx, &req.message_id, &images)?;
+        let review_status = if run.config.review_enabled == Some(false) { "not_enabled" }
+            else if run.config.review_enabled.is_none() { "legacy" }
+            else if req.action == "accept" { "passed" }
+            else if req.action == "dispatch" && is_review { "changes_requested" }
+            else if req.action == "dispatch" || req.action == "report" { "pending" }
+            else if req.action == "block" && is_review { "blocked" }
+            else { &run.review_status };
         tx.execute(
-            "UPDATE plan_execute_runs SET executor_id=?2,state=?3,round=?4,summary=?5 WHERE id=?1",
-            params![run.id, run.executor_id, state, req.round, req.text],
+            "UPDATE plan_execute_runs SET executor_id=?2,state=?3,round=?4,summary=?5,review_status=?6 WHERE id=?1",
+            params![run.id, run.executor_id, state, req.round,
+                if req.action == "finish" && run.config.review_enabled == Some(false) { &text } else { &req.text }, review_status],
         )
         .map_err(|e| e.to_string())?;
+        if run.config.review_enabled == Some(true) && (req.action == "report" || is_review) {
+            review::save_plan_notice(&tx, &run, req, &origin)?;
+        }
         tx.commit().map_err(|e| e.to_string())?;
     }
     if let Some(parent) = split::parent_id(app,&run.id)? { split::refresh_parent(app,&parent)?; }
     run = get(app, &run.id)?;
-    deliver(app, &run, &target, &wire, &req.message_id)
+    review::deliver_handoff(app, &run, &target, &wire, &req.message_id)
 }
 
 fn deliver(app: &AppCtx, run: &Run, target: &str, wire: &str, id: &str) -> Result<Value, String> {
@@ -711,7 +806,7 @@ fn deliver(app: &AppCtx, run: &Run, target: &str, wire: &str, id: &str) -> Resul
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .map_err(|e| e.to_string())?;
-        if sender == run.planner_id && matches!(action.as_str(), "accept" | "block" | "notice") {
+        if sender == run.planner_id && matches!(action.as_str(), "accept" | "finish" | "block" | "notice") {
             return Ok(
                 json!({"delivery":"recorded","messageId":id,"targetSessionId":target,"run":brief(run)}),
             );
@@ -734,7 +829,7 @@ fn deliver(app: &AppCtx, run: &Run, target: &str, wire: &str, id: &str) -> Resul
 /// Workflow peers remain available while the user opens another pane.
 pub fn active(app: &AppCtx, id: &str) -> bool {
     app.db().conn.lock().unwrap().query_row(
-        "SELECT 1 FROM plan_execute_runs WHERE (planner_id=?1 OR executor_id=?1) AND state NOT IN ('completed','stopped') LIMIT 1",
+        "SELECT 1 FROM plan_execute_runs WHERE (planner_id=?1 OR executor_id=?1 OR reviewer_id=?1) AND state NOT IN ('completed','stopped') LIMIT 1",
         [id],|_|Ok(())).optional().ok().flatten().is_some()
 }
 
@@ -753,7 +848,7 @@ pub fn observe(app: &AppCtx, id: &str, event: &Value) {
         let ids: Vec<String> = {
             let db = app.db();
             let conn = db.conn.lock().unwrap();
-            let mut query = match conn.prepare("SELECT id FROM plan_execute_runs WHERE (executor_id=?1 AND state='executing') OR (planner_id=?1 AND state IN ('planning','reviewing'))") {
+            let mut query = match conn.prepare("SELECT id FROM plan_execute_runs WHERE (executor_id=?1 AND state='executing') OR (reviewer_id=?1 AND state='reviewing') OR (planner_id=?1 AND state IN ('planning','reviewing','summarizing'))") {
                 Ok(query) => query, Err(_) => return,
             };
             let rows = match query.query_map([&id], |r|r.get(0)) { Ok(rows) => rows, Err(_) => return };
@@ -766,6 +861,7 @@ pub fn observe(app: &AppCtx, id: &str, event: &Value) {
 }
 
 fn observe_run(app: &AppCtx, id: &str, run: &Run, interrupted: bool) {
+        if run.config.review_enabled.is_some() && id == run.planner_id && run.state == "reviewing" { return; }
         if app.chat().turn_in_progress(&id) && !interrupted {
             return;
         }
@@ -781,12 +877,18 @@ fn observe_run(app: &AppCtx, id: &str, run: &Run, interrupted: bool) {
         {
             return;
         }
-        if run.executor_id.as_deref() == Some(&id) {
-            let current=snapshot.rows.iter().filter_map(|row| match row {
+        if run.executor_id.as_deref() == Some(&id) || run.reviewer_id.as_deref() == Some(&id) {
+            let wires = snapshot.rows.iter().rev().filter_map(|row| match row {
                 super::chat::engine::ChatRow::User { text, .. } => Some(text), _=>None,
-            }).any(|wire|app.db().conn.lock().unwrap().query_row(
+            });
+            let mut relevant = wires;
+            let current = if run.reviewer_id.as_deref() == Some(id) { relevant.next().is_some_and(|wire|app.db().conn.lock().unwrap().query_row(
                 "SELECT 1 FROM plan_execute_messages WHERE run_id=?1 AND target_id=?2 AND round=?3 AND wire=?4",
-                params![run.id,id,run.round,wire],|_|Ok(())).optional().ok().flatten().is_some());
+                params![run.id,id,run.round,wire],|_|Ok(())).optional().ok().flatten().is_some()) } else {
+                relevant.any(|wire|app.db().conn.lock().unwrap().query_row(
+                    "SELECT 1 FROM plan_execute_messages WHERE run_id=?1 AND target_id=?2 AND round=?3 AND wire=?4",
+                    params![run.id,id,run.round,wire],|_|Ok(())).optional().ok().flatten().is_some())
+            };
             if !current && !interrupted {
                 return;
             }
@@ -797,8 +899,8 @@ fn observe_run(app: &AppCtx, id: &str, run: &Run, interrupted: bool) {
             "A workflow turn ended without a dispatch, report or acceptance. Inspect its conversation and resolve the missing handoff before resuming."
         };
         let _ = app.db().conn.lock().unwrap().execute(
-            "UPDATE plan_execute_runs SET state='blocked',summary=?2 WHERE id=?1",
-            params![run.id, summary],
+            "UPDATE plan_execute_runs SET state='blocked',summary=?2,review_status=CASE WHEN reviewer_id=?3 THEN 'blocked' ELSE review_status END WHERE id=?1",
+            params![run.id, summary,id],
         );
         crate::diagnostics::record(
             "WARN",
@@ -806,7 +908,7 @@ fn observe_run(app: &AppCtx, id: &str, run: &Run, interrupted: bool) {
             json!({"runId":run.id,"sessionId":id,"round":run.round,"status":"blocked"}),
         );
         // The platform notice is distinct from an executor's report and never implies acceptance.
-        let target = if run.executor_id.as_deref() == Some(&id) {
+        let target = if run.executor_id.as_deref() == Some(&id) || run.reviewer_id.as_deref() == Some(&id) {
             &run.planner_id
         } else {
             &run.owner_id
@@ -871,7 +973,7 @@ pub fn run_cli(args: &[String]) -> ! {
         let rest = &args[args.len().min(2)..];
         if rest.is_empty() || rest[0] == "--help" {
             return Ok(
-                json!({"usage":"vflow list [session]\nvflow status|stop|propose|dispatch|accept|block <run-id> [--round N --message-id msg-UUID] < message.txt","note":"list is read-only and defaults to the calling session. It returns related workflows and direct child sessions with saved properties; session accepts an ID, ID prefix, exact name or unique name substring. propose reads a JSON object with tasks [{name,prompt,config:{agent,model,effort}}]. It requires user confirmation before execution. Other mutation text is read from stdin. Reuse the exact message ID, round and text when retrying."}),
+                json!({"usage":"vflow list [session]\nvflow status|stop|propose|dispatch|accept|finish|block|read-report <run-id> [--round N --message-id msg-UUID] < message.txt","note":"list is read-only and defaults to the calling session. It returns related workflows and direct child sessions with saved properties; session accepts an ID, ID prefix, exact name or unique name substring. propose reads a JSON object with tasks [{name,prompt,config:{agent,model,effort}}]. It requires user confirmation before execution. Other mutation text is read from stdin. Reuse the exact message ID, round and text when retrying."}),
             );
         }
         if rest[0] == "list" {
@@ -881,7 +983,7 @@ pub fn run_cli(args: &[String]) -> ! {
         }
         if !matches!(
             rest[0].as_str(),
-            "status" | "stop" | "propose" | "dispatch" | "accept" | "block"
+            "status" | "stop" | "propose" | "dispatch" | "accept" | "finish" | "block" | "read-report"
         ) {
             return Err(if rest[0] == "report" {
                 "Use vtell --report --round N to submit an execution report"
@@ -909,7 +1011,7 @@ pub fn run_cli(args: &[String]) -> ! {
             }
             i += 2;
         }
-        if !matches!(req.action.as_str(), "status" | "stop") {
+        if !matches!(req.action.as_str(), "status" | "stop" | "read-report") {
             std::io::stdin()
                 .take(65537)
                 .read_to_string(&mut req.text)

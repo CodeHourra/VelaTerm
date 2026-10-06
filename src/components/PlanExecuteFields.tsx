@@ -1,4 +1,4 @@
-//! Two independent launch drafts backed by the same agent capability catalogue.
+//! Independent role launch drafts backed by the same agent capability catalogue.
 import { useEffect, useRef, useState } from "react";
 import { useT } from "../i18n";
 import type { SpawnRequest } from "../ipc/events";
@@ -10,11 +10,15 @@ import Combo from "./Combo";
 import { ModelEffortFields, LaunchField, LaunchLoadState, launchErrorText } from "./LaunchFields";
 
 type Config = NonNullable<SpawnRequest["planExecute"]>;
-type Role = "plan" | "exec";
+type Role = "plan" | "exec" | "review";
+
+function roles(value: Config): Role[] {
+  return value.reviewEnabled === true ? ["plan", "exec", "review"] : ["plan", "exec"];
+}
 
 function launchable(value: Config, options: LaunchOption[]): Config | null {
-  return (["plan", "exec"] as const).every(role =>
-    options.some(option => option.id === value[role].agent && option.supportsPlanExecute)) ? value : null;
+  return roles(value).every(role =>
+    options.some(option => option.id === value[role]?.agent && option.supportsPlanExecute)) ? value : null;
 }
 
 /**
@@ -24,12 +28,12 @@ function launchable(value: Config, options: LaunchOption[]): Config | null {
 function withRemembered(
   value: Config,
   explicit: Config | null,
-  prefs: { plan: PlanExecuteRolePrefs; exec: PlanExecuteRolePrefs },
+  prefs: { plan: PlanExecuteRolePrefs; exec: PlanExecuteRolePrefs; review?: PlanExecuteRolePrefs },
   options: LaunchOption[],
 ): Config {
   const merge = (role: Role) => {
-    const base = { ...value[role] };
-    const given = explicit?.[role] ?? {};
+    const base: Config["plan"] = { ...value[role] };
+    const given: Config["plan"] = explicit?.[role] ?? {};
     const saved = prefs?.[role] ?? {};
     // Old preferences must not restore an agent that can no longer run this workflow.
     if (saved.agent && !options.some(option => option.id === saved.agent && option.supportsPlanExecute)) return base;
@@ -44,7 +48,7 @@ function withRemembered(
     if (given.effort == null && saved.effort !== undefined) base.effort = saved.effort;
     return base;
   };
-  return { ...value, plan: merge("plan"), exec: merge("exec") };
+  return { ...value, plan: merge("plan"), exec: merge("exec"), ...(value.review ? { review: merge("review") } : {}) };
 }
 
 export function PlanExecuteFields({ parentSessionId, config, options, onChange, resolved = false, cwd, disabled = false, confirmed = false }: {
@@ -88,8 +92,14 @@ export function PlanExecuteFields({ parentSessionId, config, options, onChange, 
         <strong>{t("launch.splitTasks")}</strong></span>
       <span className="launch-hint">{t("launch.splitTasksHint")}</span>
     </label>
-    {(["plan", "exec"] as const).map(role => {
-      const value = draft[role];
+    {draft.reviewEnabled != null && <label className="launch-panel launch-split-option">
+      <span className="launch-inline"><input type="checkbox" disabled={disabled || confirmed} checked={draft.reviewEnabled} aria-label={t("launch.reviewEnabled")}
+        onChange={event => publish({ ...draft, reviewEnabled: event.target.checked })} />
+        <strong>{t("launch.reviewEnabled")}</strong></span>
+      <span className="launch-hint">{t(draft.reviewEnabled ? "launch.reviewEnabledHint" : "launch.reviewDisabledHint")}</span>
+    </label>}
+    {roles(draft).map(role => {
+      const value = draft[role] ?? {};
       const spec = available.find(option => option.id === value.agent);
       const update = (patch: Partial<typeof value>) => {
         const next = { ...draft, [role]: { ...value, ...patch } };
@@ -98,7 +108,7 @@ export function PlanExecuteFields({ parentSessionId, config, options, onChange, 
       const remember = (patch: { agent?: SessionKind | null; model?: string | null; effort?: string | null }) => {
         if (!locked.current) useTermStore.getState().setPlanExecuteRolePrefs(role, patch);
       };
-      const label = t(role === "plan" ? "launch.planTitle" : "launch.execTitle");
+      const label = t(role === "review" ? "launch.reviewTitle" : role === "plan" ? (confirmed && draft.reviewEnabled == null ? "launch.legacyPlanTitle" : "launch.planTitle") : "launch.execTitle");
       return <section className="launch-panel" key={role} aria-label={label}>
         <h3>{label}</h3>
         <LaunchField label={t("spawn.agentLabel")}>

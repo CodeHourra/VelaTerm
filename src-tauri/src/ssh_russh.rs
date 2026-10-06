@@ -164,8 +164,9 @@ async fn authenticate_default_keys(
     Ok(false)
 }
 
-impl SshTransport for RusshTransport {
-    fn exec(&self, cmd: &str) -> Result<String, String> {
+impl RusshTransport {
+    /// Run `cmd` and, when `input` is given, write it to the command's stdin followed by EOF.
+    fn exec_with(&self, cmd: &str, input: Option<&str>) -> Result<String, String> {
         self.rt.block_on(async {
             let mut ch = self
                 .handle
@@ -175,6 +176,12 @@ impl SshTransport for RusshTransport {
             ch.exec(true, cmd)
                 .await
                 .map_err(|e| format!("exec failed: {e}"))?;
+            if let Some(input) = input {
+                ch.data(input.as_bytes())
+                    .await
+                    .map_err(|e| format!("write stdin failed: {e}"))?;
+                ch.eof().await.map_err(|e| format!("close stdin failed: {e}"))?;
+            }
 
             let mut out: Vec<u8> = Vec::new();
             let mut err: Vec<u8> = Vec::new();
@@ -204,6 +211,16 @@ impl SshTransport for RusshTransport {
                 }
             }
         })
+    }
+}
+
+impl SshTransport for RusshTransport {
+    fn exec(&self, cmd: &str) -> Result<String, String> {
+        self.exec_with(cmd, None)
+    }
+
+    fn exec_input(&self, cmd: &str, input: &str) -> Result<String, String> {
+        self.exec_with(cmd, Some(input))
     }
 
     fn upload(&self, local: &Path, remote_rel: &str, progress: Progress) -> Result<(), String> {

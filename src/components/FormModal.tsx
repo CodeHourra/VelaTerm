@@ -1,24 +1,31 @@
 //! Generic form modal that renders inputs from field definitions for creating groups/sessions, renaming, and similar actions.
 
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { normalizeArgDashes } from "../args";
 import { useT } from "../i18n";
 import { Backdrop } from "./Backdrop";
+import { Field, FieldStack } from "./Field";
 import Select from "./Select";
+
+export interface FormRenderContext {
+  values: Record<string, string>;
+  changeValues: (changes: Record<string, string>) => void;
+  disabled: boolean;
+}
 
 export interface FieldDef {
   key: string;
   label: string;
   placeholder?: string;
-  render?: (value: string, onChange: (value: string) => void) => ReactNode;
+  render?: (value: string, onChange: (value: string) => void, context: FormRenderContext) => ReactNode;
   required?: boolean;
   autoFocus?: boolean;
   /** When provided, render a select whose option value is submitted; an empty string is a valid Default option. */
   select?: { value: string; label: string }[];
   /** In select mode, append a Custom… option that reveals a text field; values outside the options enter this mode automatically. */
   allowCustom?: boolean;
-  /** Field type: text input by default; "checkbox" renders a binary checkable option. */
-  type?: "text" | "checkbox";
+  /** Text input by default; checkbox renders a toggle and hidden retains a dependent draft value. */
+  type?: "text" | "checkbox" | "hidden";
   /** Value written when a checkbox is checked (default "1"), mapping binary semantics to a concrete string such as "skip". */
   checkedValue?: string;
   /** Value written when a checkbox is unchecked (default ""). */
@@ -89,9 +96,11 @@ function SelectField({
 
 export function FormModal({
   title,
+  description,
   fields,
   initial,
   submitLabel,
+  submittingLabel,
   onSubmit,
   onCancel,
   validate,
@@ -99,9 +108,11 @@ export function FormModal({
   onValuesChange,
 }: {
   title: string;
+  description?: string;
   fields: FieldDef[];
   initial?: Record<string, string>;
   submitLabel?: string;
+  submittingLabel?: string;
   onSubmit: (values: Record<string, string>) => void | Promise<void>;
   onCancel: () => void;
   /** Returns an error message to show below the fields and block submission, or null when the values are valid. */
@@ -112,6 +123,14 @@ export function FormModal({
   onValuesChange?: (values: Record<string, string>) => void;
 }) {
   const t = useT();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const descriptionId = useId();
+  useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const dialog = dialogRef.current;
+    if (dialog && !dialog.contains(document.activeElement)) dialog.focus();
+    return () => { if (previous?.isConnected) previous.focus(); };
+  }, []);
   const [values, setValues] = useState<Record<string, string>>(() => {
     const v: Record<string, string> = {};
     for (const f of fields) v[f.key] = initial?.[f.key] ?? "";
@@ -121,13 +140,14 @@ export function FormModal({
   const submittingRef = useRef(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const changeValue = (key: string, value: string) => {
+  const changeValues = (changes: Record<string, string>) => {
     if (submittingRef.current) return;
     setSubmitError(null);
-    const next = { ...values, [key]: value };
+    const next = { ...values, ...changes };
     setValues(next);
     onValuesChange?.(next);
   };
+  const changeValue = (key: string, value: string) => changeValues({ [key]: value });
   const cancel = () => {
     if (!submittingRef.current) onCancel();
   };
@@ -161,13 +181,19 @@ export function FormModal({
   return (
     <Backdrop onClose={cancel}>
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        aria-describedby={description ? descriptionId : undefined}
         aria-busy={submitting}
         style={{
           width: 380,
           maxWidth: "calc(100vw - 32px)",
+          maxHeight: "calc(100dvh - 32px)",
+          overflowY: "auto",
+          outline: "none",
           background: "var(--bg-panel)",
           border: "1px solid var(--border)",
           borderRadius: 10,
@@ -195,8 +221,13 @@ export function FormModal({
           {title}
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {description && <p id={descriptionId} style={{ color: "var(--text-secondary)", fontSize: 12, lineHeight: 1.6, margin: "0 0 14px" }}>
+          {description}
+        </p>}
+
+        <FieldStack>
           {fields.map((f) => {
+            if (f.type === "hidden") return null;
             if (f.type === "checkbox") {
               const on = f.checkedValue ?? "1";
               const checked = values[f.key] === on;
@@ -238,21 +269,12 @@ export function FormModal({
                 </div>
               );
             }
+            if (f.render) return <Field key={f.key} as="div" label={f.label} required={f.required}>
+              {f.render(values[f.key], v => changeValue(f.key, v), { values, changeValues, disabled: submitting })}
+            </Field>;
             return (
-              <label key={f.key} style={{ display: "block" }}>
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: "var(--text-muted)",
-                    marginBottom: 4,
-                  }}
-                >
-                  {f.label}
-                  {f.required && (
-                    <span style={{ color: "var(--status-error)" }}> *</span>
-                  )}
-                </div>
-                {f.render ? f.render(values[f.key], v => changeValue(f.key, v)) : f.select ? (
+              <Field key={f.key} label={f.label} required={f.required}>
+                {f.select ? (
                   <SelectField
                     field={f}
                     value={values[f.key]}
@@ -272,10 +294,10 @@ export function FormModal({
                   }
                 />
                 )}
-              </label>
+              </Field>
             );
           })}
-        </div>
+        </FieldStack>
 
         {error && (
           <div role="alert" style={{ fontSize: 12, color: "var(--status-error)", marginTop: 10 }}>
@@ -299,7 +321,7 @@ export function FormModal({
             onClick={() => void submit()}
             disabled={!canSubmit}
           >
-            {submitLabel ?? t("common.confirm")}
+            {submitting && submittingLabel ? <span role="status">{submittingLabel}</span> : submitLabel ?? t("common.confirm")}
           </button>
         </div>
       </div>

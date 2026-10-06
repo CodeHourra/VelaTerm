@@ -131,6 +131,8 @@ export interface SpawnRequest {
   images?: import("./chat").ChatImage[];
   requestId?: string;
   planExecute?: {
+    reviewEnabled?: boolean | null;
+    review?: { agent?: SessionKind | null; model?: string | null; effort?: string | null };
     worktreeMode?: WorktreeMode;
     splitTasks?: boolean;
     plan: { agent?: SessionKind | null; model?: string | null; effort?: string | null };

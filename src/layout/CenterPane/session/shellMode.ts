@@ -20,6 +20,7 @@ export function shellErrorKey(error: unknown): I18nKey | null {
   const text = String(error);
   if (text.includes("chat_shell_running")) return "chat.shell.alreadyRunning";
   if (text.includes("chat_shell_empty")) return "chat.shell.emptyCommand";
+  if (text.includes("chat_shell_unsupported")) return "chat.shell.unsupported";
   return null;
 }
 

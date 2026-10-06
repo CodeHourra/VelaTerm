@@ -1,3 +1,35 @@
+## v0.2.8 — 2026-10-06
+
+- 🪟 Windows: khi quay lại cửa sổ, tiêu điểm bàn phím được giữ nguyên nếu đã nằm trong trang.
+
+- 🛡️ Windows: phần mềm diệt virus Huorong không còn nhận diện VelaTerm và vela-server là `Trojan/MSIL.ShellLoader.q`.
+
+- 🔕 Windows: khi tạo phiên mới và làm mới danh sách mô hình, VelaTerm không còn chạy PowerShell ở chế độ nền; trạng thái phiên Cursor nay được xác định dựa trên đầu ra của terminal nên có thể kém chính xác hơn một chút.
+
+- ⛔ Windows: trong chế độ hội thoại, nội dung nhập bắt đầu bằng `!` không còn được chạy như lệnh shell; một thông báo sẽ hiển thị và nội dung nhập được giữ lại, còn các lệnh đã chạy trong lịch sử vẫn hiển thị bình thường.
+
+- 🔐 Khi kết nối SSH tới máy chủ Windows dùng máy chủ OpenSSH tích hợp sẵn, VelaTerm không còn khởi chạy PowerShell bằng `-EncodedCommand`.
+
+- 🚀 Phiên tác nhân TUI khởi động bình thường ngay cả khi PATH dài, không còn hiển thị lệnh khởi chạy bị cắt cụt trong terminal.
+
+- ⬇️ Phiên tác nhân TUI tự cuộn xuống cuối khi một lượt kết thúc hoặc tác nhân yêu cầu phê duyệt, trừ khi bạn đang xem đầu ra trước đó.
+
+- 💾 Tính năng khôi phục hội thoại thử nghiệm của v0.2.7 đã bị gỡ bỏ: Chat không còn hiển thị tin nhắn Saved submission trùng lặp hay thông báo gián đoạn, và các tin nhắn trong hàng đợi chưa gửi không còn được giữ lại sau khi khởi động lại.
+
+- 🔁 Quy trình lập kế hoạch và thực thi có thêm vai trò Review độc lập tùy chọn, được bật theo mặc định cho quy trình mới, với tác nhân, mô hình và mức suy luận riêng; `vspawn --plan-execute` hỗ trợ `--review`, `--no-review`, `--review-agent`, `--review-model` và `--review-effort`.
+
+- 🏷️ "Đổi tên bằng AI…" hiển thị hộp xác nhận trước và cho phép chọn tác nhân, mô hình và mức suy luận cho lần đổi tên đó; hộp thoại hiển thị ở giữa ngay trong lúc tải các tùy chọn.
+
+- 🔍 Có thể kéo phiên, nhóm và dự án khi đang bật tìm kiếm theo tên, lọc theo trạng thái hoặc lọc theo dấu.
+
+- ➕ Khi đang bật lọc theo trạng thái, phiên mới tạo vẫn nằm dưới nhóm hoặc phiên cha của nó cho đến khi bạn làm mới trạng thái hoặc thay đổi bộ lọc.
+
+- 🪟 Cửa sổ ứng dụng mặc định mở lớn hơn, theo vùng khả dụng của màn hình, và cửa sổ kết nối mở ở giữa màn hình chứa cửa sổ chính.
+
+- 🎨 Bộ sưu tập dùng biểu tượng mới dạng các lớp xếp chồng, biểu tượng trên thanh tiêu đề tối được làm dịu đi một chút, bốn nút của thanh bên trống có cùng độ rộng và các hộp thoại biểu mẫu dùng chung một kiểu nhãn.
+
+---
+
 ## v0.2.7 — 2026-10-05
 
 - 🪐 Antigravity được thêm vào chế độ hội thoại dưới dạng tác nhân thử nghiệm, hỗ trợ văn bản, công cụ, hàng đợi tin nhắn và lịch sử gốc; hình ảnh, chỉ dẫn trong lúc trả lời, phê duyệt tương tác, phân nhánh và quay lui vẫn chưa được hỗ trợ, còn việc kiểm chứng khôi phục đầy đủ trên mọi nền tảng vẫn đang chờ hoàn tất.

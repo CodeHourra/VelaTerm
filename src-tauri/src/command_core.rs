@@ -1271,6 +1271,10 @@ pub fn chat_run_shell(
     if crate::security::session_active(session_id) {
         return Err("security_audit_owns_conversation".into());
     }
+    // Shell mode is unavailable on Windows hosts; recorded commands still replay as rows.
+    if cfg!(windows) {
+        return Err(crate::agent::chat::shell::UNSUPPORTED.into());
+    }
     if command.trim().is_empty() {
         return Err("chat_shell_empty".into());
     }
@@ -1341,14 +1345,6 @@ pub fn chat_queue_steer(ctx: &AppCtx, session_id: &str, id: &str) -> Result<(), 
 
 /// Drop a message that is still waiting behind the running turn.
 pub fn chat_queue_remove(ctx: &AppCtx, session_id: &str, id: &str) -> Result<(), String> {
-    if !ctx.chat().is_alive(session_id) {
-        let _owner = crate::agent::chat::ownership::idle_guard(ctx,session_id)?;
-        crate::agent::spawn_requests::cancel_queued(ctx,session_id,id)?;
-        crate::agent::chat::recovery::cancel(&ctx.db().conn.lock().unwrap(),session_id,id)?;
-        let items=crate::agent::chat::recovery::queued(&ctx.db().conn.lock().unwrap(),session_id)?;
-        ctx.emit(&crate::agent::chat::engine::event_name(session_id),serde_json::json!({"type":"queued","paused":!items.is_empty(),"items":items}));
-        return Ok(());
-    }
     ctx.chat().queue_remove(ctx, session_id, id)
 }
 
@@ -1359,16 +1355,6 @@ pub fn chat_queue_update(
     id: &str,
     text: &str,
 ) -> Result<(), String> {
-    if !ctx.chat().is_alive(session_id) {
-        let _owner = crate::agent::chat::ownership::idle_guard(ctx,session_id)?;
-        let items = crate::agent::chat::recovery::queued(&ctx.db().conn.lock().unwrap(),session_id)?;
-        let item = items.iter().find(|item|item.id==id).ok_or("This message is no longer queued.")?;
-        crate::agent::spawn_requests::edit_queued(ctx,session_id,id,text,&item.images)?;
-        crate::agent::chat::recovery::edit(&ctx.db().conn.lock().unwrap(),session_id,id,text)?;
-        let items=crate::agent::chat::recovery::queued(&ctx.db().conn.lock().unwrap(),session_id)?;
-        ctx.emit(&crate::agent::chat::engine::event_name(session_id),serde_json::json!({"type":"queued","paused":!items.is_empty(),"items":items}));
-        return Ok(());
-    }
     ctx.chat().queue_update(ctx, session_id, id, text)
 }
 
@@ -1694,7 +1680,6 @@ pub fn chat_snapshot_window(
             snapshot.chrome = Some(session_settings::chrome(&conn, session_id)?);
         }
     }
-    snapshot.recovery = crate::agent::chat::recovery::read(ctx,session_id)?;
     // No process has run this conversation since the backend started, so the engine holds no timeline for
     // it. The agent's own recording still does. Reading it here means a reopened session shows what was
     // said before anything else happens — and keeps showing it when the agent cannot be started at all,
@@ -1706,10 +1691,7 @@ pub fn chat_snapshot_window(
         };
         if let Some((kind, id)) = session.and_then(|s| s.agent_session_id.map(|id| (s.kind, id))) {
             match crate::agent::chat::history::replay(kind, &id) {
-                Ok(mut rows) => {
-                    crate::agent::chat::recovery::restore_rows(ctx,session_id,&mut rows)?;
-                    snapshot.rows = rows;
-                }
+                Ok(rows) => snapshot.rows = rows,
                 // A recording that is gone, or a thread Codex never wrote, is the same empty pane as before.
                 Err(e) => crate::diagnostic_warn!("chat: no history replayed for {id}: {e}"),
             }
@@ -1745,41 +1727,7 @@ pub fn chat_snapshot_window(
                 .retain(|_, index| *index >= start && *index < end);
         }
     }
-    snapshot.recovery.queue_paused |= ctx.chat().queue_paused(session_id);
-    if !snapshot.running {
-        snapshot.queue = crate::agent::chat::recovery::queued(&ctx.db().conn.lock().unwrap(),session_id)?;
-    }
     Ok(snapshot)
-}
-
-/// Explicit user recovery uses the persisted continuation ID; a lost response never creates another send.
-pub fn chat_recovery_resume(ctx: &AppCtx, session_id: &str, interrupted_id: Option<&str>) -> Result<(), String> {
-    use rusqlite::OptionalExtension;
-    if crate::security::session_active(session_id) { return Err("security_audit_owns_conversation".into()); }
-    let session = session_settings::session(ctx,session_id)?;
-    if session.engine != "chat" || session.archived_at.is_some() {
-        return Err("Restore this conversation in the chat view before continuing.".into());
-    }
-    if let Some(id) = interrupted_id {
-        if !crate::agent::chat::recovery::queued(&ctx.db().conn.lock().unwrap(),session_id)?.is_empty() {
-            return Err("Resume or remove the saved queue before continuing interrupted work.".into());
-        }
-        if session.agent_session_id.is_none() { return Err("The agent did not save a conversation identity. Its interrupted work cannot be continued safely.".into()); }
-        {
-            let conn = ctx.db().conn.lock().unwrap();
-            let offer: Option<(Option<String>,Option<String>)> = conn.query_row("SELECT interrupted_id,continuation_id FROM chat_recovery_state WHERE session_id=?1",[session_id],|r|Ok((r.get(0)?,r.get(1)?)))
-                .optional().map_err(|e|e.to_string())?;
-            let Some((offer,previous)) = offer else { return Err("This recovery offer is no longer current.".into()) };
-            if offer.as_deref()!=Some(id) && previous.as_deref()!=Some(id) { return Err("This recovery offer is no longer current.".into()); }
-            conn.execute("UPDATE chat_recovery_state SET continuation_id=?2 WHERE session_id=?1",rusqlite::params![session_id,id]).map_err(|e|e.to_string())?;
-        }
-        chat_start(ctx,session_id,None,None,false)?;
-        chat_send(ctx,session_id,"The application or agent stopped while this conversation was working. Review the native conversation history and verify the result of your last action before repeating it. Continue the user's unfinished task, and ask for any permission or input you still need.",Vec::new(),Some("queue"),Some(id))?;
-    } else {
-        chat_start(ctx,session_id,None,None,false)?;
-        ctx.chat().resume_queue(ctx,session_id)?;
-    }
-    Ok(())
 }
 
 /// Expanded tool details remain available when an inactive conversation is replayed from disk.
@@ -1823,7 +1771,7 @@ pub fn chat_attachment(
     session_id: &str,
     attachment_id: &str,
 ) -> Result<ChatImage, String> {
-    ctx.chat().attachment(session_id, attachment_id).or_else(|_|crate::agent::chat::recovery::attachment(ctx,session_id,attachment_id))
+    ctx.chat().attachment(session_id, attachment_id)
 }
 
 /// Preview the Claude file checkpoint associated with one visible user message.

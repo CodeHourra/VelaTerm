@@ -121,7 +121,7 @@ fn normalized(run: &Run, tasks: &[Task]) -> Result<Vec<Task>, String> {
                 plan: run.config.plan.clone(),
                 exec: config.clone(),
                 split_tasks: false,
-                worktree_mode: run.config.worktree_mode,
+                ..run.config.clone()
             })?;
             Ok(Task {
                 name: task.name.trim().to_owned(),
@@ -256,10 +256,10 @@ pub fn confirm(app: &AppCtx, req: &Confirmation) -> Result<Value, String> {
                 plan: run.config.plan.clone(),
                 exec: task.config.clone(),
                 split_tasks: false,
-                worktree_mode: run.config.worktree_mode,
+                ..run.config.clone()
             };
-            tx.execute("INSERT INTO plan_execute_runs(id,owner_id,planner_id,config,task,state) VALUES (?1,?2,?2,?3,?4,'planning')",
-                params![task_id,run.planner_id,serde_json::to_string(&config).unwrap(),task.prompt]).map_err(|e|e.to_string())?;
+            tx.execute("INSERT INTO plan_execute_runs(id,owner_id,planner_id,config,task,state,review_status) VALUES (?1,?2,?2,?3,?4,'planning',?5)",
+                params![task_id,run.planner_id,serde_json::to_string(&config).unwrap(),task.prompt,config.initial_review_status()]).map_err(|e|e.to_string())?;
             tx.execute("INSERT INTO plan_execute_tasks(parent_id,run_id,position,name,dispatch_id) VALUES (?1,?2,?3,?4,?5)",
                 params![run.id,task_id,position,task.name,dispatch_id]).map_err(|e|e.to_string())?;
             let start_id = format!("msg-{task_id}");
@@ -268,7 +268,7 @@ pub fn confirm(app: &AppCtx, req: &Confirmation) -> Result<Value, String> {
             save_images(&tx, &start_id, &images)?;
         }
         tx.execute("UPDATE plan_execute_proposals SET state='confirmed',tasks=?2,confirmation=?2 WHERE run_id=?1",params![run.id,serialized]).map_err(|e|e.to_string())?;
-        tx.execute("UPDATE plan_execute_runs SET state='executing',round=1,summary='User confirmed the execution tasks' WHERE id=?1",[&run.id]).map_err(|e|e.to_string())?;
+        tx.execute("UPDATE plan_execute_runs SET state='executing',round=1,review_status=?2,summary='User confirmed the execution tasks' WHERE id=?1",params![run.id,run.config.initial_review_status()]).map_err(|e|e.to_string())?;
         tx.commit().map_err(|e| e.to_string())?;
     }
     let mut errors = Vec::new();
@@ -289,7 +289,7 @@ pub fn confirm(app: &AppCtx, req: &Confirmation) -> Result<Value, String> {
             continue;
         }
         // A report or a correction round must never be replayed by a delayed confirmation response.
-        if task.round > 1 || matches!(task.state.as_str(), "completed" | "stopped" | "reviewing") {
+        if task.round > 1 || matches!(task.state.as_str(), "completed" | "stopped" | "reviewing" | "summarizing") {
             continue;
         }
         let dispatch_id: String = app
@@ -351,7 +351,8 @@ pub fn confirm(app: &AppCtx, req: &Confirmation) -> Result<Value, String> {
     } else {
         let origin =
             json!({"name":"VelaTerm","agent":"terminal","role":"system","runId":run.id,"round":1});
-        let text = format!("The user confirmed these tasks. The approved prompts and execution settings below replace your proposal. Each task has its own workflow ID and report/correction round, all addressed to this planning conversation. Review reports separately with vflow status, dispatch and accept using the task workflow IDs. Do not accept the overall workflow until every task is accepted and the complete user request is verified. Inspect blocked tasks before retrying. End your turn while executors are working; their reports will arrive here.\n{}",serde_json::to_string_pretty(&tasks(app,&run.id)?).unwrap());
+        let instructions = if run.config.review_enabled.is_none() { "Review each task with dispatch and accept; perform the final audit before overall acceptance." } else { "Plan only collects progress and summarizes. Use finish for each ready task, then finish the overall workflow. When review is enabled, the shared reviewer must pass each task and integrated delivery first. Do not perform technical review." };
+        let text = format!("{instructions}\nThe user confirmed these tasks. The approved prompts and execution settings below replace your proposal. Each task has its own workflow ID and report/correction round, all addressed to this planning conversation. Use vflow status with the task workflow IDs. Do not finish the overall workflow until every task is complete and the full delivery requirements are met. Inspect blocked tasks before retrying. End your turn while executors are working; their reports will arrive here.\n{}",serde_json::to_string_pretty(&tasks(app,&run.id)?).unwrap());
         let wire = format!("[VelaTerm message {notice_id}]\n{origin}\n\n{text}");
         app.db().conn.lock().unwrap().execute("INSERT INTO plan_execute_messages(id,run_id,sender_id,target_id,action,round,fingerprint,wire,origin) VALUES (?1,?2,?3,?3,'confirmed',1,'user',?4,?5)",params![notice_id,run.id,run.planner_id,wire,origin.to_string()]).map_err(|e|e.to_string())?;
         wire
@@ -408,7 +409,15 @@ pub fn refresh_parent(app: &AppCtx, id: &str) -> Result<(), String> {
     let all_done = ids
         .iter()
         .all(|id| get(app, id).is_ok_and(|r| r.state == "completed"));
-    app.db().conn.lock().unwrap().execute("UPDATE plan_execute_runs SET state=?2 WHERE id=?1 AND state NOT IN ('completed','stopped','blocked')",params![id,if all_done {"reviewing"} else {"executing"}]).map_err(|e|e.to_string())?;
+    let mut run = get(app,id)?;
+    if matches!(run.state.as_str(),"completed"|"stopped") { return Ok(()); }
+    if all_done && run.config.review_enabled == Some(true) {
+        review::integrated(app,&mut run)?;
+    } else {
+        let state = if all_done { if run.config.review_enabled == Some(false) { "summarizing" } else { "reviewing" } } else { "executing" };
+        app.db().conn.lock().unwrap().execute("UPDATE plan_execute_runs SET state=?2,review_status=CASE WHEN ?3 THEN 'pending' ELSE review_status END WHERE id=?1 AND state!='blocked'",
+            params![id,state,!all_done && run.config.review_enabled == Some(true)]).map_err(|e|e.to_string())?;
+    }
     Ok(())
 }
 
@@ -424,7 +433,7 @@ pub fn check_action(app: &AppCtx, run: &Run, action: &str) -> Result<(), String>
         if action == "dispatch" {
             return Err("Use vflow propose and wait for user confirmation; dispatch corrections to a task workflow ID".into());
         }
-        if action == "accept" {
+        if matches!(action,"accept"|"finish") {
             let ids = task_ids(app, &run.id)?;
             if ids.is_empty()
                 || !ids
@@ -432,7 +441,7 @@ pub fn check_action(app: &AppCtx, run: &Run, action: &str) -> Result<(), String>
                     .all(|id| get(app, id).is_ok_and(|r| r.state == "completed"))
             {
                 return Err(
-                    "Accept every execution task before accepting the overall workflow".into(),
+                    "Complete every execution task before completing the overall workflow".into(),
                 );
             }
         }

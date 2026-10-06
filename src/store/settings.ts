@@ -189,7 +189,7 @@ export interface PersistedSettings {
   chatChromeDefault: boolean;
   /** Last agent, model and reasoning effort chosen for each planning/execution role, so a repeated
    * workflow opens on the setup that was used last time rather than on the parent session's. */
-  planExecutePrefs: { plan: PlanExecuteRolePrefs; exec: PlanExecuteRolePrefs };
+  planExecutePrefs: { plan: PlanExecuteRolePrefs; exec: PlanExecuteRolePrefs; review?: PlanExecuteRolePrefs };
   /** Last agent, model and reasoning effort chosen when organizing a session into the knowledge base,
    * so the next dialog opens on the setup that was used last time. */
   memoryPrefs: MemoryPrefs;
@@ -267,7 +267,7 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
   chatEffortByModel: {},
   chatFastModeByKind: {},
   chatChromeDefault: false,
-  planExecutePrefs: { plan: {}, exec: {} },
+  planExecutePrefs: { plan: {}, exec: {}, review: {} },
   memoryPrefs: {},
   referSummary: { enabled: false, agent: "claude", model: "", effort: "" },
   showSystemResources: true,
@@ -299,9 +299,9 @@ function sanitizeLaunchChoice(input: unknown): MemoryPrefs {
   return result;
 }
 
-function sanitizePlanExecutePrefs(value: unknown): { plan: PlanExecuteRolePrefs; exec: PlanExecuteRolePrefs } {
+function sanitizePlanExecutePrefs(value: unknown): { plan: PlanExecuteRolePrefs; exec: PlanExecuteRolePrefs; review?: PlanExecuteRolePrefs } {
   const map = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-  return { plan: sanitizeLaunchChoice(map.plan), exec: sanitizeLaunchChoice(map.exec) };
+  return { plan: sanitizeLaunchChoice(map.plan), exec: sanitizeLaunchChoice(map.exec), review: sanitizeLaunchChoice(map.review) };
 }
 
 function sanitizeReferSummary(value: unknown): ReferSummaryConfig {

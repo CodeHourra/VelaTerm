@@ -142,10 +142,16 @@ button { font-family: inherit; color: inherit; background: none; border: none; c
 /* ============================ APP SHELL ============================== */
 .app { display: flex; flex-direction: column; height: 100vh; background: var(--bg-0); }
 .titlebar {
+  --tb-icon: var(--text-mid); --tb-icon-hover: var(--text);
   height: 38px; flex: none; display: flex; align-items: center; gap: 4px;
   padding: 0 12px; border-bottom: 1px solid var(--border);
   background: var(--bg-2); user-select: none;
 }
+[data-theme="dark"] .titlebar {
+  --tb-icon: color-mix(in oklch, var(--text-dim) 95%, var(--bg-2));
+  --tb-icon-hover: var(--text-dim);
+}
+[data-theme="dark"] .titlebar .tb-seg button:not(.on) { color: var(--tb-icon); }
 .tb-dots { display: flex; gap: 7px; }
 .tb-dots i { width: 11px; height: 11px; border-radius: 50%; display: block; background: var(--border-strong); }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; letter-spacing: 0.5px; }
@@ -157,9 +163,9 @@ button { font-family: inherit; color: inherit; background: none; border: none; c
 .brand .v { color: var(--text); }
 .brand .sub { color: var(--text-dim); font-weight: 400; font-size: 11px; }
 .tb-spacer { flex: 1; }
-.tb-btn { display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 4px; border-radius: var(--r-sm); color: var(--text-mid); border: 1px solid transparent; }
+.tb-btn { display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 4px; border-radius: var(--r-sm); color: var(--tb-icon, var(--text-mid)); border: 1px solid transparent; }
 .tb-pair { display: flex; gap: 0; }
-.tb-btn:hover { background: var(--bg-hover); color: var(--text); }
+.tb-btn:hover { background: var(--bg-hover); color: var(--tb-icon-hover, var(--text)); }
 .tb-btn.on { color: var(--accent); }
 /* While remote access runs, light the globe with the same accent glow as the panel's running indicator.
    A linked account lights the account icon the same way. */
@@ -422,6 +428,9 @@ svg { display: block; }
 /* Shared empty-state primary action. A neutral outline blends in until hover adds accent feedback. */
 .empty-action { display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; border: 1px solid var(--border-strong); border-radius: var(--r-md); color: var(--text-mid); font-size: var(--ui-fs); transition: background .12s, color .12s, border-color .12s; }
 .empty-action:hover { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-line); }
+.project-empty-actions { display: grid; grid-template-columns: minmax(0, 1fr); width: max-content; max-width: 100%; gap: var(--space-3, 12px); }
+.project-empty-actions .empty-action { min-width: 0; justify-content: center; overflow-wrap: anywhere; }
+.project-empty-actions .empty-action svg { flex: none; }
 
 /* ============================ INSPECTOR ============================ */
 .insp-tabs { height: 32px; flex: none; display: flex; justify-content: center; border-bottom: 1px solid var(--border); padding: 0 6px; gap: 2px; }

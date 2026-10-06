@@ -161,10 +161,10 @@ export function SpawnConfirmModal() {
     try {
       if (accepted) { await confirmSpawn(receipt.request); return; }
       if (req.planExecute && workflow) {
-        for (const role of ["plan", "exec"] as const) {
-          const choice = workflow[role];
+        for (const role of (workflow.reviewEnabled ? ["plan", "exec", "review"] : ["plan", "exec"]) as ("plan" | "exec" | "review")[]) {
+          const choice = workflow[role]!;
           try { await applyLaunchArgs(choice.agent!, null, choice.model, choice.effort); }
-          catch (cause) { throw new Error(`${t(role === "plan" ? "launch.planTitle" : "launch.execTitle")}: ${launchErrorText(cause)}`); }
+          catch (cause) { throw new Error(`${t(role === "review" ? "launch.reviewTitle" : role === "plan" ? "launch.planTitle" : "launch.execTitle")}: ${launchErrorText(cause)}`); }
         }
       }
       const images = taskImages.attachments.map(({ mimeType, data }) => ({ mimeType, data }));
@@ -228,7 +228,7 @@ export function SpawnConfirmModal() {
       <header className="launch-header">
         <div>
           <h2 id={titleId}>{t(menu ? "tree.newPlanExecuteSession" : "spawn.title")}</h2>
-          <p>{t(req.planExecute ? "launch.planExecuteIntro" : "launch.singleIntro")}</p>
+          <p>{t(req.planExecute ? (accepted && req.planExecute.reviewEnabled == null && receipt?.resolvedPlanExecute?.reviewEnabled == null ? "launch.legacyPlanExecuteIntro" : "launch.planExecuteIntro") : "launch.singleIntro")}</p>
         </div>
         <div className="launch-header-actions">
           {!menu && queue.length > 1 && (

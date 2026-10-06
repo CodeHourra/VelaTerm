@@ -629,7 +629,6 @@ pub struct ChatWindow {
 pub struct ChatSnapshot {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_messages: Option<Vec<super::user_messages::UserMessage>>,
-    pub recovery: super::recovery::Recovery,
     pub positions: HashMap<String, usize>,
     pub page_kind: &'static str,
     pub has_more: bool,
@@ -1069,7 +1068,6 @@ struct TurnQueue {
     running: bool,
     /// Messages waiting for that turn to end, in the order they will be sent.
     waiting: Vec<QueuedMessage>,
-    paused: bool,
     /// Pause automatic queue draining while native steering acceptance is pending.
     steering: bool,
     /// Whether the running turn was stopped on purpose. The agent reports an interrupted turn as a failed
@@ -1197,24 +1195,7 @@ impl SubmissionFailure {
 }
 
 impl ChatManager {
-    pub fn queue_paused(&self, session_id: &str) -> bool {
-        self.sessions.lock().unwrap().get(session_id).is_some_and(|p| { let turn=p.turn.lock().unwrap(); turn.paused && !turn.waiting.is_empty() })
-    }
-
-    pub fn resume_queue(&self, app: &AppCtx, session_id: &str) -> Result<(), String> {
-        let proc = self.get(session_id)?;
-        let _action = proc.action.lock().unwrap();
-        let _callbacks = proc.callbacks.read().unwrap();
-        if !self.owns_process(session_id,&proc) || !proc.alive.load(Ordering::Relaxed) {
-            return Err("The agent changed. Refresh the conversation before changing its queue.".into());
-        }
-        proc.turn.lock().unwrap().paused = false;
-        start_waiting_message(app,session_id,&proc);
-        emit_queue(app,session_id,&proc);
-        Ok(())
-    }
-
-    /// Application exit preserves queued work, unlike the user's explicit Stop or engine handoff.
+    /// Application exit stops every agent this backend owns and releases its conversation lease.
     pub fn shutdown(&self, app: &AppCtx) {
         self.closing.store(true,Ordering::Relaxed);
         let _start=self.starts.lock().unwrap();
@@ -1224,7 +1205,6 @@ impl ChatManager {
         for (session,proc) in processes {
             let _action = proc.action.lock().unwrap();
             let _callbacks = proc.callbacks.write().unwrap();
-            let _ = super::recovery::interrupt(app,&session);
             proc.released.store(true,Ordering::Relaxed);
             proc.alive.store(false,Ordering::Relaxed);
             *proc.stdin.lock().unwrap() = None;
@@ -1553,13 +1533,9 @@ impl ChatManager {
             crate::db::repo::codex_chat_settings(&conn, session_id)?
         };
 
-        let (mut initial_turn, release_when_idle) = if kind == SessionKind::Antigravity {
+        let (initial_turn, release_when_idle) = if kind == SessionKind::Antigravity {
             antigravity::restart_state(self.sessions.lock().unwrap().get(session_id).cloned())
         } else { (TurnQueue::default(), Arc::new(AtomicBool::new(false))) };
-        if initial_turn.waiting.is_empty() {
-            initial_turn.waiting = super::recovery::queued(&app.db().conn.lock().unwrap(),session_id)?;
-            initial_turn.paused = !initial_turn.waiting.is_empty();
-        }
         crate::agent::executable::prepare_command(&mut cmd, bin);
         let mut owner = super::ownership::Owner::acquire(app, session_id,
             resume.filter(|_| !fork).map(|id|format!("{}:{id}",kind.as_str())))?;
@@ -1673,8 +1649,7 @@ impl ChatManager {
         // timeline so a pending submission never becomes the only visible message during replay.
         if let Some(id) = resume {
             match super::history::replay(kind, id) {
-                Ok(mut rows) => {
-                    if super::recovery::restore_rows(app,session_id,&mut rows).is_err() { crate::diagnostic_warn!("chat recovery: could not merge saved attachments into history"); }
+                Ok(rows) => {
                     let mut timeline = proc.timeline.lock().unwrap();
                     timeline.replace_all(rows);
                 }
@@ -1841,12 +1816,7 @@ impl ChatManager {
         let proc = self.get(session_id).map_err(SubmissionFailure::Rejected)?;
         let mut attempted = false;
         self.send_on_process(app, session_id, &proc, text, images, behavior, message_id, &mut attempted)
-            .map_err(|error| {
-                // After the action returns, an intact prepared record proves the provider boundary was
-                // never reached. A failed database probe cannot make that promise.
-                let unwritten=message_id.is_some_and(|id|super::recovery::not_dispatched(&app.db().conn.lock().unwrap(),session_id,id));
-                if attempted && !unwritten { SubmissionFailure::Uncertain(error) } else { SubmissionFailure::Rejected(error) }
-            })
+            .map_err(|error| if attempted { SubmissionFailure::Uncertain(error) } else { SubmissionFailure::Rejected(error) })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1874,9 +1844,7 @@ impl ChatManager {
         // Steering is a prompt, never a local command or a queued replacement.
         if proc.kind == SessionKind::Opencode && behavior != "steer" && proc.ready.load(Ordering::Relaxed) && opencode::is_local_command(text.trim()) {
             claim_native_writer(app,proc)?;
-            if let Some(id) = message_id {
-                super::recovery::before_dispatch(app,session_id,id,proc.kind,proc.agent_session_id.lock().unwrap().as_deref(),text)?;
-            }
+            if let Some(id) = message_id { super::submissions::begin_dispatch(&app.db().conn.lock().unwrap(), session_id, id)?; }
             *attempted = true;
             if let Some(handled) = opencode::local_command(app, session_id, &proc, text)? {
                 if let Some(id) = message_id {
@@ -1905,14 +1873,13 @@ impl ChatManager {
                 text: text.to_string(),
                 images,
             };
-            super::recovery::queue(&app.db().conn.lock().unwrap(), session_id, &item, false)?;
             *attempted = true;
             turn.waiting.push(item);
             drop(turn);
             emit_queue(app, session_id, &proc);
             return Ok("queued");
         }
-        if turn.running || turn.paused {
+        if turn.running {
             let item = QueuedMessage {
                 id: message_id.map(str::to_owned).unwrap_or_else(|| format!("q-{}", proc.next_request.fetch_add(1, Ordering::Relaxed))),
                 text: text.to_string(),
@@ -1920,7 +1887,6 @@ impl ChatManager {
             };
             // Interrupting means "do this instead of what you are doing", so this message goes ahead of
             // anything already waiting rather than behind it.
-            super::recovery::queue(&app.db().conn.lock().unwrap(), session_id, &item, behavior == "interrupt")?;
             *attempted = true;
             if behavior == "interrupt" {
                 turn.waiting.insert(0, item);
@@ -1951,15 +1917,11 @@ impl ChatManager {
         *attempted = true;
         if let Err(e) = dispatch(app, session_id, &proc, text, &images, message_id) {
             // A lost receipt cannot end a turn whose provider write completed successfully.
-            if e.written {
-                emit(app,session_id,json!({"type":"recoveryChanged"}));
-                return Err(e.message);
-            }
-            // A failed provider write has no running clock; its uncertain queue remains paused.
+            if e.written { return Err(e.message); }
+            // Nothing was written, so nothing will report a result to clear this again.
             let mut turn = proc.turn.lock().unwrap();
             turn.running = false;
             turn.started_at = None;
-            if message_id.is_some_and(|id|super::recovery::dispatch_pending(&app.db().conn.lock().unwrap(),session_id,id)) { turn.paused=true; }
             drop(turn);
             // A snapshot may have observed the clock in the brief interval before the failed write.
             emit(app, session_id, json!({"type":"turnCompleted"}));
@@ -1969,7 +1931,7 @@ impl ChatManager {
         Ok("sent")
     }
 
-    /// Preserve a queued prompt before dispatch; uncertain writes move from the queue to recovery.
+    /// Promote a queued message into the current turn, preserving it on native refusal.
     pub fn queue_steer(&self, app: &AppCtx, session_id: &str, id: &str) -> Result<(), String> {
         let proc = self.get(session_id)?;
         let _action = proc.action.lock().unwrap();
@@ -1988,21 +1950,14 @@ impl ChatManager {
             item
         };
         let result = dispatch_steer(app, session_id, &proc, &item.text, &item.images, Some(&item.id));
-        let (unknown,confirmed)={
-            let conn=app.db().conn.lock().unwrap();
-            (result.is_err() && super::recovery::dispatch_pending(&conn,session_id,id),
-                result.is_err() && super::recovery::dispatch_confirmed(&conn,session_id,id))
-        };
         {
             let mut turn = proc.turn.lock().unwrap();
             turn.steering = false;
-            if result.is_ok() || unknown || confirmed {
+            if result.is_ok() {
                 turn.waiting.retain(|item| item.id != id);
-                if turn.waiting.is_empty() { turn.paused=false; }
             }
         }
         emit_queue(app, session_id, &proc);
-        if unknown || confirmed { emit(app,session_id,json!({"type":"recoveryChanged"})); }
         // A completion received while awaiting acceptance deferred the next queued turn.
         start_waiting_message(app, session_id, &proc);
         release_if_idle(app, session_id, &proc);
@@ -2021,9 +1976,7 @@ impl ChatManager {
             let mut turn = proc.turn.lock().unwrap();
             if turn.waiting.iter().any(|item| item.id == id) {
                 crate::agent::spawn_requests::cancel_queued(app, session_id, id)?;
-                super::recovery::cancel(&app.db().conn.lock().unwrap(), session_id, id)?;
                 turn.waiting.retain(|item| item.id != id);
-                if turn.waiting.is_empty() { turn.paused=false; }
             }
         }
         emit_queue(app, session_id, &proc);
@@ -2052,7 +2005,6 @@ impl ChatManager {
                     // A delayed editor from another client must not rewrite completed execution facts.
                     if item.images.is_empty() && super::shell::parse_context(&item.text).is_some() { continue; }
                     crate::agent::spawn_requests::edit_queued(app, session_id, id, text, &item.images)?;
-                    super::recovery::edit(&app.db().conn.lock().unwrap(), session_id, id, text)?;
                     item.text = text.to_string();
                 }
             }
@@ -2672,7 +2624,6 @@ impl ChatManager {
                 user_messages: Some(Vec::new()),
                 positions: HashMap::new(), page_kind: "full", has_more: false, total_rows: 0,
                 submission_receipts: true,
-                recovery: super::recovery::Recovery::default(),
                 rows_revision: 0,
                 queue_revision: 0,
                 rewind_scopes: Vec::new(),
@@ -2753,7 +2704,6 @@ impl ChatManager {
             user_messages,
             positions, page_kind, has_more, total_rows,
             submission_receipts: true,
-                recovery: super::recovery::Recovery::default(),
             rows_revision,
             queue_revision,
             rewind_scopes: rewind_scopes(proc.kind),
@@ -2945,8 +2895,6 @@ impl ChatManager {
         let proc = self.sessions.lock().unwrap().get(session_id).cloned();
         let Some(proc) = proc else {
             let _owner = super::ownership::idle_guard(app,session_id)?;
-            cancel_persisted_queue(app,session_id)?;
-            super::recovery::end_turn(app,session_id);
             if let Some(run) = self.shell_runs.lock().unwrap().remove(session_id) { run.abandon(); }
             return Ok(());
         };
@@ -2958,8 +2906,6 @@ impl ChatManager {
         if !sessions.get(session_id).is_some_and(|current| Arc::ptr_eq(current, &proc)) {
             return Ok(());
         }
-        cancel_persisted_queue(app,session_id)?;
-        super::recovery::end_turn(app,session_id);
         if let Some(run) = self.shell_runs.lock().unwrap().remove(session_id) { run.abandon(); }
         {
             let mut turn = proc.turn.lock().unwrap();
@@ -3034,7 +2980,7 @@ fn release_if_idle(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
         && !turn.running
         && !proc.shell_running.load(Ordering::Relaxed)
         && !auth::active(proc)
-        && (turn.waiting.is_empty() || turn.paused)
+        && turn.waiting.is_empty()
         && turn.active_tasks.is_empty()
         && turn.background_tasks.is_empty()
         && turn.settling.is_empty()
@@ -3072,7 +3018,6 @@ fn settle_background_state(app: &AppCtx, session_id: &str, proc: &Arc<ChatProces
         if background_pending(&turn) || turn.waking.is_some_and(|since| since.elapsed() < WAKE_LIMIT) {
             continue;
         }
-        super::recovery::end_turn(&app,&session_id);
         emit_state(&app, &session_id, AgentState::Waiting);
         return;
     });
@@ -3648,9 +3593,6 @@ fn spawn_stdout_reader(
         let _exit_callback = proc.callbacks.read().unwrap();
         if proc.kind == SessionKind::Antigravity { antigravity::finish_rows(&proc); }
         proc.alive.store(false, Ordering::Relaxed);
-        if app.chat().owns_process(&session_id,&proc) && !proc.released.load(Ordering::Relaxed) && super::recovery::interrupt(&app,&session_id).is_err() {
-            crate::diagnostic_warn!("chat recovery: failed to record process interruption");
-        }
         for (_, waiter) in proc.waiters.lock().unwrap().drain() {
             let _ = waiter.send(Err("The agent exited before answering the request".to_string()));
         }
@@ -4246,7 +4188,7 @@ fn handle_codex_response(
         // replaced when the new thread's start response is remembered.
         if matches!(kind, Some("thread_resume" | "thread_fork_open"))
             && message.to_lowercase().contains("no rollout")
-            && app.db().conn.lock().unwrap().query_row("SELECT NOT EXISTS(SELECT 1 FROM chat_recovery_items WHERE session_id=?1 AND phase IN ('dispatching','sent')) AND NOT EXISTS(SELECT 1 FROM chat_submissions WHERE session_id=?1 AND (outcome IS NULL OR (outcome!='{\"Ok\":\"queued\"}' AND json_extract(outcome,'$.rejected') IS NULL)))",[session_id],|r|r.get::<_,bool>(0)).unwrap_or(false)
+            && app.db().conn.lock().unwrap().query_row("SELECT NOT EXISTS(SELECT 1 FROM chat_submissions WHERE session_id=?1 AND (outcome IS NULL OR (outcome!='{\"Ok\":\"queued\"}' AND json_extract(outcome,'$.rejected') IS NULL)))",[session_id],|r|r.get::<_,bool>(0)).unwrap_or(false)
         {
             let abandoned = proc.agent_session_id.lock().unwrap().take();
             crate::diagnostic_warn!(
@@ -4498,21 +4440,11 @@ fn adopt_agent_turn(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
     emit_state(app, session_id, AgentState::Working);
 }
 
-fn restore_unwritten_queue(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, item: &QueuedMessage) {
-    if super::recovery::still_queued(&app.db().conn.lock().unwrap(),session_id,&item.id) {
-        let mut turn=proc.turn.lock().unwrap();
-        if !turn.waiting.iter().any(|v|v.id==item.id) { turn.waiting.insert(0,item.clone()); }
-        turn.paused=true;
-        drop(turn);
-        emit_queue(app,session_id,proc);
-    }
-}
-
 fn start_waiting_message(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
     if app.chat().closing.load(Ordering::Relaxed) || auth::blocks_queue(proc) { return; }
     let next = {
         let mut turn = proc.turn.lock().unwrap();
-        if !proc.ready.load(Ordering::Relaxed) || turn.paused || turn.running || turn.steering || turn.waiting.is_empty() {
+        if !proc.ready.load(Ordering::Relaxed) || turn.running || turn.steering || turn.waiting.is_empty() {
             return;
         }
         turn.running = true;
@@ -4523,7 +4455,6 @@ fn start_waiting_message(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>
     }
     emit_queue(app, session_id, &proc);
     if let Err(message) = dispatch(app, session_id, proc, &next.text, &next.images, Some(&next.id)) {
-        emit(app,session_id,json!({"type":"recoveryChanged"}));
         if message.written {
             emit(app, session_id, json!({"type":"error","message":message.message}));
             return;
@@ -4531,9 +4462,7 @@ fn start_waiting_message(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>
         let mut turn = proc.turn.lock().unwrap();
         turn.running = false;
         turn.started_at = None;
-        if super::recovery::dispatch_pending(&app.db().conn.lock().unwrap(),session_id,&next.id) { turn.paused=true; }
         drop(turn);
-        restore_unwritten_queue(app,session_id,proc,&next);
         emit(app, session_id, json!({"type":"error","message":message.message}));
         emit(app, session_id, json!({"type":"turnCompleted"}));
         emit_state(app, session_id, AgentState::Waiting);
@@ -5375,7 +5304,7 @@ fn handle_turn_end(
         for id in foreground_tasks.drain() {
             active_tasks.remove(&id);
         }
-        let next = if app.chat().closing.load(Ordering::Relaxed) || turn.paused || turn.steering || turn.waiting.is_empty() || auth::blocks_queue(proc) {
+        let next = if app.chat().closing.load(Ordering::Relaxed) || turn.steering || turn.waiting.is_empty() || auth::blocks_queue(proc) {
             turn.running = false;
             None
         } else {
@@ -5384,7 +5313,6 @@ fn handle_turn_end(
         };
         (next, interrupted, started_at, background_pending(&turn))
     };
-    if !background { super::recovery::end_turn(app,session_id); }
     if let Some(duration_ms) = reported_duration_ms.or_else(|| {
         started_at.map(|started| completed_at.saturating_sub(started))
     }) {
@@ -5419,7 +5347,6 @@ fn handle_turn_end(
     };
     emit_queue(app, session_id, &proc);
     if let Err(e) = dispatch(app, session_id, proc, &item.text, &item.images, Some(&item.id)) {
-        emit(app,session_id,json!({"type":"recoveryChanged"}));
         if e.written {
             emit(app, session_id, json!({"type":"error","message":e.message}));
             return;
@@ -5427,9 +5354,7 @@ fn handle_turn_end(
         let mut turn = proc.turn.lock().unwrap();
         turn.running = false;
         turn.started_at = None;
-        if super::recovery::dispatch_pending(&app.db().conn.lock().unwrap(),session_id,&item.id) { turn.paused=true; }
         drop(turn);
-        restore_unwritten_queue(app,session_id,proc,&item);
         emit(app, session_id, json!({"type":"error","message":e.message}));
         emit(app, session_id, json!({"type":"turnCompleted"}));
         emit_state(app, session_id, AgentState::Waiting);
@@ -5561,15 +5486,6 @@ fn terminate_owned(child: &mut std::process::Child) {
     if child.try_wait().is_ok_and(|status|status.is_none()) { crate::host::kill_process_tree(child); }
 }
 
-fn cancel_persisted_queue(app: &AppCtx, session_id: &str) -> Result<(),String> {
-    let items=super::recovery::queued(&app.db().conn.lock().unwrap(),session_id)?;
-    for item in items {
-        crate::agent::spawn_requests::cancel_queued(app,session_id,&item.id)?;
-        super::recovery::cancel(&app.db().conn.lock().unwrap(),session_id,&item.id)?;
-    }
-    Ok(())
-}
-
 fn verify_native_identity(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: &str) -> bool {
     if proc.identity_checked.load(Ordering::Relaxed) { return true; }
     if proc.expected_native.as_ref().is_some_and(|expected|expected!=id) {
@@ -5620,14 +5536,7 @@ fn dispatch_steer(
         if proc.current_turn.lock().unwrap().is_none() { return Err("Codex is still starting its turn. Retry steering once the turn has started.".into()); }
     }
     claim_native_writer(app,proc)?;
-    if let Some(id) = message_id {
-        super::recovery::before_dispatch(app, session_id, id, proc.kind, proc.agent_session_id.lock().unwrap().as_deref(), text)?;
-        if super::recovery::dispatch_pending(&app.db().conn.lock().unwrap(),session_id,id) {
-            // Another client may reconcile delivery before the wire response arrives. Keep its body
-            // visible even if that response is later lost or refused.
-            proc.timeline.lock().unwrap().upsert(user_row(row_id.clone(),text,images.to_vec(),Some(sent_at as i64)));
-        }
-    }
+    if let Some(id) = message_id { super::submissions::begin_dispatch(&app.db().conn.lock().unwrap(), session_id, id)?; }
     match proc.kind {
         SessionKind::Codex => {
             let thread_id = proc.agent_session_id.lock().unwrap().clone()
@@ -5642,7 +5551,7 @@ fn dispatch_steer(
                 message_id: turn_id.clone(), last_message_id: None, turn_id: Some(turn_id), text: text.to_string(),
             });
         }
-        SessionKind::Opencode => opencode::steer(app, session_id, proc, &row_id, text, images)?,
+        SessionKind::Opencode => opencode::steer(proc, &row_id, text, images)?,
         SessionKind::Pi | SessionKind::Omp => pi::steer(proc, text, images)?,
         _ => proc.write(&protocol::user_message(text, images))?,
     }
@@ -5701,9 +5610,7 @@ fn dispatch(
     };
     if newly_started { proc.extras.lock().unwrap().generation = generation::GenerationTiming::default(); }
     let row_id = message_id.map(str::to_owned).unwrap_or_else(|| format!("u-{}", proc.next_request.fetch_add(1, Ordering::Relaxed)));
-    if let Some(id) = message_id {
-        super::recovery::before_dispatch(app, session_id, id, proc.kind, proc.agent_session_id.lock().unwrap().as_deref(), text)?;
-    }
+    if let Some(id) = message_id { super::submissions::begin_dispatch(&app.db().conn.lock().unwrap(), session_id, id)?; }
     proc.timeline.lock().unwrap().upsert(user_row(row_id.clone(), text, images.to_vec(), Some(sent_at as i64)));
     // Publish the clock before a fast provider can complete the turn on its reader thread.
     if newly_started {
@@ -6224,7 +6131,6 @@ fn mcp_set_servers_error(response: &Value) -> Option<String> {
 /// Publish the whole `extras` object. See `ClaudeExtras`.
 fn emit_extras(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
     let extras = proc.extras.lock().unwrap().published();
-    if extras.background_tasks.iter().any(|task|!task.finished()) { super::recovery::background_work(app,session_id); }
     emit(app, session_id, json!({"type":"extras","extras":extras}));
 }
 
@@ -6255,12 +6161,12 @@ fn emit(app: &AppCtx, session_id: &str, mut payload: Value) {
 /// Publish the whole queue rather than one change to it. Every client showing this conversation has to
 /// agree on what is waiting, and a list is the only description that cannot drift.
 fn emit_queue(app: &AppCtx, session_id: &str, proc: &ChatProcess) {
-    let (waiting, revision, paused) = {
+    let (waiting, revision) = {
         let mut turn = proc.turn.lock().unwrap();
         turn.revision += 1;
-        (turn.waiting.clone(), turn.revision, turn.paused && !turn.waiting.is_empty())
+        (turn.waiting.clone(), turn.revision)
     };
-    emit(app, session_id, json!({"type":"queued","items":waiting,"paused":paused,"revision":revision,"epoch":proc.started_at}));
+    emit(app, session_id, json!({"type":"queued","items":waiting,"revision":revision,"epoch":proc.started_at}));
 }
 
 /// Report work state through the same channel PTY sessions use, so the sidebar, tab dots, and notifications
@@ -7885,6 +7791,7 @@ mod tests {
     }
 
     include!("split_workflow_tests.rs");
+    include!("review_workflow_tests.rs");
 
     fn plan_execute_fixture() -> (AppCtx, Vec<Arc<ChatProcess>>, String) {
         let tag=format!("workflow-{}",uuid::Uuid::new_v4());
@@ -8324,7 +8231,7 @@ mod tests {
         }
         std::fs::write(root.join("uncommitted.txt"),"preserve").unwrap();
         let req: menu::Request=serde_json::from_value(json!({"requestId":uuid::Uuid::new_v4().to_string(),"context":{"projectId":"p","groupId":"g","parentSessionId":"parent"},"prompt":"Task","images":[{"mimeType":"image/png","data":"AQID"}],"cwd":root,"worktree":true,
-            "config":{"worktreeMode":mode,"plan":{"agent":"claude","model":"review-model","effort":"high"},"exec":{"agent":"claude","model":"execute-model","effort":"low"}}})).unwrap();
+            "config":{"reviewEnabled":false,"worktreeMode":mode,"plan":{"agent":"claude","model":"review-model","effort":"high"},"exec":{"agent":"claude","model":"execute-model","effort":"low"}}})).unwrap();
         let mut too_many:menu::Request=serde_json::from_value(serde_json::to_value(&req).unwrap()).unwrap();
         too_many.images=vec![req.images[0].clone();crate::command_core::MAX_IMAGES_PER_MESSAGE+1];
         assert!(menu::start(&app,&too_many).unwrap_err().contains("At most"));
@@ -8371,7 +8278,7 @@ mod tests {
         tell_report(&app,&action(executor,"report",2)).unwrap();
         finish_turn(app.chat(),&app,executor,"success");
         let before=app.chat().snapshot(planner).rows.len();
-        let accepted=flow::action(&app,&action(planner,"accept",2)).unwrap();
+        let accepted=flow::action(&app,&action(planner,"finish",2)).unwrap();
         assert_eq!(accepted["delivery"],"recorded"); assert_eq!(accepted["run"]["state"],"completed");
         assert_eq!(accepted["run"]["executorId"],executor);
         let restored = crate::db::repo::get_session(&app.db().conn.lock().unwrap(), executor).unwrap().unwrap();
@@ -8930,9 +8837,6 @@ mod tests {
             assert_eq!(crate::command_core::chat_send(&app,"s","next",images,Some("queue"),Some(&next)).unwrap(),"queued");
             assert_eq!(said(app.chat(),"s"),vec!["first"]);
             assert_eq!(queued(app.chat(),"s"),vec!["next"]);
-            assert_eq!(super::super::recovery::queued(&app.db().conn.lock().unwrap(),"s").unwrap()[0].images[0].data,"AQID");
-            let state=super::super::recovery::read(&app,"s").unwrap();
-            assert_eq!(state.items.iter().find(|item|item["id"]==first).unwrap()["status"],"unknown");
             app.db().conn.lock().unwrap().execute_batch("DROP TRIGGER deny_success;").unwrap();
             handle_turn_end(&app,"s",&proc,"success",None);
             assert_eq!(said(app.chat(),"s"),vec!["first","next"]);
@@ -8943,49 +8847,12 @@ mod tests {
     }
 
     #[test]
-    fn durable_queue_preserves_prewrite_failures_and_exposes_uncertain_steering() {
-        let app=ctx("durable-queue-write-boundaries");
-        app.db().conn.lock().unwrap().execute_batch("INSERT INTO projects(id,name,root_path,created_at) VALUES ('p','Recovery','/tmp',0); INSERT INTO sessions(id,project_id,name,kind,engine,created_at) VALUES ('s','p','Recovery','claude','chat',0);").unwrap();
-        let (proc,_stdout)=cat_process();
-        app.chat().sessions.lock().unwrap().insert("s".into(),proc.clone());
-        app.db().conn.lock().unwrap().execute_batch("CREATE TRIGGER deny_dispatch BEFORE UPDATE OF outcome ON chat_submissions WHEN NEW.outcome='{\"dispatching\":true}' BEGIN SELECT RAISE(ABORT,'fixture prewrite failure'); END;").unwrap();
-        let direct_id=format!("msg-{}",uuid::Uuid::new_v4());
-        assert!(crate::command_core::chat_send(&app,"s","not written",Vec::new(),Some("queue"),Some(&direct_id)).unwrap_err().contains("fixture prewrite failure"));
-        let rejected=super::super::recovery::read(&app,"s").unwrap();
-        assert_eq!(rejected.items.iter().find(|item|item["id"]==direct_id).unwrap()["status"],"failed");
-        assert!(said(app.chat(),"s").is_empty());
-        proc.turn.lock().unwrap().running=true;
-        let id=format!("msg-{}",uuid::Uuid::new_v4());
-        let images=vec![ChatImage { mime_type:"image/png".into(),data:"AQID".into() }];
-        let payload=serde_json::to_vec(&json!(["correction",images,"queue"])).unwrap();
-        super::super::submissions::claim(&app.db().conn.lock().unwrap(),"s",&id,&payload).unwrap();
-        assert_eq!(app.chat().send_identified(&app,"s","correction",images.clone(),"queue",Some(&id)).unwrap(),"queued");
-        proc.turn.lock().unwrap().running=false;
-        app.chat().resume_queue(&app,"s").unwrap();
-        assert_eq!(queued(app.chat(),"s"),vec!["correction"]);
-        assert!(app.chat().queue_paused("s"));
-        assert!(said(app.chat(),"s").is_empty());
-        assert!(super::super::recovery::still_queued(&app.db().conn.lock().unwrap(),"s",&id));
-        app.db().conn.lock().unwrap().execute_batch("DROP TRIGGER deny_dispatch;").unwrap();
-        proc.turn.lock().unwrap().running=true;
-        proc.stdin.lock().unwrap().take();
-        assert!(app.chat().queue_steer(&app,"s",&id).is_err());
-        assert!(queued(app.chat(),"s").is_empty());
-        let recovery=super::super::recovery::read(&app,"s").unwrap();
-        let item=recovery.items.iter().find(|item|item["id"]==id).unwrap();
-        assert_eq!(item["status"],"unknown");
-        assert_eq!(item["text"],"correction");
-        assert_eq!(item["images"].as_array().unwrap().len(),1);
-        assert!(super::super::submissions::claim_retry(&app.db().conn.lock().unwrap(),"s",&id,&payload).is_err());
-        proc.child.lock().unwrap().wait().unwrap();
-    }
-
-    #[test]
     fn an_old_queue_editor_cannot_mutate_a_replacement_process() {
         let app=ctx("queue-editor-replacement");
         app.db().conn.lock().unwrap().execute_batch("INSERT INTO projects(id,name,root_path,created_at) VALUES ('p','Recovery','/tmp',0); INSERT INTO sessions(id,project_id,name,kind,engine,created_at) VALUES ('s','p','Recovery','claude','chat',0);").unwrap();
         let (previous,_previous_stdout)=cat_process();
-        previous.turn.lock().unwrap().paused=true;
+        // A running turn keeps the message waiting in the queue.
+        previous.turn.lock().unwrap().running=true;
         app.chat().sessions.lock().unwrap().insert("s".into(),previous.clone());
         let id=format!("msg-{}",uuid::Uuid::new_v4());
         let payload=serde_json::to_vec(&json!(["saved",[],"queue"])).unwrap();
@@ -9003,13 +8870,11 @@ mod tests {
         }
         let (next,_next_stdout)=cat_process();
         next.turn.lock().unwrap().waiting=previous.turn.lock().unwrap().waiting.clone();
-        next.turn.lock().unwrap().paused=true;
         let replacement=previous.callbacks.write().unwrap();
         app.chat().sessions.lock().unwrap().insert("s".into(),next.clone());
         drop(replacement); drop(action);
         assert!(rx.recv_timeout(Duration::from_secs(5)).unwrap().unwrap_err().contains("agent changed"));
         assert_eq!(next.turn.lock().unwrap().waiting[0].text,"saved");
-        assert_eq!(super::super::recovery::queued(&app.db().conn.lock().unwrap(),"s").unwrap()[0].text,"saved");
         worker.join().unwrap();
         terminate_owned(&mut previous.child.lock().unwrap());
         app.chat().stop(&app,"s").unwrap();
@@ -9072,7 +8937,7 @@ mod tests {
     }
 
     #[test]
-    fn application_shutdown_preserves_durable_queue_and_rejects_new_work() {
+    fn application_shutdown_stops_agents_and_rejects_new_work() {
         let app=ctx("durable-queue-shutdown");
         app.db().conn.lock().unwrap().execute_batch("INSERT INTO projects(id,name,root_path,created_at) VALUES ('p','Recovery','/tmp',0); INSERT INTO sessions(id,project_id,name,kind,engine,created_at) VALUES ('s','p','Recovery','claude','chat',0);").unwrap();
         let (proc,_stdout)=cat_process();
@@ -9086,37 +8951,8 @@ mod tests {
         app.chat().shutdown(&app);
         assert!(!app.chat().is_alive("s"));
         assert!(proc.child.lock().unwrap().try_wait().unwrap().is_some());
-        let restored=super::super::recovery::queued(&app.db().conn.lock().unwrap(),"s").unwrap();
-        assert_eq!(restored[0].id,id);
-        assert_eq!(restored[0].text,"after restart");
-        assert_eq!(restored[0].images[0].data,"AQID");
         assert!(app.chat().start(&app,"s",SessionKind::Claude,None,"missing-fixture",None,None,None,None,None,&[],false).unwrap_err().contains("shutting down"));
         assert!(app.chat().send(&app,"s","too late",Vec::new(),"queue").unwrap_err().contains("shutting down"));
-    }
-
-    #[test]
-    fn reconciled_steering_receipt_survives_a_late_native_error_without_requeueing() {
-        let (app,proc,mut reader)=codex_permission_fixture("queued-steer-reconciled");
-        *proc.current_turn.lock().unwrap()=Some("turn-test".into());
-        proc.turn.lock().unwrap().running=true;
-        let id=format!("msg-{}",uuid::Uuid::new_v4());
-        let images=vec![ChatImage { mime_type:"image/png".into(),data:"AQID".into() }];
-        let payload=serde_json::to_vec(&json!(["accepted body",images,"queue"])).unwrap();
-        super::super::submissions::claim(&app.db().conn.lock().unwrap(),"s",&id,&payload).unwrap();
-        app.chat().send_identified(&app,"s","accepted body",images,"queue",Some(&id)).unwrap();
-        let response_app=app.clone(); let responder=proc.clone(); let response_id=id.clone();
-        let worker=std::thread::spawn(move || {
-            let request=read_codex_request(&mut reader);
-            assert_eq!(request["method"],"turn/steer");
-            // Simulate a second client's native-history reconciliation while the caller awaits its reply.
-            super::super::submissions::finish_dispatch(&response_app.db().conn.lock().unwrap(),"s",&response_id,"sent").unwrap();
-            handle_codex_line(&response_app,"s",&responder,&json!({"id":request["id"],"error":{"message":"late native error"}}).to_string());
-        });
-        assert!(app.chat().queue_steer(&app,"s",&id).is_err()); worker.join().unwrap();
-        assert!(queued(app.chat(),"s").is_empty());
-        assert_eq!(said(app.chat(),"s"),vec!["accepted body"]);
-        assert!(matches!(super::super::submissions::claim_retry(&app.db().conn.lock().unwrap(),"s",&id,&payload).unwrap(),super::super::submissions::Claim::Complete(Ok(v)) if v=="sent"));
-        proc.child.lock().unwrap().kill().unwrap(); proc.child.lock().unwrap().wait().unwrap();
     }
 
     #[test]
@@ -10398,30 +10234,6 @@ mod tests {
         let proc = m.get("s").unwrap();
         assert!(proc.released.load(Ordering::Relaxed));
         assert!(proc.stdin.lock().unwrap().is_none());
-    }
-
-    /// Paused recovery messages survive idle release without keeping an unused agent alive.
-    #[test]
-    fn detaching_with_a_paused_recovery_queue_releases_without_losing_its_payload() {
-        let app=ctx("detach-paused-recovery");
-        app.db().conn.lock().unwrap().execute_batch("INSERT INTO projects(id,name,root_path,created_at) VALUES ('p','Recovery','/tmp',0); INSERT INTO sessions(id,project_id,name,kind,engine,created_at) VALUES ('s','p','Recovery','claude','chat',0);").unwrap();
-        let (proc,_stdout)=cat_process();
-        proc.turn.lock().unwrap().paused=true;
-        app.chat().sessions.lock().unwrap().insert("s".into(),proc);
-        let id=format!("msg-{}",uuid::Uuid::new_v4());
-        let images=vec![ChatImage { mime_type:"image/png".into(),data:"AQID".into() }];
-        let payload=serde_json::to_vec(&json!(["saved",images,"queue"])).unwrap();
-        super::super::submissions::claim(&app.db().conn.lock().unwrap(),"s",&id,&payload).unwrap();
-        assert_eq!(app.chat().send_identified(&app,"s","saved",images,"queue",Some(&id)).unwrap(),"queued");
-        app.chat().detach(&app,"s");
-        assert!(!app.chat().is_alive("s"));
-        let queue=super::super::recovery::queued(&app.db().conn.lock().unwrap(),"s").unwrap();
-        assert_eq!(queue.len(),1);
-        assert_eq!(queue[0].id,id);
-        assert_eq!(queue[0].text,"saved");
-        assert_eq!(queue[0].images[0].data,"AQID");
-        assert!(app.chat().snapshot("s").rows.is_empty());
-        assert!(app.chat().queue_paused("s"));
     }
 
     /// Closing the view mid-answer must not cut the answer off: the process stays until the turn ends.

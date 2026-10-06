@@ -1,9 +1,41 @@
 # Changelog
 
-> Created: 2026-07-09 16:10 · Updated: 2026-10-05
+> Created: 2026-07-09 16:10 · Updated: 2026-10-06
 
 All notable changes to VelaTerm are documented here, newest first.
 v0.1.91 is the first public release; earlier version numbers were internal iterations and are not covered.
+
+---
+
+## v0.2.8 — 2026-10-06
+
+- 🪟 Windows: returning to the window leaves keyboard focus where it is when it is already inside the page.
+
+- 🛡️ Windows: Huorong antivirus no longer flags VelaTerm and vela-server as `Trojan/MSIL.ShellLoader.q`.
+
+- 🔕 Windows: new sessions and model list refreshes no longer run PowerShell in the background, and Cursor session status is now detected from terminal output, which can be less precise.
+
+- ⛔ Windows: input starting with `!` in the conversation view is no longer run as a shell command; a notice appears and the input is kept, while earlier commands in the history still display.
+
+- 🔐 SSH connections to Windows hosts running the built-in OpenSSH server no longer start PowerShell with `-EncodedCommand`.
+
+- 🚀 TUI agent sessions start correctly when PATH is long, without a truncated launch command in the terminal.
+
+- ⬇️ TUI agent sessions scroll to the bottom when a turn ends or the agent asks for approval, unless you are reading earlier output.
+
+- 💾 The experimental conversation recovery from v0.2.7 is removed: Chat no longer shows duplicate Saved submission messages or interruption notices, and unsent queued messages are not kept after a restart.
+
+- 🔁 Plan-and-execute workflows add an optional independent Review role, on by default for new workflows, with its own agent, model and reasoning effort; `vspawn --plan-execute` accepts `--review`, `--no-review`, `--review-agent`, `--review-model` and `--review-effort`.
+
+- 🏷️ Rename with AI… asks for confirmation first and lets you choose the agent, model and reasoning effort for that rename, with the dialog shown centered while options load.
+
+- 🔍 Sessions, groups and projects can be dragged while a name search, status filter or mark filter is active.
+
+- ➕ With a status filter active, a new session stays under its group or parent session until you refresh status or change the filter.
+
+- 🪟 App windows open larger by default, sized to the display's available area, and connection windows open centered on the display of the main window.
+
+- 🎨 Collections have a new stacked icon, dark title bar icons are slightly dimmer, the four buttons in the empty sidebar share one width, and form dialogs use a single label style.
 
 ---
 

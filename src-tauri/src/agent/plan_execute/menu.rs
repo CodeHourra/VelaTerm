@@ -141,7 +141,8 @@ fn defaults(app: &AppCtx, config: &Config, parent: Option<&Session>) -> Result<C
     };
     let plan = role(&config.plan, SessionKind::Claude)?;
     let exec = role(&config.exec, plan.agent.unwrap())?;
-    Ok(Config { plan, exec, ..config.clone() })
+    let review = if config.review_enabled == Some(false) && config.review.agent.is_some_and(|a| !supported(a)) { config.review.clone() } else { role(&config.review,plan.agent.unwrap())? };
+    Ok(Config { plan, exec, review, review_enabled:Some(config.review_enabled.unwrap_or(true)), ..config.clone() })
 }
 
 pub fn prepare(app: &AppCtx, context: &Context) -> Result<Value, String> {
@@ -159,7 +160,11 @@ pub fn start(app: &AppCtx, req: &Request) -> Result<Value, String> {
         return Err("A workflow needs a task".into());
     }
     let placement = placement(app, &req.context)?;
-    let config = defaults(app, &req.config, placement.parent.as_ref())?;
+    let existing = get(app,&req.request_id).ok();
+    let mut config = defaults(app, &req.config, placement.parent.as_ref())?;
+    if existing.as_ref().is_some_and(|r|r.config.review_enabled.is_none()) && req.config.review_enabled.is_none() {
+        config.review_enabled = None; config.review = RoleConfig::default();
+    }
     validate_config(&config)?;
     core::check_images(&req.images)?;
     let request = json!({"context":req.context,"prompt":req.prompt,"cwd":req.cwd,"worktree":req.worktree,"config":config});
@@ -213,12 +218,12 @@ pub fn start(app: &AppCtx, req: &Request) -> Result<Value, String> {
         inherited.and(placement.inherited_base.as_deref()), |tx, planner| {
             let message_id = format!("msg-{id}");
             let directory = planner.cwd.as_deref().unwrap_or("");
-            let task=format!("{}\n\nWorkflow ID: {id}\nRole: planner\nWorking directory: {directory}\nThis workflow was created by the user from the New Session menu. There is no initiating conversation; present the final audit here.\n\nUser task:\n{}",
-                include_str!("../../../../skills/vspawn/references/plan-execute.md"),req.prompt);
+            let task=format!("{}\n\nWorkflow ID: {id}\nRole: planner\nWorking directory: {directory}\nThis workflow was created by the user from the New Session menu. There is no initiating conversation; present the final delivery summary here.\n\nUser task:\n{}",
+                review::protocol(&config),req.prompt);
             let origin = json!({"role":"user"});
             let wire = format!("[VelaTerm message {message_id}]\n{origin}\n\n{task}").trim_end().to_owned();
-            tx.execute("INSERT INTO plan_execute_runs(id,owner_id,planner_id,config,task,state) VALUES (?1,?2,?2,?3,?4,'planning')",
-                params![id,planner.id,serde_json::to_string(&config).map_err(|e|e.to_string())?,req.prompt]).map_err(|e|e.to_string())?;
+            tx.execute("INSERT INTO plan_execute_runs(id,owner_id,planner_id,config,task,state,review_status) VALUES (?1,?2,?2,?3,?4,'planning',?5)",
+                params![id,planner.id,serde_json::to_string(&config).map_err(|e|e.to_string())?,req.prompt,config.initial_review_status()]).map_err(|e|e.to_string())?;
             tx.execute("INSERT INTO plan_execute_menu_launches(run_id,request) VALUES (?1,?2)",
                 params![id,request.to_string()]).map_err(|e|e.to_string())?;
             tx.execute("INSERT INTO plan_execute_messages(id,run_id,sender_id,target_id,action,round,fingerprint,wire,origin) VALUES (?1,?2,?3,?3,'start',0,'user',?4,?5)",

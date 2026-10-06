@@ -10,9 +10,8 @@ import { type MenuItem } from "../components/ContextMenu";
 import { FormModal, type FieldDef } from "../components/FormModal";
 import Icons from "../components/Icons";
 import { canExportContext, exportSessionToFile } from "../exportSession";
-import { t, useT, type I18nKey } from "../i18n";
-import { renameSessionWithAgent } from "../ipc/tree";
-import { navigateSmartRename } from "./SmartRename/navigation";
+import { t, useT } from "../i18n";
+import { navigateSmartRename, smartRenameUrl } from "./SmartRename/navigation";
 import {
   createWorktree,
   downloadFullGitbash,
@@ -72,11 +71,6 @@ import { navigatePlanExecute, planExecuteUrl } from "../components/planExecuteNa
 
 /** Number of direct agent shortcuts on the first New Session menu level. */
 const QUICK_AGENT_COUNT = 3;
-const TITLE_ERROR_KEYS: Record<string, I18nKey> = {
-  empty: "sessionTitle.unavailable", unavailable: "sessionTitle.unavailable", unsupported: "sessionTitle.unavailable",
-  no_agent: "sessionTitle.noAgent", busy: "sessionTitle.busy", too_large: "sessionTitle.tooLarge",
-  timeout: "sessionTitle.timeout", invalid: "sessionTitle.invalid", changed: "sessionTitle.changed",
-};
 /** Default shortcut order when no recent history exists. */
 const DEFAULT_QUICK_AGENTS: SessionKind[] = ["claude", "codex", "opencode"];
 /** Local agent kinds eligible for one-click first-level shortcuts. Separate from AGENT_ARGS_KINDS despite overlap. */
@@ -235,28 +229,6 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
   const closeNewGroup = () => {
     if (groupRoute) { lockGroupNavigation(false); navigateNewGroup(null); }
     else setDialog(null);
-  };
-  const [titleJobs, setTitleJobs] = useState<Record<string, string>>({});
-  const titleInFlight = useRef(new Set<string>());
-  const [titleError, setTitleError] = useState<string | null>(null);
-  const titleDialogId = useId();
-  const generateTitle = async (session: Session) => {
-    if (titleInFlight.current.has(session.id)) return;
-    titleInFlight.current.add(session.id);
-    setTitleJobs(jobs => ({ ...jobs, [session.id]: session.name }));
-    setTitleError(null);
-    try {
-      await renameSessionWithAgent(session.id);
-    } catch (error) {
-      const code = String(error).match(/session_title:([a-z_]+)/)?.[1] ?? "failed";
-      if (code === "agent_unavailable" || code === "timeout") navigateSmartRename(session.id);
-      else setTitleError(t(TITLE_ERROR_KEYS[code] ?? "sessionTitle.failed"));
-    } finally {
-      titleInFlight.current.delete(session.id);
-      setTitleJobs(jobs => {
-        const next = { ...jobs }; delete next[session.id]; return next;
-      });
-    }
   };
   const [killError, setKillError] = useState<string | null>(null);
   const [killTarget, setKillTarget] = useState<{ id: string; name: string } | null>(null);
@@ -957,7 +929,7 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
       const rootItem: MenuItem = {
         label: t("tree.projectRoot"),
         icon: isVirtualProject(useTermStore.getState().projects.find(p => p.id === node.projectId))
-          ? <Icons.layers size={14} /> : <Icons.project size={14} />,
+          ? <Icons.collection size={14} /> : <Icons.project size={14} />,
         disabled: node.groupId === null,
         onClick: () => void moveNode("session", node.id, node.projectId, null, null, Date.now()),
       };
@@ -1110,10 +1082,11 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
     if (renameItem) items.push(renameItem);
     if (sessionRec && sessionRec.kind !== "terminal") {
       items.push({
-        label: t(titleJobs[node.id] ? "sessionTitle.generating" : "sessionTitle.rename"),
+        label: t("sessionTitle.menu"),
         icon: <Icons.sparkle size={14} />,
-        disabled: !!titleJobs[node.id] || (!sessionRec.agentSessionId && sessionRec.engine !== "chat"),
-        onClick: () => void generateTitle(sessionRec),
+        disabled: !sessionRec.agentSessionId && sessionRec.engine !== "chat",
+        href: smartRenameUrl(sessionRec.id),
+        onClick: event => { event.preventDefault(); navigateSmartRename(sessionRec.id); },
       });
     }
     items.push(sep, buildMoveTo(), sep);
@@ -1160,7 +1133,7 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
     const rootItem: MenuItem = {
       label: t("tree.projectRoot"),
       icon: isVirtualProject(useTermStore.getState().projects.find(p => p.id === projectId))
-        ? <Icons.layers size={14} /> : <Icons.project size={14} />,
+        ? <Icons.collection size={14} /> : <Icons.project size={14} />,
       // Disable project root when every session is already ungrouped there.
       disabled: recs.every((s) => (s.groupId ?? null) === null),
       onClick: () => void moveMany(ids, projectId, null, null),
@@ -1271,32 +1244,6 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
 
   const dialogs = (
     <>
-      {Object.keys(titleJobs).length > 0 && (
-        <div role="status" style={{ position: "fixed", bottom: 40, right: 16, zIndex: 1400,
-          display: "flex", flexDirection: "column", gap: 8, maxWidth: "min(360px, calc(100vw - 32px))",
-          padding: 12, borderRadius: 8, background: "var(--bg-elevated)", color: "var(--text-primary)",
-          border: "1px solid var(--border)", boxShadow: "var(--shadow)", fontSize: 12 }}>
-          {Object.entries(titleJobs).map(([id, name]) => (
-            <span key={id} style={{ overflowWrap: "anywhere" }}>{t("sessionTitle.generating")} · {name}</span>
-          ))}
-        </div>
-      )}
-      {titleError !== null && (
-        <Backdrop onClose={() => setTitleError(null)}>
-          <div className="quit-card" role="alertdialog" aria-modal="true" aria-labelledby={`${titleDialogId}-title`}
-            aria-describedby={`${titleDialogId}-body`} onKeyDown={event => {
-              if (event.key === "Escape") { event.stopPropagation(); setTitleError(null); }
-            }}>
-            <div className="quit-head">
-              <div className="quit-title" id={`${titleDialogId}-title`}>{t("sessionTitle.rename")}</div>
-              <div className="quit-body" id={`${titleDialogId}-body`}>{titleError}</div>
-            </div>
-            <div className="quit-foot">
-              <button className="vlx-btn vlx-btn-primary" autoFocus onClick={() => setTitleError(null)}>{t("common.close")}</button>
-            </div>
-          </div>
-        </Backdrop>
-      )}
       {killTarget !== null && (
         <Backdrop onClose={cancelKill}>
           <div className="quit-card" role="alertdialog" aria-modal="true" aria-busy={killBusy}

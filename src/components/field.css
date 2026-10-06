@@ -1,0 +1,28 @@
+/* Shared form field rhythm: label, control and supporting text use one size and spacing everywhere. */
+.vlx-field-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.vlx-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.vlx-field-label {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1.5;
+}
+.vlx-field-required {
+  color: var(--status-error);
+}
+.vlx-field-hint {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}

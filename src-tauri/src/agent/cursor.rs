@@ -5,8 +5,9 @@
 //! three tested `--plugin-dir` layouts failed to activate hooks. To avoid modifying repositories, merge
 //! into the user-level `~/.cursor/hooks.json` with the user's consent:
 //!
-//! - Unix uses an explicitly invoked POSIX shim; Windows uses an encoded PowerShell launcher.
-//! - Both launch the hidden `--cursor-hook` entry without invoking file associations or starting a GUI.
+//! - Unix uses an explicitly invoked POSIX shim that launches the hidden `--cursor-hook` entry.
+//! - Windows registers no hook: a hidden PowerShell launcher triggers antivirus alerts. Installation only
+//!   removes entries written by earlier versions, and Cursor status relies on screen detection.
 //! - Merge only VelaTerm commands into `~/.cursor/hooks.json`, preserving user entries and refusing
 //!   malformed configuration. Recognize both separators when migrating legacy script commands.
 //! - Dynamic executable paths, ports, session IDs, and tokens remain in the injected environment.
@@ -31,6 +32,7 @@ pub use hook::run;
 /// Legacy marker retained for upgrades from script-based hooks.
 const MARKER: &str = "vlx-term/hook.sh";
 const NATIVE_MARKER: &str = "velaterm-cursor-hook-v1";
+/// Prefix of the PowerShell launcher written by earlier Windows versions, recognized only for removal.
 const WINDOWS_COMMAND_PREFIX: &str = "powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ";
 
 /// Explicit `sh` invocation avoids executable-bit and script-association dependencies.
@@ -43,46 +45,6 @@ else
 fi
 exit 0
 "#;
-
-/// The command contains no user paths or shell metacharacters. ProcessStartInfo passes VLX_EXE as
-/// data, disables ShellExecute/file associations and console windows, and copies raw stdin bytes.
-/// Both the pipe copy and child wait are bounded; the wrapper emits exactly one continue response.
-fn windows_command(event: &str) -> String {
-    use base64::Engine;
-    let code = format!(r#"# {NATIVE_MARKER}
-$ErrorActionPreference = 'Stop'
-$ProgressPreference = 'SilentlyContinue'
-$p = $null
-try {{
-  if ($env:VLX_EXE -and $env:VLX_SPAWN_URL -and $env:VLX_SESSION_ID -and $env:VLX_TOKEN) {{
-    $p = New-Object System.Diagnostics.Process
-    $p.StartInfo.FileName = $env:VLX_EXE
-    $p.StartInfo.Arguments = '--cursor-hook {event}'
-    $p.StartInfo.UseShellExecute = $false
-    $p.StartInfo.CreateNoWindow = $true
-    $p.StartInfo.RedirectStandardInput = $true
-    $p.StartInfo.RedirectStandardOutput = $true
-    $p.StartInfo.RedirectStandardError = $true
-    if ($p.Start()) {{
-      $copy = [Console]::OpenStandardInput().CopyToAsync($p.StandardInput.BaseStream)
-      $null = $copy.Wait(1000)
-      $p.StandardInput.Close()
-      if (-not $p.WaitForExit(3500)) {{ $p.Kill() }}
-    }}
-  }}
-}} catch {{
-}} finally {{
-  if ($p) {{
-    try {{ if (-not $p.HasExited) {{ $p.Kill() }} }} catch {{}}
-    $p.Dispose()
-  }}
-}}
-[Console]::Out.WriteLine('{{}}')
-exit 0
-"#);
-    let bytes: Vec<u8> = code.encode_utf16().flat_map(u16::to_le_bytes).collect();
-    format!("{WINDOWS_COMMAND_PREFIX}{}", base64::engine::general_purpose::STANDARD.encode(bytes))
-}
 
 fn is_vlx_command(command: &str) -> bool {
     let normalized = command.replace('\\', "/");
@@ -121,11 +83,7 @@ const EVENTS: [(&str, &str); 3] = [
 
 /// Paths are single-quoted for POSIX shells; apostrophes are escaped without expansion.
 fn hook_entry(script: &Path, event: &str) -> serde_json::Value {
-    let command = if cfg!(windows) {
-        windows_command(event)
-    } else {
-        format!("sh '{}' {event}", script.to_string_lossy().replace('\'', "'\"'\"'"))
-    };
+    let command = format!("sh '{}' {event}", script.to_string_lossy().replace('\'', "'\"'\"'"));
     serde_json::json!({ "command": command, "timeout": 6 })
 }
 
@@ -156,7 +114,7 @@ fn merge_into(root: &mut serde_json::Value, script: &Path) -> Result<(), String>
                 .and_then(|c| c.as_str())
                 .is_some_and(|c| is_vlx_command(c))
         });
-        arr.push(hook_entry(script, status));
+        if !cfg!(windows) { arr.push(hook_entry(script, status)); }
     }
     Ok(())
 }
@@ -184,6 +142,8 @@ fn install_at(script: &Path, hooks_json: &Path) -> Result<PathBuf, String> {
             "~/.cursor/hooks.json is not valid JSON; not written (please check manually)"
                 .to_string()
         })?,
+        // Windows registers nothing, so a missing file needs no cleanup.
+        None if cfg!(windows) => return Ok(hooks_json.to_path_buf()),
         None => serde_json::json!({}),
     };
     merge_into(&mut root, script)?;
@@ -227,6 +187,19 @@ mod tests {
         dir
     }
 
+    /// A launcher command as earlier Windows versions wrote it.
+    fn legacy_windows_command() -> String {
+        use base64::Engine;
+        let code = format!("# {NATIVE_MARKER}\n[Console]::Out.WriteLine('{{}}')\n");
+        let bytes: Vec<u8> = code.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        format!("{WINDOWS_COMMAND_PREFIX}{}", base64::engine::general_purpose::STANDARD.encode(bytes))
+    }
+
+    /// Entries VelaTerm registers for one event on the current platform.
+    fn registered(script: &Path, status: &str) -> Vec<serde_json::Value> {
+        if cfg!(windows) { Vec::new() } else { vec![hook_entry(script, status)] }
+    }
+
     #[test]
     fn fresh_install_writes_script_and_hooks() {
         let dir = tmp_dir("fresh");
@@ -235,9 +208,12 @@ mod tests {
 
         install_at(&script, &hooks).expect("installation should succeed");
 
-        if !cfg!(windows) {
-            assert_eq!(std::fs::read_to_string(&script).unwrap(), HOOK_SCRIPT);
+        if cfg!(windows) {
+            assert!(!hooks.exists() && !script.exists(), "Windows should not register hooks");
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
         }
+        assert_eq!(std::fs::read_to_string(&script).unwrap(), HOOK_SCRIPT);
 
         // hooks.json has version 1 and one script command with event name for each of three events.
         let v: serde_json::Value =
@@ -250,6 +226,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(unix)]
     #[test]
     fn install_is_idempotent() {
         let dir = tmp_dir("idem");
@@ -313,13 +290,13 @@ mod tests {
                 .any(|e| e["command"] == "/Users/me/my-own-hook.sh"),
             "the user's own stop entries should be preserved"
         );
-        // The old entry is replaced by one current entry pointing to the new script and waiting event.
+        // The old entry is replaced by the current registration: one entry on Unix, none on Windows.
         let vlx: Vec<_> = stop
             .iter()
             .filter(|e| is_vlx_command(e["command"].as_str().unwrap()))
+            .cloned()
             .collect();
-        assert_eq!(vlx.len(), 1, "the vlx entries should be deduplicated to one");
-        assert_eq!(*vlx[0], hook_entry(&script, "waiting"));
+        assert_eq!(vlx, registered(&script, "waiting"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -376,7 +353,7 @@ mod tests {
         for (event, _) in EVENTS {
             let mut entries: Vec<_> = old.iter().map(|command| serde_json::json!({"command": command})).collect();
             entries.push(user.clone());
-            entries.push(serde_json::json!({"command": windows_command("working")}));
+            entries.push(serde_json::json!({"command": legacy_windows_command()}));
             root["hooks"][event] = entries.into();
         }
         let script = Path::new("/new/vlx-term/hook.sh");
@@ -388,7 +365,9 @@ mod tests {
         assert_eq!(root["version"], 2);
         assert_eq!(root["hooks"]["afterFileEdit"], serde_json::json!([user.clone()]));
         for (event, status) in EVENTS {
-            assert_eq!(root["hooks"][event], serde_json::json!([user.clone(), hook_entry(script, status)]));
+            let mut expected = vec![user.clone()];
+            expected.extend(registered(script, status));
+            assert_eq!(root["hooks"][event], serde_json::Value::from(expected));
         }
     }
 

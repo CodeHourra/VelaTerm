@@ -5,7 +5,7 @@ description: >-
   Only use when the user explicitly invokes /vspawn-tree or $vspawn-tree; never auto-trigger. This is a real session run by its
   own process in the vlx-term left-panel tree — not an in-process sub-agent, and not a background Task. Available only
   inside vlx-term-hosted sessions.
-argument-hint: "[--plan-execute] [--split-tasks] [--worktree-mode <shared|each>] [--plan-agent <agent>] [--plan-model <model>] [--plan-effort <level>] [--exec-agent <agent>] [--exec-model <model>] [--exec-effort <level>] [--cwd <path>] [--yes] [--claude|--codex] [--model <name>] [--effort <level>] <task>"
+argument-hint: "[--plan-execute] [--review|--no-review] [--review-agent <agent>] [--review-model <model>] [--review-effort <level>] [--split-tasks] [--worktree-mode <shared|each>] [--plan-agent <agent>] [--plan-model <model>] [--plan-effort <level>] [--exec-agent <agent>] [--exec-model <model>] [--exec-effort <level>] [--cwd <path>] [--yes] [--claude|--codex] [--model <name>] [--effort <level>] <task>"
 disable-model-invocation: true
 allowed-tools: Bash(vspawn-tree:*)
 ---
@@ -29,7 +29,7 @@ $ARGUMENTS
 ## Planning and execution mode
 
 When the user requests planning and execution, add `--plan-execute`. Keep this conversation as the
-initiator; a new planner performs planning and review, then dispatches to persistent execution sessions.
+initiator; a new planner organizes work and dispatches to persistent execution sessions. Independent review is enabled by default in a separate Review session; add `--no-review` when the user requests no review. Plan only collects context, coordinates and summarizes in either mode.
 Add `--split-tasks` when the user requests task decomposition. Do not plan, split or implement the task
 in this conversation, and do not use in-process subagents.
 

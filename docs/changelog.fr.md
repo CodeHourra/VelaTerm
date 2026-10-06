@@ -1,3 +1,35 @@
+## v0.2.8 — 2026-10-06
+
+- 🪟 Windows : au retour dans la fenêtre, le focus clavier reste en place lorsqu’il se trouve déjà dans la page.
+
+- 🛡️ Windows : l’antivirus Huorong ne signale plus VelaTerm ni vela-server comme `Trojan/MSIL.ShellLoader.q`.
+
+- 🔕 Windows : la création de sessions et l’actualisation de la liste des modèles n’exécutent plus PowerShell en arrière-plan, et l’état des sessions Cursor est désormais déterminé d’après la sortie du terminal, ce qui peut être un peu moins précis.
+
+- ⛔ Windows : dans la vue de conversation, une saisie commençant par `!` n’est plus exécutée comme commande shell ; un avertissement s’affiche et la saisie est conservée, tandis que les commandes déjà présentes dans l’historique restent affichées.
+
+- 🔐 Les connexions SSH vers des hôtes Windows utilisant le serveur OpenSSH intégré ne lancent plus PowerShell avec `-EncodedCommand`.
+
+- 🚀 Les sessions d’agents TUI démarrent correctement lorsque le PATH est long, sans commande de lancement tronquée dans le terminal.
+
+- ⬇️ Les sessions d’agents TUI reviennent en bas lorsqu’un tour se termine ou que l’agent demande une autorisation, sauf si vous consultez une sortie antérieure.
+
+- 💾 La récupération expérimentale des conversations introduite dans la v0.2.7 est retirée : Chat n’affiche plus de messages Saved submission en double ni d’avis d’interruption, et les messages en attente non envoyés ne sont plus conservés après un redémarrage.
+
+- 🔁 Les workflows de planification et d’exécution proposent un rôle Review indépendant et facultatif, activé par défaut pour les nouveaux workflows, avec son propre agent, son modèle et son niveau de raisonnement ; `vspawn --plan-execute` accepte `--review`, `--no-review`, `--review-agent`, `--review-model` et `--review-effort`.
+
+- 🏷️ « Renommer avec l’IA… » demande d’abord une confirmation et permet de choisir l’agent, le modèle et le niveau de raisonnement pour ce renommage ; la boîte de dialogue s’affiche au centre pendant le chargement des options.
+
+- 🔍 Les sessions, les groupes et les projets peuvent être déplacés par glisser-déposer lorsqu’une recherche par nom, un filtre d’état ou un filtre de repère est actif.
+
+- ➕ Lorsqu’un filtre d’état est actif, une nouvelle session reste sous son groupe ou sa session parente jusqu’à l’actualisation de l’état ou la modification du filtre.
+
+- 🪟 Les fenêtres de l’application s’ouvrent par défaut en plus grand, selon la zone disponible de l’écran, et les fenêtres de connexion s’ouvrent centrées sur l’écran de la fenêtre principale.
+
+- 🎨 Les collections ont une nouvelle icône à couches empilées, les icônes de la barre de titre sombre sont légèrement atténuées, les quatre boutons de la barre latérale vide ont la même largeur et les boîtes de dialogue de formulaire utilisent un seul style d’étiquette.
+
+---
+
 ## v0.2.7 — 2026-10-05
 
 - 🪐 Antigravity rejoint la vue de conversation à titre expérimental avec le texte, les outils, les messages en attente et la reprise de l’historique natif ; les images, les consignes en cours de réponse, les approbations interactives, les bifurcations et le retour en arrière restent indisponibles, et la validation complète de la récupération sur toutes les plateformes reste à effectuer.

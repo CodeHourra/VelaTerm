@@ -58,6 +58,11 @@ pub fn restore(app: &AppHandle, window_label: &str) {
         let Some(window) = app_handle.get_window(&window_label) else {
             return;
         };
+        // Act only when focus actually stopped at the top-level HWND. Focus already inside a webview (startup,
+        // a click into the page) needs no move, and skipping it avoids a redundant focus round trip.
+        if !top_level_has_focus(&window) {
+            return;
+        }
         let remembered = last_focused()
             .lock()
             .ok()
@@ -71,4 +76,14 @@ pub fn restore(app: &AppHandle, window_label: &str) {
             let _ = wv.set_focus();
         }
     });
+}
+
+/// Whether this thread's keyboard focus is the window's own top-level HWND rather than one of its webviews.
+fn top_level_has_focus(window: &tauri::Window) -> bool {
+    use windows::Win32::UI::Input::KeyboardAndMouse::GetFocus;
+    let Ok(hwnd) = window.hwnd() else {
+        return false;
+    };
+    // SAFETY: argument-free Win32 query on the UI thread that owns the window.
+    unsafe { GetFocus() == hwnd }
 }

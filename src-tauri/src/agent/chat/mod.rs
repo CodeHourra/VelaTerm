@@ -26,7 +26,6 @@ pub mod protocol;
 pub mod shell;
 pub mod skills;
 pub mod submissions;
-pub mod recovery;
 pub(crate) mod ownership;
 
 pub use history::{read, ChatEvent};

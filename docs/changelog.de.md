@@ -1,3 +1,35 @@
+## v0.2.8 — 2026-10-06
+
+- 🪟 Windows: Beim Zurückkehren zum Fenster bleibt der Tastaturfokus unverändert, wenn er sich bereits in der Seite befindet.
+
+- 🛡️ Windows: Der Virenscanner Huorong stuft VelaTerm und vela-server nicht mehr als `Trojan/MSIL.ShellLoader.q` ein.
+
+- 🔕 Windows: Beim Anlegen neuer Sitzungen und beim Aktualisieren der Modellliste wird PowerShell nicht mehr im Hintergrund ausgeführt; der Status von Cursor-Sitzungen wird nun anhand der Terminalausgabe ermittelt und kann etwas ungenauer sein.
+
+- ⛔ Windows: In der Gesprächsansicht werden Eingaben, die mit `!` beginnen, nicht mehr als Shell-Befehl ausgeführt; stattdessen erscheint ein Hinweis und die Eingabe bleibt erhalten, während frühere Befehle im Verlauf weiterhin angezeigt werden.
+
+- 🔐 SSH-Verbindungen zu Windows-Hosts mit dem integrierten OpenSSH-Server starten PowerShell nicht mehr mit `-EncodedCommand`.
+
+- 🚀 TUI-Agentensitzungen starten auch bei langem PATH korrekt, ohne abgeschnittenen Startbefehl im Terminal.
+
+- ⬇️ TUI-Agentensitzungen springen ans Ende, wenn ein Durchgang endet oder der Agent eine Freigabe anfordert, sofern Sie nicht gerade frühere Ausgaben lesen.
+
+- 💾 Die experimentelle Gesprächswiederherstellung aus v0.2.7 wurde entfernt: Chat zeigt keine doppelten Saved-submission-Nachrichten oder Unterbrechungshinweise mehr, und nicht gesendete Nachrichten in der Warteschlange bleiben nach einem Neustart nicht erhalten.
+
+- 🔁 Planungs- und Ausführungs-Workflows bieten eine optionale, unabhängige Review-Rolle, die bei neuen Workflows standardmäßig aktiv ist und eigenen Agenten, eigenes Modell und eigene Denkstufe hat; `vspawn --plan-execute` akzeptiert `--review`, `--no-review`, `--review-agent`, `--review-model` und `--review-effort`.
+
+- 🏷️ „Mit KI umbenennen…“ fragt zuerst nach einer Bestätigung und lässt Agent, Modell und Denkstufe für diese Umbenennung wählen; der Dialog erscheint bereits während des Ladens der Optionen zentriert.
+
+- 🔍 Sitzungen, Gruppen und Projekte lassen sich auch bei aktiver Namenssuche, Statusfilterung oder Markierungsfilterung ziehen.
+
+- ➕ Bei aktiver Statusfilterung bleibt eine neue Sitzung unter ihrer Gruppe oder übergeordneten Sitzung, bis Sie den Status aktualisieren oder den Filter ändern.
+
+- 🪟 App-Fenster öffnen sich standardmäßig größer, passend zum verfügbaren Bereich des Bildschirms, und Verbindungsfenster öffnen sich zentriert auf dem Bildschirm des Hauptfensters.
+
+- 🎨 Sammlungen haben ein neues Symbol mit gestapelten Ebenen, die Symbole der dunklen Titelleiste sind etwas gedämpfter, die vier Schaltflächen der leeren Seitenleiste sind gleich breit, und Formulardialoge verwenden einen einheitlichen Beschriftungsstil.
+
+---
+
 ## v0.2.7 — 2026-10-05
 
 - 🪐 Antigravity ist als experimenteller Agent in der Gesprächsansicht verfügbar und unterstützt Text, Werkzeuge, Nachrichtenwarteschlangen und den nativen Verlauf; Bilder, zusätzliche Anweisungen während einer Antwort, interaktive Freigaben, Verzweigen und Zurückspulen werden noch nicht unterstützt, und die vollständige plattformübergreifende Prüfung der Wiederherstellung steht noch aus.

@@ -369,18 +369,19 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
     termRef.current = term;
     fitRef.current = fitAddon;
 
-    // Codex inline TUI output has left viewportY behind baseY when parsing partial-region
-    // scroll sequences, causing a jump into history even without alternate-screen mode. Two triggers
+    // Inline agent TUIs (Codex, Claude Code) can leave viewportY behind baseY while redrawing, so the
+    // view stays in history even without alternate-screen mode or any scroll by the user. Two triggers
     // arm a short window that pulls parsed batches back to the live bottom: a standalone Esc while
-    // Codex is working, and a completed turn (the final redraw). Any next input cancels the window,
-    // and a deliberate scroll away cancels it too, so reading history is never yanked back.
-    let followCodexInterruptUntil = 0;
+    // Codex is working, and a turn that ends or stops for a prompt (the final redraw). Any next input
+    // cancels the window, and a deliberate scroll away cancels it too, so reading history is never
+    // yanked back.
+    let followBottomUntil = 0;
     let userScrolledAway = false;
     let wheelGestureAt = 0;
     const syncViewportIntent = () => {
       const buffer = term.buffer.active;
       userScrolledAway = buffer.viewportY !== buffer.baseY;
-      if (userScrolledAway) followCodexInterruptUntil = 0;
+      if (userScrolledAway) followBottomUntil = 0;
     };
     // xterm 6 scrolls through its own model, so native DOM scroll events no longer report viewport
     // changes. Read public onScroll after a wheel gesture; the custom scrollbar reports intent directly.
@@ -392,6 +393,8 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
       if (performance.now() - wheelGestureAt < 250) syncViewportIntent();
     });
     container.addEventListener("vlx-terminal-user-scroll", syncViewportIntent);
+    // A search jump moves the viewport to the match; treat it as reading history.
+    const searchIntentSub = searchAddon.onDidChangeResults(syncViewportIntent);
 
     // Tell output scheduling when the user types so background draining yields. Capture keydown during
     // IME composition, composition events without keydown, and later onData paths; repeated signals only
@@ -770,15 +773,15 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
               .setRuntime(session.id, { agentMissing: true, agentInstalling: false });
             return;
           }
-          // A completed Codex turn triggers a final inline redraw whose partial-region scrolls can
-          // leave the viewport in history; follow the bottom briefly unless the user scrolled away.
+          // A turn that ends or stops for a prompt triggers a final inline redraw that can leave the
+          // viewport in history; follow the bottom briefly unless the user scrolled away.
           if (
-            agentKind === "codex" &&
+            agentKind &&
             signal.kind === "state" &&
-            signal.state === "waiting" &&
+            (signal.state === "waiting" || signal.state === "asking") &&
             !userScrolledAway
           ) {
-            followCodexInterruptUntil = performance.now() + 2000;
+            followBottomUntil = performance.now() + 2000;
             const buffer = term.buffer.active;
             if (buffer.viewportY !== buffer.baseY) term.scrollToBottom();
           }
@@ -869,7 +872,7 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
       : null;
 
     const writeParsedSub = term.onWriteParsed(() => {
-      if (performance.now() > followCodexInterruptUntil) return;
+      if (performance.now() > followBottomUntil) return;
       const buffer = term.buffer.active;
       if (buffer.viewportY !== buffer.baseY) term.scrollToBottom();
     });
@@ -877,6 +880,9 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
     const dataSub = term.onData((data) => {
       // onData is the authoritative input moment, covering context-menu paste and other no-keydown paths.
       noteUserInput();
+      // xterm returns the viewport to the bottom on user input, so a previous scroll away no longer
+      // holds; read the settled position once xterm has applied it.
+      setTimeout(syncViewportIntent, 0);
       // Swallow xterm's late duplicate of punctuation already sent by the WebKit fallback.
       if (imeFix?.shouldSwallow(data)) return;
       completion?.input(data);
@@ -890,11 +896,11 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
         : undefined;
       if (agentKind === "codex" && data === "\x1b" && cur === "working") {
         // Return immediately to bottom, then correct parsed batches for up to five seconds.
-        followCodexInterruptUntil = performance.now() + 5000;
+        followBottomUntil = performance.now() + 5000;
         term.scrollToBottom();
       } else {
         // Any subsequent interaction, including a second Esc, stops viewport intervention.
-        followCodexInterruptUntil = 0;
+        followBottomUntil = 0;
       }
       // Change only working to waiting for agents that still require an input-interrupt fallback. Codex is
       // hook-only: its Stop lifecycle event owns this transition, and missing events must remain visible.
@@ -964,6 +970,7 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
       container.removeEventListener("wheel", onWheelIntent, true);
       scrollIntentSub.dispose();
       container.removeEventListener("vlx-terminal-user-scroll", syncViewportIntent);
+      searchIntentSub.dispose();
       imeCaret.dispose();
       imeFix?.dispose();
       writeParsedSub.dispose();

@@ -1,18 +1,19 @@
 import { useEffect, useState } from "react";
 import AgentSelect from "../../components/AgentSelect";
-import { Backdrop } from "../../components/Backdrop";
+import { FieldStack } from "../../components/Field";
 import { FormModal } from "../../components/FormModal";
-import { LaunchLoadState } from "../../components/LaunchFields";
+import { LaunchLoadState, ModelEffortFields } from "../../components/LaunchFields";
 import { useT, type I18nKey } from "../../i18n";
 import { renameSessionWithAgent, sessionTitleOptions } from "../../ipc/tree";
 import type { SessionKind } from "../../types";
-import { navigateSmartRename, readSmartRenameRoute, useSmartRenameRoute, writeSmartRenameAgent, type SmartRenameRoute as Route } from "./navigation";
+import { navigateSmartRename, readSmartRenameRoute, useSmartRenameRoute, writeSmartRenameSelection, type SmartRenameRoute as Route } from "./navigation";
 
 const ERROR_KEYS: Record<string, I18nKey> = {
   agent_unavailable: "sessionTitle.agentUnavailable", empty: "sessionTitle.unavailable",
   unavailable: "sessionTitle.unavailable", unsupported: "sessionTitle.unavailable",
   busy: "sessionTitle.busy", too_large: "sessionTitle.tooLarge", timeout: "sessionTitle.timeout",
   invalid: "sessionTitle.invalid", changed: "sessionTitle.changed",
+  invalid_selection: "sessionTitle.invalidSelection",
 };
 export function titleErrorKey(error: unknown): I18nKey {
   return ERROR_KEYS[String(error).match(/session_title:([a-z_]+)/)?.[1] ?? ""] ?? "sessionTitle.failed";
@@ -36,26 +37,35 @@ function AgentChoice({ route }: { route: Route }) {
       .catch(cause => { if (live) setError(t(titleErrorKey(cause))); });
     return () => { live = false; };
   }, [route.sessionId, revision, t]);
-  if (!data) return <Backdrop onClose={close}><section className="launch-dialog launch-single" role="dialog"
-    aria-modal="true" aria-label={t("sessionTitle.rename")} onKeyDown={event => { if (event.key === "Escape") close(); }}>
-    <h2>{t("sessionTitle.rename")}</h2>
-    <LaunchLoadState state={error ? "error" : "loading"} error={error} retry={() => setRevision(value => value + 1)} />
-    <footer className="launch-footer"><button className="vlx-btn" onClick={close}>{t("common.cancel")}</button></footer>
-  </section></Backdrop>;
-  return <FormModal key={`${route.sessionId}:${route.agent}`} title={t("sessionTitle.rename")}
-    initial={{ agent: route.agent }} submitLabel={t("common.rename")}
-    fields={[{ key: "agent", label: t("orch.agentLabel"), required: true, render: (value, change) => <>
-      <p style={{ margin: "0 0 12px", color: "var(--text-secondary)", fontSize: 12 }}>{t("sessionTitle.chooseAgentHint")}</p>
-      <AgentSelect value={value as SessionKind | ""} onChange={change} options={data.agents}
-        placeholder={t("orch.agentLabel")} />
-    </> }]}
+  // Load inside the same centered modal as the form so the dialog does not jump once options arrive.
+  // The empty required field keeps submission disabled until the real form replaces this one.
+  if (!data) return <FormModal key="loading" title={t("sessionTitle.rename")} description={t("sessionTitle.confirmHint")}
+    submitLabel={t("common.rename")} onCancel={close} onSubmit={() => {}}
+    fields={[{ key: "loading", label: "", required: true, render: () =>
+      <LaunchLoadState state={error ? "error" : "loading"} error={error} retry={() => setRevision(value => value + 1)} /> }]} />;
+  const agent = route.agent ?? data.agent;
+  const defaults = data.agents.find(option => option.id === agent);
+  return <FormModal key={JSON.stringify([route.sessionId, route.agent, route.model, route.effort])} title={t("sessionTitle.rename")}
+    description={t("sessionTitle.confirmHint")} submitLabel={t("common.rename")} submittingLabel={t("sessionTitle.generating")}
+    initial={{ agent, model: route.model ?? defaults?.model ?? "", effort: route.effort ?? defaults?.effort ?? "" }}
+    fields={[{ key: "agent", label: t("orch.agentLabel"), required: true, render: (value, _change, context) =>
+      <AgentSelect value={value as SessionKind | ""} disabled={context.disabled} onChange={next => {
+        const selected = data.agents.find(option => option.id === next);
+        context.changeValues({ agent: next, model: selected?.model ?? "", effort: selected?.effort ?? "" });
+      }} options={data.agents} placeholder={t("orch.agentLabel")} /> },
+      { key: "model", label: "", render: (_value, _change, { values, changeValues, disabled }) => {
+        const spec = data.agents.find(option => option.id === values.agent && option.available);
+        return spec ? <FieldStack><ModelEffortFields spec={spec} model={values.model} effort={values.effort}
+          disabled={disabled} context={{ parentSessionId: route.sessionId, inheritArgs: true }}
+          onChange={(model, effort) => changeValues({ model, effort })} /></FieldStack> : null;
+      }}, { key: "effort", label: "", type: "hidden" }]}
     validate={values => !data.agents.some(option => option.available) ? t("sessionTitle.noAgent")
       : values.agent && !data.agents.some(option => option.id === values.agent && option.available)
         ? t("sessionTitle.agentUnavailable") : null}
-    onValuesChange={values => writeSmartRenameAgent(values.agent)}
+    onValuesChange={writeSmartRenameSelection}
     formatSubmitError={cause => t(titleErrorKey(cause))} onCancel={close}
     onSubmit={async values => {
-      await renameSessionWithAgent(route.sessionId, values.agent as SessionKind);
+      await renameSessionWithAgent(route.sessionId, values.agent as SessionKind, values.model, values.effort);
       if (readSmartRenameRoute()?.sessionId === route.sessionId) navigateSmartRename(null, true);
     }} />;
 }
